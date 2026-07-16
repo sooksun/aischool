@@ -48,14 +48,17 @@ tasks:
 
   - id: SEIP-UI-000
     title: Evidence submission UX flow (design, no implementation)
-    status: ready               # can run alongside or after ARCH-001
+    status: done                # 2026-07-17 — close-out at .ai-team/handoffs/SEIP-UI-000.md
     work_order: .ai-team/work-orders/SEIP-UI-000.md
     dependencies: [SEIP-ARCH-001]
+    notes: >
+      Found 3 contract gaps during field trace (CCR-002) — applied to draft contract:
+      CurrentUser.personnel object, evidence draft→active lifecycle, duration nullable.
     acceptance_criteria:
-      - Teacher submits evidence with minimal fields (mobile-first flow)
-      - All screen states inventoried (empty/loading/error/upload-resume/denied)
-      - Every UI field traced to a contract field
-      - Accessibility intent documented
+      - Teacher submits evidence with minimal fields (mobile-first flow)            # DONE — 3 fields
+      - All screen states inventoried (empty/loading/error/upload-resume/denied)    # DONE — 8×7 matrix
+      - Every UI field traced to a contract field                                   # DONE — 37/37 post CCR-002
+      - Accessibility intent documented                                             # DONE — 7 areas
 
   - id: SEIP-QA-001
     title: Runnable QA and security gate baseline

@@ -1,0 +1,35 @@
+%% SEIP-UI-000 — Teacher evidence submission flow (mobile-first)
+%% Target: submit in 1-2 minutes from a phone. Design artifact, no implementation.
+flowchart TD
+  Home["S1 หน้าหลักฐานของฉัน<br/>(list + FAB ส่งหลักฐาน)"] -->|แตะ FAB| Pick
+
+  Pick["S2 เลือกไฟล์<br/>ถ่ายรูป/วิดีโอ | คลังภาพ | ไฟล์"] -->|ได้ไฟล์| Meta
+  Pick -->|ยกเลิก| Home
+
+  Meta["S3 รายละเอียดขั้นต่ำ<br/>หมวดหลักฐาน (การ์ด 5 หมวด)<br/>ชื่อ (เติมจากชื่อไฟล์ แก้ได้)"] -->|ไฟล์ผิดชนิด/ใหญ่เกิน/วิดีโอยาวเกิน| PreErr
+  PreErr["แจ้งก่อนอัปโหลด<br/>UPL-001/002/003 wording"] --> Pick
+  Meta -->|ถัดไป| Map
+
+  Map["S4 ผูกตัวชี้วัด (ไม่บังคับ)<br/>chips T-x.x จาก framework ของผู้ใช้"] -->|เลือกแล้ว/ข้ามไปก่อน| Review
+
+  Review["S5 ตรวจ + คำแจ้ง PDPA<br/>สรุปไฟล์ หมวด ชื่อ ตัวชี้วัด<br/>คำเตือนข้อมูลส่วนบุคคลผู้เรียน"] -->|ยืนยันส่ง| Submit
+  Review -->|แก้ไข| Meta
+
+  Submit["สร้าง evidence + ขอ upload target<br/>POST /evidence → files/initiate"] --> Upload
+  Submit -->|VAL/UPL 4xx| FormErr["แสดง error รายฟิลด์<br/>โฟกัสเลื่อนไปฟิลด์แรกที่ผิด"] --> Meta
+
+  Upload["S6 กำลังอัปโหลด (พื้นหลังได้)<br/>progress + ยกเลิกได้<br/>PUT ตรงไป storage"] -->|สำเร็จ| Complete
+  Upload -->|หลุด/ออฟไลน์| Resume["ค้างสถานะ ไว้ resume<br/>เก็บ state ในเครื่อง + retry เมื่อออนไลน์"]
+  Resume -->|target หมดอายุ| ReInit["initiate ใหม่<br/>(idempotent ต่อไฟล์)"] --> Upload
+  Resume -->|ผู้ใช้กลับมา| Upload
+
+  Complete["POST files/{id}/complete<br/>checksum ตรวจซ้ำ (UPL-005)"] -->|สำเร็จ| Done
+  Complete -->|checksum ไม่ตรง| ReInit
+
+  Done["S7 ส่งแล้ว<br/>การ์ดสรุป + สถานะสแกนไวรัส pending<br/>ผูกตัวชี้วัดเพิ่มภายหลังได้"] --> Home
+
+  %% cross-cutting
+  AuthX["เซสชันหมดอายุ (AUTH-002)<br/>เก็บ draft ไว้ → login → กลับมาที่เดิม"]
+  Denied["ไม่มีสิทธิ์ (PERM-*/RES-001)<br/>อธิบาย + ทางออก (ติดต่อ admin)"]
+  Scan["สแกนพบปัญหา (UPL-006)<br/>แจ้งเตือน + ไฟล์ถูกกัก + วิธีแก้"]
+  Done -.->|ภายหลัง แจ้งผ่าน event| Scan

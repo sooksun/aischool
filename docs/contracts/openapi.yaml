@@ -768,10 +768,19 @@ components:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
         display_name: { type: string }
-        personnel_id:
-          type: [string, 'null']
-          format: uuid
-          description: Set when the user is school personnel (evaluatee-capable)
+        personnel:
+          description: Present when the user is school personnel (evaluatee-capable). Null otherwise. (CCR-002)
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [id, position_role, rank_level_code]
+              properties:
+                id: { type: string, format: uuid }
+                position_role: { $ref: '#/components/schemas/RoleFamily' }
+                rank_level_code:
+                  type: string
+                  description: วิทยฐานะ tier code — selects IndicatorLevel.expected_practice_th
+                  examples: [teacher_kru, teacher_chamnankan]
         memberships:
           type: array
           items:
@@ -943,6 +952,10 @@ components:
     Evidence:
       type: object
       required: [id, school_id, owner_personnel_id, category_id, title, status, created_at]
+      description: |
+        Lifecycle (CCR-002): created as `draft`; the server promotes to `active` when the
+        first file upload completes successfully. Clients never set draft→active directly;
+        EvidencePatch.status is for archive/reject transitions only.
       properties:
         id: { type: string, format: uuid }
         school_id: { type: string, format: uuid }
@@ -1017,7 +1030,10 @@ components:
         original_filename: { type: string, maxLength: 255 }
         duration_seconds:
           type: [integer, 'null']
-          description: Required for video categories (validated against category max, UPL-003)
+          description: |
+            Video categories: send when the client can read it (enables fail-fast UPL-003
+            before bytes move); null is always allowed — the server-side probe after upload
+            is the authoritative UPL-003 enforcement (CCR-002).
 
     FileUploadTarget:
       type: object
