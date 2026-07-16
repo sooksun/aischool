@@ -15,8 +15,8 @@ No production feature code until the Sprint 0 exit gate passes: contracts v1.0 l
 ## Current Objectives (sequence)
 1. ~~SEIP-OPS-001~~ DONE 2026-07-17 — repo live, CI green (close-out in `.ai-team/handoffs/`)
 2. ~~SEIP-ARCH-001~~ DONE 2026-07-17 — contracts v0.1 drafted + verified; CCR-001 resolved; DB-000 review PASS
-3. ~~SEIP-UI-000~~ DONE 2026-07-17 — UX design + field trace (CCR-002 applied); SEIP-QA-001 — runnable quality gates ← **next**
-4. SEIP-ARCH-002 — lock contracts v1.0 with user approval → Ready to Build
+3. ~~SEIP-UI-000~~ DONE 2026-07-17 — UX design + field trace (CCR-002 applied); ~~SEIP-QA-001~~ DONE 2026-07-17 — 4 LIVE + 8 self-arming gates
+4. SEIP-ARCH-002 — lock contracts v1.0 with user approval → Ready to Build ← **next (needs user)**
 5. Sprint 1: SEIP-DB-001 (schema + migrations), SEIP-UI-001 (evidence flow)
 
 ## Active Tasks

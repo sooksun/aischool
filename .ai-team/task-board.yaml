@@ -62,12 +62,16 @@ tasks:
 
   - id: SEIP-QA-001
     title: Runnable QA and security gate baseline
-    status: ready
+    status: done                # 2026-07-17 — close-out at .ai-team/handoffs/SEIP-QA-001.md
     work_order: .ai-team/work-orders/SEIP-QA-001.md
     dependencies: [SEIP-OPS-001]
+    notes: >
+      CI now: 4 LIVE gates (ownership, contracts+oasdiff, gitleaks, dep-audit)
+      + 8 self-arming gates that activate when Sprint 1 code lands.
+      All four LIVE gates verified locally exit 0 before push.
     acceptance_criteria:
-      - Every gate in docs/qa/QUALITY-GATES.md has a runnable command + CI job mapping
-      - Security baseline + finding severity model created
+      - Every gate in docs/qa/QUALITY-GATES.md has a runnable command + CI job mapping   # DONE
+      - Security baseline + finding severity model created                              # DONE — 28 SEC-* reqs, S1-S5 model
 
   - id: SEIP-QA-002
     title: Adversarial cross-agent design review

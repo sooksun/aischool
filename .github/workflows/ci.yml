@@ -1,7 +1,8 @@
-# SEIP CI skeleton — SEIP-OPS-001
-# One job per PR gate in docs/qa/QUALITY-GATES.md. Stub jobs echo their pending
-# status until SEIP-QA-001 supplies real commands; the ownership gate is live now.
-# "Code owner review" is enforced by GitHub branch protection + CODEOWNERS, not a job here.
+# SEIP CI — gates per docs/qa/QUALITY-GATES.md (SEIP-QA-001)
+# Pattern: LIVE gates run real commands today; SELF-ARMING gates check whether
+# their subject exists (script/schema/tests) and activate automatically when
+# Sprint 1 lands code — no future workflow edits needed.
+# "Code owner review" is enforced by branch protection + CODEOWNERS, not a job.
 name: ci
 
 on:
@@ -10,7 +11,11 @@ on:
   push:
     branches: [develop, main]
 
+permissions:
+  contents: read
+
 jobs:
+  # ---------- LIVE gates ----------
   ownership:
     name: "Gate: module ownership"
     runs-on: ubuntu-latest
@@ -19,70 +24,147 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node scripts/orchestration/validate-ownership.mjs
-
-  format:
-    name: "Gate: format (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
-
-  lint:
-    name: "Gate: lint (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
-
-  typecheck:
-    name: "Gate: type check (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
-
-  unit:
-    name: "Gate: unit tests (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
-
-  integration:
-    name: "Gate: integration tests (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
-
-  build:
-    name: "Gate: build (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
-
-  migration-validation:
-    name: "Gate: migration validation (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
-
-  secret-scan:
-    name: "Gate: secret scan (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
-
-  dependency-audit:
-    name: "Gate: dependency audit (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
-
-  permission-tests:
-    name: "Gate: permission tests (stub)"
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+      - run: npm run gate:ownership
 
   contract-compatibility:
-    name: "Gate: contract compatibility (stub)"
+    name: "Gate: contract compatibility"
     runs-on: ubuntu-latest
     steps:
-      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Contract validity (lint + typegen + parse)
+        run: npm run gate:contracts
+      - name: Breaking-change check vs base (PRs only)
+        if: github.event_name == 'pull_request'
+        run: |
+          BASE="${{ github.base_ref }}"
+          if git show "origin/${BASE}:docs/contracts/openapi.yaml" > /tmp/base-openapi.yaml 2>/dev/null; then
+            docker run --rm -v /tmp:/tmp -v "$PWD":/repo tufin/oasdiff breaking /tmp/base-openapi.yaml /repo/docs/contracts/openapi.yaml --fail-on ERR
+          else
+            echo "::notice::no openapi.yaml on base ${BASE} — first introduction, skipping diff"
+          fi
+
+  secret-scan:
+    name: "Gate: secret scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks (pinned) over full history
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --source . --redact --no-banner --verbose
+
+  dependency-audit:
+    name: "Gate: dependency audit"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Audit (arms via lockfile)
+        run: |
+          if [ -f package-lock.json ] || [ -f pnpm-lock.yaml ]; then
+            npm run gate:dep-audit
+          else
+            echo "::notice::dependency-audit not yet armed — arms when a lockfile lands"
+          fi
+
+  # ---------- SELF-ARMING gates (activate when their subject exists) ----------
+  format:
+    name: "Gate: format"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run if package.json defines scripts.format:check
+        run: |
+          ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['format:check']?'true':'false')}catch{process.stdout.write('false')}")
+          if [ "$ARMED" = "true" ]; then npm ci && npm run format:check; else
+            echo "::notice::format gate not yet armed — arms when scripts.format:check is defined (Sprint 1)"; fi
+
+  lint:
+    name: "Gate: lint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run if package.json defines scripts.lint
+        run: |
+          ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['lint']?'true':'false')}catch{process.stdout.write('false')}")
+          if [ "$ARMED" = "true" ]; then npm ci && npm run lint; else
+            echo "::notice::lint gate not yet armed — arms when scripts.lint is defined (Sprint 1)"; fi
+
+  typecheck:
+    name: "Gate: type check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run if package.json defines scripts.typecheck
+        run: |
+          ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['typecheck']?'true':'false')}catch{process.stdout.write('false')}")
+          if [ "$ARMED" = "true" ]; then npm ci && npm run typecheck; else
+            echo "::notice::typecheck gate not yet armed — arms when scripts.typecheck is defined (Sprint 1)"; fi
+
+  unit:
+    name: "Gate: unit tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run if package.json defines scripts.test:unit
+        run: |
+          ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['test:unit']?'true':'false')}catch{process.stdout.write('false')}")
+          if [ "$ARMED" = "true" ]; then npm ci && npm run test:unit; else
+            echo "::notice::unit gate not yet armed — arms when scripts.test:unit is defined (Sprint 1)"; fi
+
+  integration:
+    name: "Gate: integration tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run if package.json defines scripts.test:integration
+        run: |
+          ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['test:integration']?'true':'false')}catch{process.stdout.write('false')}")
+          if [ "$ARMED" = "true" ]; then npm ci && npm run test:integration; else
+            echo "::notice::integration gate not yet armed — arms when scripts.test:integration is defined (Sprint 1)"; fi
+
+  build:
+    name: "Gate: build"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run if package.json defines scripts.build
+        run: |
+          ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['build']?'true':'false')}catch{process.stdout.write('false')}")
+          if [ "$ARMED" = "true" ]; then npm ci && npm run build; else
+            echo "::notice::build gate not yet armed — arms when scripts.build is defined (Sprint 1)"; fi
+
+  migration-validation:
+    name: "Gate: migration validation"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run if prisma/schema.prisma exists
+        run: |
+          if [ -f prisma/schema.prisma ]; then
+            npx --yes prisma validate
+          else
+            echo "::notice::migration gate not yet armed — arms when prisma/schema.prisma lands (SEIP-DB-001)"
+          fi
+
+  permission-tests:
+    name: "Gate: permission tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run if tests/security has test files
+        run: |
+          if [ -n "$(find tests/security -type f ! -name '.gitkeep' -print -quit 2>/dev/null)" ]; then
+            npm ci && npm run test:security
+          else
+            echo "::notice::permission gate not yet armed — arms when tests/security/* land (against permissions.yaml matrix)"
+          fi
