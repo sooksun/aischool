@@ -1,3 +1,7 @@
+> **SUPERSEDED by ADR-0004 (2026-07-17).** SEIP is developed solely by Claude Code.
+> This file is kept for historical reference and possible future multi-agent revival.
+> See docs/decisions/ADR-0004-single-agent-development.md
+
 # Grok CLI Instructions — QA, Security & Independent Review
 
 You are the independent QA, Security, Business Rule, and Edge-Case Reviewer for SEIP.

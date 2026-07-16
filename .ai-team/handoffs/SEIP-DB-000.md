@@ -24,7 +24,8 @@ Work proceeded on path locks only, per user dispatch, using closed domain inputs
 | Path | Role |
 |---|---|
 | `docs/architecture/data-model/README.md` | Design principles, audit choice, OPEN questions |
-| `docs/architecture/data-model/erd.mmd` | Mermaid ERD |
+| `docs/architecture/data-model/erd.mmd` | Mermaid ERD source |
+| `docs/architecture/data-model/erd.svg` | Rendered ERD (verification output) |
 | `docs/architecture/data-model/entity-dictionary.md` | Full dictionary + constraint intentions |
 | `docs/reviews/SEIP-DB-000-feasibility.md` | Feasibility findings for Grok |
 | `docs/reviews/CCR-001-contracts-v0.1-missing.md` | Contract Change Request |
@@ -69,16 +70,10 @@ None executed (design task). Constraint intentions stated in entity dictionary.
 # From repo root D:\laragon\www\aischool
 
 ls docs/architecture/data-model/
-# Expected: README.md, erd.mmd, entity-dictionary.md
+# Expected: README.md, erd.mmd, entity-dictionary.md (+ erd.svg after render)
 
 npx --yes @mermaid-js/mermaid-cli -i docs/architecture/data-model/erd.mmd -o docs/architecture/data-model/erd.svg
 # Expected: exit 0 and erd.svg created
-```
-
-Results recorded at handoff time:
-
-```text
-(see agent session — commands run and exit codes captured below in "Verification results")
 ```
 
 ## Known Limitations
@@ -107,4 +102,24 @@ Results recorded at handoff time:
 4. Sprint 1: SEIP-DB-001 implements Prisma from this dictionary after contract lock.
 
 ## Verification results
-_Filled by agent after running commands._
+
+Ran 2026-07-16 from `D:\laragon\www\aischool`:
+
+```text
+=== ls docs/architecture/data-model/ ===
+Name                 Length
+----                 ------
+entity-dictionary.md  19292
+erd.mmd                8686
+README.md              7226
+
+=== mermaid-cli ===
+Generating single mermaid chart
+mermaid_exit=0
+
+Name    Length
+----    ------
+erd.svg 742567
+```
+
+First render attempt failed (exit 1) due to pipe characters and nonstandard attribute keys in attribute comments; `erd.mmd` was fixed to mermaid-compatible attribute syntax; second render **exit 0**.

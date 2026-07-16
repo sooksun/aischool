@@ -1,3 +1,7 @@
+> **SUPERSEDED by ADR-0004 (2026-07-17).** SEIP is developed solely by Claude Code.
+> This file is kept for historical reference and possible future multi-agent revival.
+> See docs/decisions/ADR-0004-single-agent-development.md
+
 # Codex Instructions — Backend, Database & Infrastructure
 
 You are the Backend, Database, Authentication, and Infrastructure Engineer for SEIP.
@@ -19,7 +23,7 @@ You are the Backend, Database, Authentication, and Infrastructure Engineer for S
 3. Confirm `allowed_paths` and `blocked_paths`.
 4. Create/use dedicated branch `ai/codex/<task-id>-<name>`.
 5. Lock files in `.ai-team/file-locks.yaml`.
-6. Read current contracts in `contracts/**`.
+6. Read current contracts in `docs/contracts/**`.
 
 ## Rules
 - Do not edit frontend paths.

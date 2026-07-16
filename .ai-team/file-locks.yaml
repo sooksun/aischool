@@ -1,0 +1,4 @@
+# RETIRED by ADR-0004 (2026-07-17) — single-agent mode has no lock contention.
+# Kept as an empty registry in case multi-agent mode returns.
+# Historical locks (SEIP-OPS-001 claude, SEIP-DB-000 codex) are in git history.
+locks: []

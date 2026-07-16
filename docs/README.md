@@ -1,18 +1,24 @@
-# AI School Multi-Agent Development Docs
+# AI School (SEIP) — Documentation
 
-เอกสารควบคุมการพัฒนาระบบ School Evidence Intelligence Platform (SEIP) โดยใช้ Claude Code, Codex, Antigravity และ Grok CLI ทำงานร่วมกันโดยไม่ทับซ้อนกัน
+เอกสารของ School Evidence Intelligence Platform พัฒนาโดย **Claude Code ตัวเดียว** (ADR-0004) — user เป็นผู้อนุมัติสุดท้าย (โมเดล Multi-AI เดิมถูกยกเลิก ไฟล์ที่เกี่ยวข้องติด banner SUPERSEDED)
 
-## วิธีติดตั้ง
-คัดลอกเนื้อหาทั้งหมดของโฟลเดอร์นี้ไปไว้ที่:
+## Layout (canonical per ADR-0002)
 
-`D:\laragon\www\aischool\docs`
+| Location | Content |
+|---|---|
+| `/CLAUDE.md` | คู่มือทำงานของ Claude Code (sole developer) — `/AGENTS.md` `/ANTIGRAVITY.md` `/GROK.md` superseded |
+| `/.ai-team/` | Task board (tracker เดียว), work orders (task specs), templates |
+| `docs/project/` | Project state, Sprint plans, development plan |
+| `docs/decisions/` | ADRs (ADR-0001 stack, ADR-0002 layout/ownership, ADR-0003 evaluation framework) |
+| `docs/architecture/` | System context, evaluation framework (วPA ว9/ว10-2564), data model, UX designs |
+| `docs/contracts/` | Protected contracts: openapi / events / permissions / error-codes (from SEIP-ARCH-001) |
+| `docs/qa/` | Quality gates and QA baselines |
+| `docs/reviews/` | Review findings, CCRs, verdicts (Grok's output) |
 
-## เอกสารเริ่มต้น
-- `CLAUDE.md` — คำสั่งสำหรับ Claude Code
-- `AGENTS.md` — คำสั่งสำหรับ Codex
-- `ANTIGRAVITY.md` — คำสั่งสำหรับ Antigravity
-- `GROK.md` — คำสั่งสำหรับ Grok CLI
-- `.ai-team/task-board.yaml` — กระดานงานกลาง
-- `.ai-team/module-ownership.yaml` — เจ้าของโมดูล
-- `.ai-team/file-locks.yaml` — ระบบล็อกไฟล์
-- `project/MULTI-AI-DEVELOPMENT-PLAN.md` — แผนการทำงานฉบับเต็ม
+## Start here
+1. `docs/project/PROJECT_STATE.md` — current phase and objectives
+2. `.ai-team/task-board.yaml` — who is doing what right now
+3. `docs/project/SPRINT-0.md` — the plan and the Definition of Ready to Build
+
+## Ground rule
+No production feature code until the Sprint 0 exit gate passes. Design, contracts, gates, and scaffolding only.

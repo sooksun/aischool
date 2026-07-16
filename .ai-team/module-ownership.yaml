@@ -1,0 +1,56 @@
+# Functional-area map (ADR-0002 §4 paths, re-owned per ADR-0004)
+# Single-agent mode: claude develops everything; the user is the reviewer/approver.
+# Kept as the codebase map + validated for path overlaps by
+# scripts/orchestration/validate-ownership.mjs (CI "ownership" gate).
+modules:
+  orchestration:
+    owner: claude
+    reviewer: user
+    paths:
+      - .ai-team/**
+      - .github/**
+      - scripts/orchestration/**
+
+  architecture:
+    owner: claude
+    reviewer: user
+    paths:
+      - docs/architecture/**
+      - docs/contracts/**
+      - docs/decisions/**
+      - docs/project/**
+
+  backend:
+    owner: claude
+    reviewer: user
+    paths:
+      - apps/api/**
+      - apps/worker/**
+      - packages/database/**
+      - packages/auth/**
+      - packages/backend-shared/**
+      - prisma/**
+      - database/**
+      - infra/docker/**
+      - tests/backend/**
+
+  frontend:
+    owner: claude
+    reviewer: user
+    paths:
+      - apps/web/**
+      - packages/ui/**
+      - packages/design-tokens/**
+      - public/**
+      - tests/frontend/**
+
+  quality:
+    owner: claude
+    reviewer: user
+    paths:
+      - tests/e2e/**
+      - tests/security/**
+      - tests/regression/**
+      - scripts/security/**
+      - docs/qa/**
+      - docs/reviews/**

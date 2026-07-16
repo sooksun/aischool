@@ -1,14 +1,15 @@
 %% SEIP Domain ERD — SEIP-DB-000 (design only, stack-agnostic)
 %% Source: evaluation-framework.md, system-context.md, ADR-0003
 %% Not a Prisma schema. No migrations. Contracts v0.1 not yet available.
+%% Attribute comments avoid pipe characters (mermaid erDiagram delimiter).
 
 erDiagram
-  %% ========== Tenancy & Identity ==========
+  %% ========== Tenancy and Identity ==========
   School {
     uuid id PK
     string code UK
     string name
-    uuid area_id "nullable FK to Area"
+    uuid area_id FK
     string status
     timestamptz created_at
   }
@@ -31,18 +32,18 @@ erDiagram
     uuid id PK
     uuid school_id FK
     uuid user_id FK
-    string role "teacher|director|deputy|evaluator|school_admin|area_admin"
-    string membership_scope "school|area"
-    uuid area_id "nullable"
+    string role
+    string membership_scope
+    uuid area_id
     date effective_from
-    date effective_to "nullable"
+    date effective_to
     string status
   }
 
   %% ========== Personnel ==========
   RankLevel {
-    string code PK "e.g. assistant_teacher, skilled, expert"
-    string role_family "teacher|administrator"
+    string code PK
+    string role_family
     string label_th
     int sort_order
   }
@@ -53,7 +54,7 @@ erDiagram
     uuid user_id FK
     string employee_code
     string full_name
-    string position_role "teacher|administrator"
+    string position_role
     string rank_level_code FK
     string status
     timestamptz created_at
@@ -62,56 +63,56 @@ erDiagram
   %% ========== Framework (versioned indicator taxonomy) ==========
   FrameworkVersion {
     uuid id PK
-    string code UK "e.g. w9-2564-teacher"
-    string role_family "teacher|administrator"
-    string legal_ref "ว9/2564|ว10/2564"
+    string code UK
+    string role_family
+    string legal_ref
     int revision_year
-    string status "draft|active|retired"
+    string status
     date effective_from
-    date effective_to "nullable"
+    date effective_to
   }
 
   EvaluationDomain {
     uuid id PK
     uuid framework_version_id FK
-    string code "T-1|A-1|..."
+    string code
     string name_th
     int sort_order
-    string part "standards|challenge"
+    string part
   }
 
   Indicator {
     uuid id PK
     uuid domain_id FK
-    string code UK_in_framework "T-1.1|A-1.1|T-C.1"
+    string code
     string name_th
     int sort_order
     boolean is_scored
-    string indicator_kind "standard|challenge|workload_gate"
+    string indicator_kind
   }
 
   IndicatorLevelDescription {
     uuid id PK
     uuid indicator_id FK
     string rank_level_code FK
-    int rubric_level "1..4"
+    int rubric_level
     text expected_practice_th
   }
 
   ScoreWeight {
     uuid id PK
     uuid framework_version_id FK
-    string weight_key "part1_standards|part2_challenge|challenge_method|..."
-    decimal weight_value "e.g. 0.60"
+    string weight_key
+    decimal weight_value
     string notes
   }
 
   EvidenceCategory {
     uuid id PK
-    string code UK "lesson_plan_pdf|teaching_video_mp4|..."
+    string code UK
     string label_th
     string allowed_mime_csv
-    int max_duration_seconds "nullable"
+    int max_duration_seconds
     boolean required_for_dpa
   }
 
@@ -120,10 +121,10 @@ erDiagram
     uuid id PK
     uuid school_id FK
     uuid framework_version_id FK
-    string fiscal_year "e.g. 2568"
-    string evaluation_kind "pa|dpa"
+    string fiscal_year
+    string evaluation_kind
     string title
-    string status "planned|open|closed"
+    string status
     date starts_on
     date ends_on
   }
@@ -131,11 +132,11 @@ erDiagram
   EvaluationRound {
     uuid id PK
     uuid cycle_id FK
-    int round_number "1..n"
-    string purpose "pa_formal|salary_increment|ad_hoc"
+    int round_number
+    string purpose
     date period_start
     date period_end
-    string status "planned|open|scoring|closed"
+    string status
   }
 
   PerformanceAgreement {
@@ -143,8 +144,8 @@ erDiagram
     uuid school_id FK
     uuid cycle_id FK
     uuid personnel_id FK
-    string form_variant "PA1_s|PA1_bs"
-    string status "draft|submitted|accepted|closed"
+    string form_variant
+    string status
     timestamptz submitted_at
   }
 
@@ -152,7 +153,7 @@ erDiagram
     uuid id PK
     uuid agreement_id FK
     uuid round_id FK
-    boolean workload_met "ภาระงาน gate"
+    boolean workload_met
     text notes
     uuid declared_by_user_id FK
     timestamptz declared_at
@@ -161,7 +162,7 @@ erDiagram
   AgreementChallenge {
     uuid id PK
     uuid agreement_id FK
-    uuid indicator_id FK "challenge item def"
+    uuid indicator_id FK
     text method_plan
     text quantitative_target
     text qualitative_target
@@ -176,23 +177,23 @@ erDiagram
     uuid category_id FK
     string title
     text description
-    string status "draft|active|archived|rejected"
+    string status
     timestamptz captured_at
     timestamptz created_at
-    timestamptz deleted_at "nullable soft-delete"
+    timestamptz deleted_at
   }
 
   EvidenceFile {
     uuid id PK
     uuid evidence_id FK
-    string storage_provider "OPEN-4 agnostic"
+    string storage_provider
     string storage_uri
     string content_type
     bigint byte_size
     string checksum_sha256
-    int duration_seconds "nullable"
+    int duration_seconds
     string original_filename
-    string scan_status "pending|clean|blocked"
+    string scan_status
     timestamptz uploaded_at
   }
 
@@ -202,32 +203,32 @@ erDiagram
     uuid school_id FK
     uuid evidence_id FK
     uuid indicator_id FK
-    uuid cycle_id FK "optional scope"
-    string mapping_source "human|ai_suggested"
-    string status "suggested|confirmed|rejected|revoked"
+    uuid cycle_id FK
+    string mapping_source
+    string status
     uuid mapped_by_user_id FK
-    uuid confirmed_by_user_id "nullable"
+    uuid confirmed_by_user_id
     text rationale
     timestamptz mapped_at
-    timestamptz confirmed_at "nullable"
+    timestamptz confirmed_at
   }
 
-  %% ========== Committee & per-evaluator scores ==========
+  %% ========== Committee and per-evaluator scores ==========
   EvaluationAssignment {
     uuid id PK
     uuid school_id FK
     uuid round_id FK
     uuid evaluatee_personnel_id FK
     uuid agreement_id FK
-    string status "pending|in_progress|completed|void"
+    string status
   }
 
   CommitteeMember {
     uuid id PK
     uuid assignment_id FK
     uuid evaluator_user_id FK
-    string committee_role "chair|member"
-    int seat_number "1..3"
+    string committee_role
+    int seat_number
   }
 
   IndicatorScore {
@@ -235,8 +236,8 @@ erDiagram
     uuid assignment_id FK
     uuid indicator_id FK
     uuid evaluator_user_id FK
-    int rubric_level "1..4"
-    decimal points_awarded "nullable derived"
+    int rubric_level
+    decimal points_awarded
     text comment
     timestamptz scored_at
   }
@@ -244,9 +245,9 @@ erDiagram
   ChallengeScore {
     uuid id PK
     uuid assignment_id FK
-    uuid indicator_id FK "challenge item"
+    uuid indicator_id FK
     uuid evaluator_user_id FK
-    int rubric_level "1..4"
+    int rubric_level
     decimal points_awarded
     text comment
     timestamptz scored_at
@@ -260,29 +261,29 @@ erDiagram
     decimal part2_percent
     decimal total_percent
     boolean passed_workload_gate
-    boolean passed_individual_threshold "each evaluator >= 70"
-    string status "provisional|final"
+    boolean passed_individual_threshold
+    string status
     timestamptz computed_at
   }
 
-  %% ========== Reports & approvals ==========
+  %% ========== Reports and approvals ==========
   Report {
     uuid id PK
     uuid school_id FK
     uuid cycle_id FK
-    uuid round_id "nullable"
+    uuid round_id
     uuid subject_personnel_id FK
-    string template_code "PA1_s|PA2_s|PA3_s|PA1_bs|..."
-    string status "draft|pending_approval|approved|issued|superseded"
-    jsonb payload "structured form data"
+    string template_code
+    string status
+    jsonb payload
     timestamptz generated_at
   }
 
   ReportSectionRef {
     uuid id PK
     uuid report_id FK
-    uuid evidence_id "nullable FK"
-    uuid mapping_id "nullable FK"
+    uuid evidence_id
+    uuid mapping_id
     string section_key
     int sort_order
   }
@@ -293,16 +294,16 @@ erDiagram
     uuid report_id FK
     uuid approver_user_id FK
     string step_code
-    string decision "pending|approved|rejected|returned"
+    string decision
     text comment
-    timestamptz decided_at "nullable"
+    timestamptz decided_at
   }
 
   %% ========== Audit (append-only) ==========
   AuditEvent {
     uuid id PK
-    uuid school_id "nullable for system"
-    uuid actor_user_id "nullable system"
+    uuid school_id
+    uuid actor_user_id
     string action
     string entity_type
     uuid entity_id
