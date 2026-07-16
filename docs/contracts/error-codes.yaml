@@ -1,6 +1,9 @@
 # SEIP Error Code Contract
-# version: 0.1.0-draft — UNLOCKED until SEIP-ARCH-002 ratifies v1.0.
-# Protected contract (contract-policy.md): changes require an approved CCR after lock.
+# version: 1.0.0 — LOCKED 2026-07-17 by SEIP-ARCH-002 (user approved).
+# Protected contract (contract-policy.md): changes require an approved CCR.
+# Codes are a stable API surface — clients map them to localized text. Adding a
+# code is additive (1.x); changing the meaning or HTTP status of an existing code,
+# or removing one, is breaking (2.0).
 #
 # Error response shape (every non-2xx JSON response):
 #   {
@@ -11,8 +14,9 @@
 #   }
 # HTTP status is authoritative for transport semantics; `code` for business semantics.
 
-version: 0.1.0-draft
-status: draft
+version: 1.0.0
+status: locked
+locked_at: 2026-07-17
 error_shape:
   required: [code, message]
   optional: [details, request_id]

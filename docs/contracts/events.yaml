@@ -1,14 +1,17 @@
 # SEIP Domain Event Contract
-# version: 0.1.0-draft — UNLOCKED until SEIP-ARCH-002 ratifies v1.0.
-# Protected contract (contract-policy.md).
+# version: 1.0.0 — LOCKED 2026-07-17 by SEIP-ARCH-002 (user approved).
+# Protected contract (contract-policy.md): changes require a CCR + version bump.
+# Adding an event or an optional payload field is additive (1.x); removing or
+# retyping a field, or changing an event name, is breaking (2.0).
 #
 # Delivery: transactional OUTBOX (module-boundaries.md rule 4).
 # The api/worker write the event row in the same DB transaction as the domain
 # change; a dispatcher relays to consumers (notification, projections).
 # No dual-writes inside request handlers.
 
-version: 0.1.0-draft
-status: draft
+version: 1.0.0
+status: locked
+locked_at: 2026-07-17
 
 envelope:
   required:
