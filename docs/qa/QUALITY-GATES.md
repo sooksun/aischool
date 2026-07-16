@@ -9,7 +9,7 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 | Gate | Command (pass = exit 0) | CI job | State | Arming condition |
 |---|---|---|---|---|
 | Module ownership | `npm run gate:ownership` | `Gate: module ownership` | **LIVE** | always |
-| Contract compatibility | `npm run gate:contracts` + oasdiff breaking vs base (PR only, `--fail-on ERR`) | `Gate: contract compatibility` | **LIVE** | always; diff part skips if base has no openapi.yaml |
+| Contract compatibility | `npm run gate:contracts` (lint + typegen + yaml parse + **authz coverage**) **+** oasdiff breaking vs base, `--fail-on ERR`, on **both** PR and push | `Gate: contract compatibility` | **LIVE** | always; diff skips only if base has no openapi.yaml |
 | Secret scan | gitleaks v8.18.4 (pinned), full history, `--redact` · local: `npm run gate:secret-scan` | `Gate: secret scan` | **LIVE** | always |
 | Dependency audit | `npm run gate:dep-audit` (`npm audit --audit-level=high`) | `Gate: dependency audit` | **LIVE** | lockfile present (committed 2026-07-17) |
 | Format | `npm run format:check` | `Gate: format` | self-arming | `scripts.format:check` defined |
@@ -23,6 +23,10 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 | Code owner review | — (not a CI job) | branch protection + CODEOWNERS | policy | requires branch protection (below) |
 
 **Pass thresholds:** every gate is binary (exit 0). `dep-audit` fails on **high+** advisories. oasdiff fails on **breaking** changes only (additive contract changes pass). Secret scan fails on any leak — false positives are handled by a reviewed `.gitleaks.toml` allowlist commit, never by skipping the gate.
+
+**Why the contract check runs on push, not just PRs:** ADR-0004 sanctions committing straight to `develop`, so a PR-only breaking-change check would almost never execute in the real workflow. On `push` it diffs against `github.event.before`; on `pull_request`, against the target branch. Both paths fail the build on a breaking change without an accompanying version bump.
+
+**Authz coverage (SEC-TEN-5):** `gate:contracts` fails if any `operationId` in `openapi.yaml` lacks either a rule in the `permissions.yaml` matrix or an explicit entry under `unauthenticated:` / `any_authenticated:`. An endpoint cannot ship with undocumented authorization.
 
 ## Release gates (run before tagging a release from main — not CI jobs yet)
 
@@ -57,3 +61,4 @@ Add the self-arming gate names to the required list **when they arm** (a require
 | `npm run gate:contracts` | exit 0 — lint OK, typegen OK, 3× yaml parse OK |
 | `npm run gate:dep-audit` | exit 0 — 0 vulnerabilities |
 | `npm run gate:secret-scan` | exit 0 — 7 commits scanned, no leaks (docker image, pinned v8.18.4) |
+| oasdiff breaking (develop v0.1-draft → ARCH-002 v1.0.0) | exit 0 — "No breaking changes to report" (docker, digest-pinned) |

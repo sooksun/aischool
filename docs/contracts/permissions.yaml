@@ -1,12 +1,16 @@
 # SEIP Permission Contract
-# version: 0.1.0-draft — UNLOCKED until SEIP-ARCH-002 ratifies v1.0.
-# Protected contract (contract-policy.md).
+# version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
+# Protected contract (contract-policy.md): changes require a CCR + version bump.
 #
 # The api module is the sole enforcement point (module-boundaries.md).
 # UI may hide affordances but never substitutes for these rules.
+#
+# This file is also a TEST FIXTURE (SECURITY-BASELINE SEC-TEN-5): permission tests
+# generate their cases from this matrix, so contract and enforcement cannot drift.
 
-version: 0.1.0-draft
-status: draft
+version: 1.0.0
+status: locked
+locked_at: 2026-07-17
 
 roles:
   teacher:      { scope: school, description: ครูผู้ส่งหลักฐานและรับการประเมิน }
@@ -28,6 +32,20 @@ tenancy:
   ownership:
     evidence: Owner (personnel) or school_admin may mutate; others per matrix below.
     scores: Only the evaluator who owns the per-evaluator record may write it.
+
+# Operations deliberately OUTSIDE the role matrix. Listed explicitly so the
+# authz-coverage gate can prove no endpoint shipped without a reviewed decision
+# (silence is never treated as "no authz needed").
+unauthenticated:
+  login: >
+    Public by design (security: [] in openapi.yaml). Carries no tenancy dimension.
+    Must be throttled per-account and per-IP (SEC-AUTH-5) and must not reveal whether
+    an email exists (same AUTH-001 response for unknown user and wrong password).
+
+any_authenticated:
+  getCurrentUser: >
+    Returns only the caller's own identity and memberships — the caller is the tenancy
+    scope, so no role rule applies. Must never accept a user id parameter.
 
 # Operations reference openapi.yaml operationIds.
 # Legend: own = only own records / self as subject; school = any record in own school;

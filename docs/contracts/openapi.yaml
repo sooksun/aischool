@@ -1,13 +1,19 @@
 openapi: 3.1.0
-# version 0.1.0-draft — UNLOCKED until SEIP-ARCH-002 ratifies v1.0.
-# Protected contract (contract-policy.md). Types are GENERATED from this file (ADR-0001);
-# no implementation may invent fields outside it.
+# version 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
+# Protected contract (contract-policy.md): changes now require a Contract Change
+# Request + version bump. Additive changes → 1.x; breaking changes → 2.0 with a
+# migration plan. The CI gate "contract compatibility" fails PRs that break this
+# surface (oasdiff --fail-on ERR).
+# Types are GENERATED from this file (ADR-0001); no implementation may invent
+# fields outside it.
 info:
   title: SEIP API
-  version: 0.1.0-draft
+  version: 1.0.0
   summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation)
   description: |
-    Contract v0.1 (draft) per SEIP-ARCH-001. Scope: authentication, indicator taxonomy
+    Contract v1.0 (locked, Sprint 0 exit) — drafted in SEIP-ARCH-001, validated against the
+    data model (SEIP-DB-000) and the evidence-submission UX (SEIP-UI-000, CCR-002 applied),
+    ratified in SEIP-ARCH-002. Scope: authentication, indicator taxonomy
     (read), evaluation cycle/round configuration, evidence upload (two-phase,
     storage-agnostic), governed evidence↔indicator mappings, and per-evaluator committee
     scoring per ADR-0003 (วPA ว9/ว10 2564).
@@ -19,7 +25,7 @@ info:
     - Rounds are configurable 1..n per cycle; no endpoint assumes exactly 2.
     - Error bodies follow error-codes.yaml; codes are stable API surface.
 
-    **Deferred (explicitly out of v0.1)** — see `x-deferred`.
+    **Deferred (explicitly out of v1.0)** — see `x-deferred`.
   license:
     name: Proprietary — SEIP project internal
     url: https://github.com/sooksun/aischool

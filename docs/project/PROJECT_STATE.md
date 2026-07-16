@@ -11,13 +11,14 @@ Claude Code is the sole developer (architect + backend + frontend + QA); the use
 
 ## Hard Constraint
 No production feature code until the Sprint 0 exit gate passes: contracts v1.0 locked (SEIP-ARCH-002) + data model and UX designs approved.
+Status 2026-07-17: contracts locked; gate is 7 pass / 1 accepted deviation / 2 superseded / **1 pending — item 7 (PR pipeline proof) + user approval**. See `.ai-team/handoffs/SEIP-ARCH-002.md` for the item-by-item evaluation.
 
 ## Current Objectives (sequence)
 1. ~~SEIP-OPS-001~~ DONE 2026-07-17 — repo live, CI green (close-out in `.ai-team/handoffs/`)
 2. ~~SEIP-ARCH-001~~ DONE 2026-07-17 — contracts v0.1 drafted + verified; CCR-001 resolved; DB-000 review PASS
 3. ~~SEIP-UI-000~~ DONE 2026-07-17 — UX design + field trace (CCR-002 applied); ~~SEIP-QA-001~~ DONE 2026-07-17 — 4 LIVE + 8 self-arming gates
-4. SEIP-ARCH-002 — lock contracts v1.0 with user approval → Ready to Build ← **next (needs user)**
-5. Sprint 1: SEIP-DB-001 (schema + migrations), SEIP-UI-001 (evidence flow)
+4. SEIP-ARCH-002 — contracts **locked at v1.0.0** 2026-07-17; ← **awaiting user approval of the PR** (this is the Sprint 0 exit gate; PR also provides the item-7 pipeline proof)
+5. Sprint 1 (opens on that merge): SEIP-DB-001 (schema + migrations), SEIP-UI-001 (evidence flow)
 
 ## Active Tasks
 See `.ai-team/task-board.yaml` (single tracker).
