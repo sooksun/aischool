@@ -1,11 +1,11 @@
-# Module ownership — single source of truth for reviewers (ADR-0002 §4, §5)
-# Steady-state owner per path. A task's allowed_paths on the board may grant
-# temporary cross-module write access for that task only; the owner listed
-# here still reviews/integrates. Validated by scripts/orchestration/validate-ownership.mjs
+# Functional-area map (ADR-0002 §4 paths, re-owned per ADR-0004)
+# Single-agent mode: claude develops everything; the user is the reviewer/approver.
+# Kept as the codebase map + validated for path overlaps by
+# scripts/orchestration/validate-ownership.mjs (CI "ownership" gate).
 modules:
   orchestration:
     owner: claude
-    reviewer: grok
+    reviewer: user
     paths:
       - .ai-team/**
       - .github/**
@@ -13,7 +13,7 @@ modules:
 
   architecture:
     owner: claude
-    reviewer: grok
+    reviewer: user
     paths:
       - docs/architecture/**
       - docs/contracts/**
@@ -21,8 +21,8 @@ modules:
       - docs/project/**
 
   backend:
-    owner: codex
-    reviewer: grok
+    owner: claude
+    reviewer: user
     paths:
       - apps/api/**
       - apps/worker/**
@@ -35,8 +35,8 @@ modules:
       - tests/backend/**
 
   frontend:
-    owner: antigravity
-    reviewer: claude
+    owner: claude
+    reviewer: user
     paths:
       - apps/web/**
       - packages/ui/**
@@ -45,8 +45,8 @@ modules:
       - tests/frontend/**
 
   quality:
-    owner: grok
-    reviewer: claude
+    owner: claude
+    reviewer: user
     paths:
       - tests/e2e/**
       - tests/security/**

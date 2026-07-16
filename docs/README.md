@@ -1,13 +1,13 @@
 # AI School (SEIP) — Documentation
 
-เอกสารของ School Evidence Intelligence Platform พัฒนาโดยทีม Multi-AI: Claude Code (architect/integrator), Codex (backend), Antigravity (frontend), Grok CLI (QA/security)
+เอกสารของ School Evidence Intelligence Platform พัฒนาโดย **Claude Code ตัวเดียว** (ADR-0004) — user เป็นผู้อนุมัติสุดท้าย (โมเดล Multi-AI เดิมถูกยกเลิก ไฟล์ที่เกี่ยวข้องติด banner SUPERSEDED)
 
 ## Layout (canonical per ADR-0002)
 
 | Location | Content |
 |---|---|
-| `/CLAUDE.md` `/AGENTS.md` `/ANTIGRAVITY.md` `/GROK.md` | Agent instructions — repo root so each tool auto-loads its own |
-| `/.ai-team/` | Operating system: task board, ownership, locks, work orders, handoffs, templates |
+| `/CLAUDE.md` | คู่มือทำงานของ Claude Code (sole developer) — `/AGENTS.md` `/ANTIGRAVITY.md` `/GROK.md` superseded |
+| `/.ai-team/` | Task board (tracker เดียว), work orders (task specs), templates |
 | `docs/project/` | Project state, Sprint plans, development plan |
 | `docs/decisions/` | ADRs (ADR-0001 stack, ADR-0002 layout/ownership, ADR-0003 evaluation framework) |
 | `docs/architecture/` | System context, evaluation framework (วPA ว9/ว10-2564), data model, UX designs |

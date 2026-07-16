@@ -1,6 +1,13 @@
 # Sprint 0 — Multi-AI Team Operating System
 
-Status: Planned
+> **PARTIALLY SUPERSEDED by ADR-0004 (2026-07-17).** SEIP is now developed solely
+> by Claude Code. The multi-agent mechanics in this plan (dispatch, file locks,
+> per-agent waves, cross-agent handoffs, SEIP-QA-002) are retired. What survives:
+> the task sequence (contracts → designs → gates → lock), the Hard Constraint
+> below, and the Definition of Ready to Build reinterpreted for one developer.
+> Current sequence lives in `.ai-team/task-board.yaml` + `PROJECT_STATE.md`.
+
+Status: Planned 2026-07-16 · rescoped by ADR-0004 on 2026-07-17
 Planned by: Claude (Lead Architect)
 Date: 2026-07-16
 
