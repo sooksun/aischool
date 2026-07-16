@@ -1,0 +1,78 @@
+# SEIP Permission Contract
+# version: 0.1.0-draft — UNLOCKED until SEIP-ARCH-002 ratifies v1.0.
+# Protected contract (contract-policy.md).
+#
+# The api module is the sole enforcement point (module-boundaries.md).
+# UI may hide affordances but never substitutes for these rules.
+
+version: 0.1.0-draft
+status: draft
+
+roles:
+  teacher:      { scope: school, description: ครูผู้ส่งหลักฐานและรับการประเมิน }
+  director:     { scope: school, description: ผู้อำนวยการ — ประธานกรรมการ PA, อนุมัติข้อตกลง }
+  deputy:       { scope: school, description: รองผู้อำนวยการ — evaluatee ในสาย ว10 และผู้ช่วยงานบริหาร }
+  evaluator:    { scope: school, description: กรรมการประเมินภายนอก/ภายในที่ถูกแต่งตั้งใน assignment }
+  school_admin: { scope: school, description: ผู้ดูแลระบบระดับโรงเรียน — จัดการ cycle, รอบ, บุคลากร }
+  area_admin:   { scope: area,   description: เขตพื้นที่ — read-only ข้ามโรงเรียนในเขต (M-1 จาก data model) }
+
+tenancy:
+  rule: >
+    Every operational resource carries school_id. A caller may access a resource
+    only when they hold an active SchoolMembership in that school, EXCEPT
+    area_admin, whose membership_scope=area grants READ-ONLY access to schools
+    within their area. Cross-tenant denial returns RES-001 (not-found shape) so
+    existence is never leaked (PERM-002 is reserved for same-school role denials
+    where existence is already known).
+  writes_by_area_admin: forbidden   # PERM-004
+  ownership:
+    evidence: Owner (personnel) or school_admin may mutate; others per matrix below.
+    scores: Only the evaluator who owns the per-evaluator record may write it.
+
+# Operations reference openapi.yaml operationIds.
+# Legend: own = only own records / self as subject; school = any record in own school;
+#         area-r = read-only across schools in area; committee = only if CommitteeMember of the assignment.
+matrix:
+  # taxonomy (reference data — readable by any authenticated member)
+  listFrameworks:          { teacher: school, director: school, deputy: school, evaluator: school, school_admin: school, area_admin: area-r }
+  getFramework:            { teacher: school, director: school, deputy: school, evaluator: school, school_admin: school, area_admin: area-r }
+  listEvidenceCategories:  { teacher: school, director: school, deputy: school, evaluator: school, school_admin: school, area_admin: area-r }
+
+  # cycles & rounds
+  listCycles:              { teacher: school, director: school, deputy: school, evaluator: school, school_admin: school, area_admin: area-r }
+  getCycle:                { teacher: school, director: school, deputy: school, evaluator: school, school_admin: school, area_admin: area-r }
+  createCycle:             { director: school, school_admin: school }
+  updateCycle:             { director: school, school_admin: school }
+  createRound:             { director: school, school_admin: school }
+  updateRound:             { director: school, school_admin: school }   # closing a round freezes scores
+
+  # evidence — teachers own their evidence; upload once, reuse via mappings
+  listEvidence:            { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
+  createEvidence:          { teacher: own, director: own, deputy: own, school_admin: school }
+  getEvidence:             { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
+  updateEvidence:          { teacher: own, deputy: own, director: own, school_admin: school }
+  deleteEvidence:          { teacher: own, deputy: own, director: own, school_admin: school }
+  initiateFileUpload:      { teacher: own, deputy: own, director: own, school_admin: school }
+  completeFileUpload:      { teacher: own, deputy: own, director: own, school_admin: school }
+
+  # mappings — evidence owner proposes; confirmation is a governance act
+  listEvidenceMappings:    { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
+  createMapping:           { teacher: own, deputy: own, director: own, school_admin: school }
+  listMappings:            { director: school, school_admin: school, evaluator: committee, area_admin: area-r }
+  actOnMapping:            # confirm/reject/revoke
+    teacher: own-revoke    # owner may revoke their own suggested mapping only
+    director: school
+    school_admin: school
+
+  # scoring — committee of 3, per-evaluator records
+  listAssignments:         { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
+  createAssignment:        { director: school, school_admin: school }
+  getAssignment:           { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
+  submitMyScores:          { evaluator: committee, director: committee }   # director scores only as committee chair/member
+  getAssignmentResults:    { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
+
+notes:
+  - teacher:own on listEvidence means the default filter is owner=self and other owners are rejected.
+  - evaluator:committee resolves through CommitteeMember rows of the target assignment (PERM-003 otherwise).
+  - teacher/deputy see their own assignment results only after the round enters status=closed (business rule; prevents mid-scoring visibility).
+  - Every deny path emits an AuditEvent with action=access_denied when the request carried a valid identity.

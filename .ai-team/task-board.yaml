@@ -22,28 +22,29 @@ tasks:
 
   - id: SEIP-ARCH-001
     title: Contracts v0.1 draft (openapi, permissions, error-codes, events)
-    status: ready               # unblocked when OPS-001 done
+    status: done                # 2026-07-17
     work_order: .ai-team/work-orders/SEIP-ARCH-001.md
     dependencies: [SEIP-OPS-001]
     acceptance_criteria:
-      - openapi.yaml events.yaml permissions.yaml error-codes.yaml drafted at v0.1
-      - Roles + school-scoped tenancy in permissions.yaml
-      - Indicator taxonomy per ADR-0003 / architecture/evaluation-framework.md
-      - OpenAPI lints clean; type generation runs
-      - AI-mapping endpoints explicitly deferred to Sprint 2
-      - Resolves CCR-001 (filed by codex pre-ADR-0004)
+      - openapi.yaml events.yaml permissions.yaml error-codes.yaml drafted at v0.1   # DONE
+      - Roles + school-scoped tenancy in permissions.yaml                            # DONE
+      - Indicator taxonomy per ADR-0003 / architecture/evaluation-framework.md       # DONE
+      - OpenAPI lints clean; type generation runs                    # DONE — redocly valid 0 warnings; openapi-typescript OK
+      - AI-mapping endpoints explicitly deferred to Sprint 2         # DONE — x-deferred section
+      - Resolves CCR-001 (filed by codex pre-ADR-0004)               # DONE — RESOLVED 2026-07-17
+      - Module boundary map                                          # DONE — docs/architecture/module-boundaries.md
 
   - id: SEIP-DB-000
     title: Data model proposal (ERD + entity dictionary, no schema)
-    status: review              # claude reviews the inherited design
+    status: done                # 2026-07-17 — review PASS
     work_order: .ai-team/work-orders/SEIP-DB-000.md
     notes: >
-      Produced by Codex before ADR-0004 (out-of-wave user dispatch; honest
-      handoff at .ai-team/handoffs/SEIP-DB-000.md). Claude inherits ownership,
-      reviews during ARCH-001, and amends the feasibility verdict there.
+      Produced by Codex before ADR-0004; inherited by Claude. Review verdict PASS
+      at docs/reviews/SEIP-DB-000-claude-review.md — all 8 framework implications
+      covered; contracts v0.1 consistent; 4 non-blocking observations routed to DB-001.
     acceptance_criteria:
-      - Claude review pass against evaluation-framework.md implications
-      - Consistency with contracts v0.1 confirmed in ARCH-001
+      - Claude review pass against evaluation-framework.md implications   # DONE
+      - Consistency with contracts v0.1 confirmed in ARCH-001             # DONE
 
   - id: SEIP-UI-000
     title: Evidence submission UX flow (design, no implementation)

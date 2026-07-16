@@ -52,7 +52,9 @@ No data migration. Process only:
 - grok (SEIP-DB-000 reviewer; adversarial later in SEIP-QA-002)
 
 ## Approval Status
-**pending** — waiting on SEIP-ARCH-001
+**RESOLVED 2026-07-17** — SEIP-ARCH-001 delivered contracts v0.1
+(`openapi.yaml`, `permissions.yaml`, `error-codes.yaml`, `events.yaml`; all lint/parse-verified).
+Feasibility follow-up absorbed into `SEIP-DB-000-claude-review.md` under single-agent mode (ADR-0004).
 
 ## Related
 - Task board: SEIP-DB-000 `status: blocked` (dependency SEIP-ARCH-001)

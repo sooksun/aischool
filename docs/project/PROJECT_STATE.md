@@ -13,9 +13,9 @@ Claude Code is the sole developer (architect + backend + frontend + QA); the use
 No production feature code until the Sprint 0 exit gate passes: contracts v1.0 locked (SEIP-ARCH-002) + data model and UX designs approved.
 
 ## Current Objectives (sequence)
-1. SEIP-OPS-001 — finish repo bootstrap (merge to develop, CI green on GitHub)
-2. SEIP-ARCH-001 — contracts v0.1 (also resolves CCR-001 and reviews the inherited DB-000 design)
-3. SEIP-UI-000 — evidence submission UX design; SEIP-QA-001 — runnable quality gates
+1. ~~SEIP-OPS-001~~ DONE 2026-07-17 — repo live, CI green (close-out in `.ai-team/handoffs/`)
+2. ~~SEIP-ARCH-001~~ DONE 2026-07-17 — contracts v0.1 drafted + verified; CCR-001 resolved; DB-000 review PASS
+3. SEIP-UI-000 — evidence submission UX design; SEIP-QA-001 — runnable quality gates ← **next**
 4. SEIP-ARCH-002 — lock contracts v1.0 with user approval → Ready to Build
 5. Sprint 1: SEIP-DB-001 (schema + migrations), SEIP-UI-001 (evidence flow)
 

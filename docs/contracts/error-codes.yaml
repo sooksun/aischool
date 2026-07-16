@@ -1,0 +1,80 @@
+# SEIP Error Code Contract
+# version: 0.1.0-draft — UNLOCKED until SEIP-ARCH-002 ratifies v1.0.
+# Protected contract (contract-policy.md): changes require an approved CCR after lock.
+#
+# Error response shape (every non-2xx JSON response):
+#   {
+#     "code":       "<NAMESPACE-NNN>",      # stable, machine-readable, from this file
+#     "message":    "<human-readable EN>",  # dev-facing; UI maps code -> localized TH text
+#     "details":    [ { "field": "...", "issue": "..." } ],   # optional, validation only
+#     "request_id": "<uuid>"                # correlates with logs / AuditEvent.request_id
+#   }
+# HTTP status is authoritative for transport semantics; `code` for business semantics.
+
+version: 0.1.0-draft
+status: draft
+error_shape:
+  required: [code, message]
+  optional: [details, request_id]
+
+namespaces:
+  AUTH: authentication (who are you)
+  PERM: authorization / tenancy (what may you do)
+  VAL: request validation
+  UPL: evidence upload constraints
+  MAP: evidence-indicator mapping rules
+  SCORE: committee scoring rules
+  CYCLE: cycle / round configuration and state
+  RES: resource existence / conflict
+  SYS: infrastructure and unexpected
+
+codes:
+  # --- AUTH (401) ---
+  AUTH-001: { http: 401, meaning: Missing or malformed credentials/token }
+  AUTH-002: { http: 401, meaning: Token expired }
+  AUTH-003: { http: 401, meaning: Account disabled or not yet activated }
+
+  # --- PERM (403) ---
+  PERM-001: { http: 403, meaning: Role not allowed for this operation (permissions.yaml matrix) }
+  PERM-002: { http: 403, meaning: Cross-school access denied (tenancy) — resource belongs to another school }
+  PERM-003: { http: 403, meaning: Not a committee member of this assignment }
+  PERM-004: { http: 403, meaning: Area-scoped role attempted write outside read-only scope }
+
+  # --- VAL (400 / 422) ---
+  VAL-001: { http: 400, meaning: 'Malformed request body or query (schema violation) — details[] lists fields' }
+  VAL-002: { http: 422, meaning: Semantically invalid (valid shape, impossible values) }
+  VAL-003: { http: 422, meaning: Referenced entity belongs to an incompatible framework version }
+
+  # --- UPL (evidence upload) ---
+  UPL-001: { http: 422, meaning: Content type not allowed for the evidence category }
+  UPL-002: { http: 422, meaning: File exceeds size limit for the category }
+  UPL-003: { http: 422, meaning: Video duration exceeds category maximum (e.g. problem/inspiration video > 600s) }
+  UPL-004: { http: 409, meaning: Upload already completed for this file id }
+  UPL-005: { http: 422, meaning: Checksum mismatch between initiate and complete }
+  UPL-006: { http: 423, meaning: File quarantined — virus scan not clean }
+
+  # --- MAP (mapping governance) ---
+  MAP-001: { http: 409, meaning: Active mapping already exists for (evidence, indicator, cycle) }
+  MAP-002: { http: 422, meaning: Confirm rejected — mapping not in suggested state }
+  MAP-003: { http: 422, meaning: Indicator not scorable/mappable (workload gate rows cannot be mapped) }
+  MAP-004: { http: 422, meaning: Evidence and cycle framework versions incompatible }
+
+  # --- SCORE (committee scoring) ---
+  SCORE-001: { http: 422, meaning: Committee incomplete — scoring requires exactly 3 members }
+  SCORE-002: { http: 409, meaning: Round is closed — scores immutable }
+  SCORE-003: { http: 422, meaning: Rubric level out of range (must be 1..4) }
+  SCORE-004: { http: 422, meaning: Workload gate not declared before score submission }
+  SCORE-005: { http: 422, meaning: Score set incomplete — all scored indicators of the framework part required in one submission }
+
+  # --- CYCLE ---
+  CYCLE-001: { http: 422, meaning: Invalid round state transition (planned→open→scoring→closed only) }
+  CYCLE-002: { http: 409, meaning: Overlapping active cycle for (school, fiscal_year, kind) }
+  CYCLE-003: { http: 422, meaning: Round period outside cycle bounds }
+
+  # --- RES ---
+  RES-001: { http: 404, meaning: Resource not found (or hidden by tenancy — indistinguishable by design) }
+  RES-002: { http: 409, meaning: Concurrent modification (stale version/etag) }
+
+  # --- SYS ---
+  SYS-001: { http: 500, meaning: Unexpected server error — request_id always present }
+  SYS-002: { http: 503, meaning: Dependency unavailable (storage, database) — retryable }

@@ -1,0 +1,1199 @@
+openapi: 3.1.0
+# version 0.1.0-draft — UNLOCKED until SEIP-ARCH-002 ratifies v1.0.
+# Protected contract (contract-policy.md). Types are GENERATED from this file (ADR-0001);
+# no implementation may invent fields outside it.
+info:
+  title: SEIP API
+  version: 0.1.0-draft
+  summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation)
+  description: |
+    Contract v0.1 (draft) per SEIP-ARCH-001. Scope: authentication, indicator taxonomy
+    (read), evaluation cycle/round configuration, evidence upload (two-phase,
+    storage-agnostic), governed evidence↔indicator mappings, and per-evaluator committee
+    scoring per ADR-0003 (วPA ว9/ว10 2564).
+
+    **Business rules that bind every implementation**
+    - Tenancy: every resource is school-scoped; cross-school access returns RES-001 (indistinguishable from not-found).
+    - Taxonomy (frameworks/domains/indicators/weights) is versioned seed data — never hard-coded.
+    - Scoring grain is per-evaluator (3 committee members); overall pass requires **every** evaluator ≥ 70% and the workload gate met.
+    - Rounds are configurable 1..n per cycle; no endpoint assumes exactly 2.
+    - Error bodies follow error-codes.yaml; codes are stable API surface.
+
+    **Deferred (explicitly out of v0.1)** — see `x-deferred`.
+  license:
+    name: Proprietary — SEIP project internal
+    url: https://github.com/sooksun/aischool
+  contact:
+    name: SEIP Architecture (Claude Code)
+
+x-deferred:
+  ai-mapping:
+    reason: Sprint 2 — blocked on OPEN-3 (AI provider + PDPA data residency)
+    planned-surface: POST /evidence/{evidenceId}/mappings/suggest, mapping_source=ai_suggested already reserved in schemas
+  reports:
+    reason: Contract v0.2 — needs UX (SEIP-UI-000) + official PA1/PA2/PA3 field inventory
+  notifications:
+    reason: Channel choice pending; events.yaml defines the triggering domain events
+
+servers:
+  - url: /api/v1
+    description: Version-prefixed base path (host is deployment config)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+    description: Authentication and session identity
+  - name: taxonomy
+    description: Read-only versioned indicator taxonomy (ADR-0003) and evidence categories
+  - name: cycles
+    description: Evaluation cycle and round configuration (school admin)
+  - name: evidence
+    description: Evidence metadata and two-phase file upload
+  - name: mappings
+    description: Governed evidence↔indicator mappings (human-confirmed)
+  - name: scoring
+    description: Committee assignments and per-evaluator scoring
+
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      summary: Exchange credentials for a token pair
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      summary: Current user identity, memberships and roles
+      tags: [auth]
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /frameworks:
+    get:
+      operationId: listFrameworks
+      summary: List framework versions (ว9/ว10 revisions)
+      tags: [taxonomy]
+      parameters:
+        - name: role_family
+          in: query
+          schema: { $ref: '#/components/schemas/RoleFamily' }
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, superseded, draft] }
+      responses:
+        '200':
+          description: Framework versions (no nested taxonomy — keep list light)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Framework' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /frameworks/{frameworkId}:
+    get:
+      operationId: getFramework
+      summary: One framework with its domain→indicator tree
+      description: Per-rank rubric level descriptions are large; request them explicitly with `include=levels`.
+      tags: [taxonomy]
+      parameters:
+        - $ref: '#/components/parameters/FrameworkId'
+        - name: include
+          in: query
+          description: Comma-separated expansions. `levels` adds IndicatorLevelDescription rows.
+          schema: { type: string, enum: [levels] }
+      responses:
+        '200':
+          description: Framework detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FrameworkDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /evidence-categories:
+    get:
+      operationId: listEvidenceCategories
+      summary: Evidence categories with upload validation metadata
+      tags: [taxonomy]
+      responses:
+        '200':
+          description: Categories (framework-named evidence classes)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EvidenceCategory' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /cycles:
+    get:
+      operationId: listCycles
+      summary: List evaluation cycles of the caller's school
+      tags: [cycles]
+      parameters:
+        - name: fiscal_year
+          in: query
+          schema: { type: integer }
+        - name: evaluation_kind
+          in: query
+          schema: { $ref: '#/components/schemas/EvaluationKind' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CycleStatus' }
+      responses:
+        '200':
+          description: Cycles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Cycle' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createCycle
+      summary: Create an evaluation cycle (school admin)
+      tags: [cycles]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CycleCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cycle' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /cycles/{cycleId}:
+    get:
+      operationId: getCycle
+      summary: One cycle with its rounds
+      tags: [cycles]
+      parameters:
+        - $ref: '#/components/parameters/CycleId'
+      responses:
+        '200':
+          description: Cycle detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CycleDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateCycle
+      summary: Update cycle status/title/dates (school admin)
+      tags: [cycles]
+      parameters:
+        - $ref: '#/components/parameters/CycleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CyclePatch' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cycle' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /cycles/{cycleId}/rounds:
+    post:
+      operationId: createRound
+      summary: Add a round to a cycle (rounds are 1..n, data-driven)
+      tags: [cycles]
+      parameters:
+        - $ref: '#/components/parameters/CycleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoundCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Round' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /rounds/{roundId}:
+    patch:
+      operationId: updateRound
+      summary: Update round period or transition its status
+      description: Legal transitions planned→open→scoring→closed (CYCLE-001). Closing freezes all scores (SCORE-002).
+      tags: [cycles]
+      parameters:
+        - $ref: '#/components/parameters/RoundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoundPatch' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Round' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /evidence:
+    get:
+      operationId: listEvidence
+      summary: List evidence (school-scoped; teachers see their own by default)
+      tags: [evidence]
+      parameters:
+        - name: owner_personnel_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: category_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/EvidenceStatus' }
+        - name: mapped_to_indicator_id
+          in: query
+          description: Only evidence having an active mapping to this indicator
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paged evidence list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidencePage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createEvidence
+      summary: Create a logical evidence item (metadata only; files attach via two-phase upload)
+      tags: [evidence]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvidenceCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Evidence' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /evidence/{evidenceId}:
+    get:
+      operationId: getEvidence
+      summary: Evidence detail with files and mappings
+      tags: [evidence]
+      parameters:
+        - $ref: '#/components/parameters/EvidenceId'
+      responses:
+        '200':
+          description: Evidence detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidenceDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateEvidence
+      summary: Update evidence metadata (owner or school admin)
+      tags: [evidence]
+      parameters:
+        - $ref: '#/components/parameters/EvidenceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvidencePatch' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Evidence' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    delete:
+      operationId: deleteEvidence
+      summary: Soft-delete evidence (audited; storage GC is async policy)
+      tags: [evidence]
+      parameters:
+        - $ref: '#/components/parameters/EvidenceId'
+      responses:
+        '204':
+          description: Soft-deleted
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /evidence/{evidenceId}/files/initiate:
+    post:
+      operationId: initiateFileUpload
+      summary: 'Phase 1: validate metadata and obtain an upload target'
+      description: |
+        Validates content type / size / (video) duration against the evidence category
+        (UPL-001..003) **before** bytes move. Returns a provider-agnostic upload target
+        (presigned URL or equivalent). Client uploads bytes directly to storage,
+        then calls the complete endpoint.
+      tags: [evidence]
+      parameters:
+        - $ref: '#/components/parameters/EvidenceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FileUploadInitiate' }
+      responses:
+        '201':
+          description: Upload target issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileUploadTarget' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /evidence/{evidenceId}/files/{fileId}/complete:
+    post:
+      operationId: completeFileUpload
+      summary: 'Phase 2: confirm bytes uploaded; register file and enqueue virus scan'
+      description: Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served only when scan_status=clean (UPL-006).
+      tags: [evidence]
+      parameters:
+        - $ref: '#/components/parameters/EvidenceId'
+        - name: fileId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FileUploadComplete' }
+      responses:
+        '200':
+          description: File registered (scan pending)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidenceFile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /evidence/{evidenceId}/mappings:
+    get:
+      operationId: listEvidenceMappings
+      summary: Mappings of one evidence item
+      tags: [mappings]
+      parameters:
+        - $ref: '#/components/parameters/EvidenceId'
+      responses:
+        '200':
+          description: Mappings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Mapping' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createMapping
+      summary: Map evidence to an indicator (human; AI suggestions deferred to Sprint 2)
+      tags: [mappings]
+      parameters:
+        - $ref: '#/components/parameters/EvidenceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MappingCreate' }
+      responses:
+        '201':
+          description: Created (status=suggested until confirmed)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mapping' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /mappings:
+    get:
+      operationId: listMappings
+      summary: Mapping review queue (filter by indicator, cycle, status)
+      tags: [mappings]
+      parameters:
+        - name: indicator_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: cycle_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/MappingStatus' }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paged mappings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MappingPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /mappings/{mappingId}:
+    patch:
+      operationId: actOnMapping
+      summary: Confirm, reject, or revoke a mapping (governance action, audited)
+      tags: [mappings]
+      parameters:
+        - name: mappingId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MappingAction' }
+      responses:
+        '200':
+          description: Mapping after action
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mapping' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /rounds/{roundId}/assignments:
+    get:
+      operationId: listAssignments
+      summary: Evaluation assignments in a round
+      tags: [scoring]
+      parameters:
+        - $ref: '#/components/parameters/RoundId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paged assignments
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createAssignment
+      summary: Create an assignment with its 3-member committee
+      description: Committee must be exactly 3 (SCORE-001) — chair + 2 members, per ว9/ว10.
+      tags: [scoring]
+      parameters:
+        - $ref: '#/components/parameters/RoundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignmentCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Assignment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /assignments/{assignmentId}:
+    get:
+      operationId: getAssignment
+      summary: Assignment detail (committee, workload gate, scoring progress)
+      tags: [scoring]
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      responses:
+        '200':
+          description: Assignment detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /assignments/{assignmentId}/my-scores:
+    put:
+      operationId: submitMyScores
+      summary: Submit or replace the calling evaluator's full score set (idempotent upsert)
+      description: |
+        Per-evaluator grain (ADR-0003): each of the 3 committee members submits their own
+        complete set — all scored standard indicators + challenge items (SCORE-005) with
+        rubric levels 1..4 (SCORE-003). Requires committee membership (PERM-003),
+        a declared workload gate (SCORE-004), and an open/scoring round (SCORE-002).
+        Rollup (part1/part2/total %, ≥70% flag) is computed server-side per evaluator.
+      tags: [scoring]
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScoreSubmission' }
+      responses:
+        '200':
+          description: Stored; per-evaluator rollup returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluatorResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /assignments/{assignmentId}/results:
+    get:
+      operationId: getAssignmentResults
+      summary: Per-evaluator rollups and overall pass verdict
+      description: Overall pass = workload gate met AND every evaluator's total ≥ 70%.
+      tags: [scoring]
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      responses:
+        '200':
+          description: Results
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentResults' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    FrameworkId:
+      name: frameworkId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CycleId:
+      name: cycleId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RoundId:
+      name: roundId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EvidenceId:
+      name: evidenceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AssignmentId:
+      name: assignmentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    Unauthorized:
+      description: AUTH-* — missing/expired/invalid credentials
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: PERM-* — role or tenancy denial
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: RES-001 — not found or cross-tenant (indistinguishable by design)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: VAL-001 — malformed request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UnprocessableEntity:
+      description: VAL/UPL/MAP/SCORE/CYCLE-* — semantically invalid
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: RES-002/MAP-001/UPL-004/CYCLE-002/SCORE-002 — state conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, description: Stable code from error-codes.yaml }
+        message: { type: string }
+        details:
+          type: array
+          items:
+            type: object
+            required: [field, issue]
+            properties:
+              field: { type: string }
+              issue: { type: string }
+        request_id: { type: string, format: uuid }
+
+    RoleFamily:
+      type: string
+      enum: [teacher, administrator]
+    Role:
+      type: string
+      enum: [teacher, director, deputy, evaluator, school_admin, area_admin]
+    EvaluationKind:
+      type: string
+      enum: [pa, dpa]
+    CycleStatus:
+      type: string
+      enum: [planned, open, closed]
+    RoundStatus:
+      type: string
+      enum: [planned, open, scoring, closed]
+    EvidenceStatus:
+      type: string
+      enum: [draft, active, archived, rejected]
+    MappingStatus:
+      type: string
+      enum: [suggested, confirmed, rejected, revoked]
+    MappingSource:
+      type: string
+      enum: [human, ai_suggested]
+      description: ai_suggested reserved for Sprint 2 (x-deferred)
+    ScanStatus:
+      type: string
+      enum: [pending, clean, blocked]
+    RubricLevel:
+      type: integer
+      minimum: 1
+      maximum: 4
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, expires_in]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        expires_in: { type: integer, description: Access token TTL seconds }
+
+    CurrentUser:
+      type: object
+      required: [id, email, display_name, memberships]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        personnel_id:
+          type: [string, 'null']
+          format: uuid
+          description: Set when the user is school personnel (evaluatee-capable)
+        memberships:
+          type: array
+          items:
+            type: object
+            required: [role, membership_scope]
+            properties:
+              role: { $ref: '#/components/schemas/Role' }
+              membership_scope: { type: string, enum: [school, area] }
+              school_id: { type: [string, 'null'], format: uuid }
+              area_id: { type: [string, 'null'], format: uuid }
+
+    Framework:
+      type: object
+      required: [id, code, role_family, legal_ref, revision_year, status]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, examples: [v9-2564-teacher] }
+        role_family: { $ref: '#/components/schemas/RoleFamily' }
+        legal_ref: { type: string, examples: ['ศธ 0206.3/ว 9 ลว. 20 พ.ค. 2564'] }
+        revision_year: { type: integer, examples: [2564] }
+        status: { type: string, enum: [active, superseded, draft] }
+
+    FrameworkDetail:
+      allOf:
+        - $ref: '#/components/schemas/Framework'
+        - type: object
+          required: [domains, score_weights]
+          properties:
+            domains:
+              type: array
+              items: { $ref: '#/components/schemas/Domain' }
+            score_weights:
+              type: array
+              description: Framework data (e.g. part1=60, part2=40, challenge method=20)
+              items:
+                type: object
+                required: [weight_key, weight_value]
+                properties:
+                  weight_key: { type: string, examples: [part1_total] }
+                  weight_value: { type: number }
+
+    Domain:
+      type: object
+      required: [id, code, name_th, sort_order, part, indicators]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, examples: [T-D1] }
+        name_th: { type: string, examples: [ด้านการจัดการเรียนรู้] }
+        sort_order: { type: integer }
+        part: { type: string, enum: [standards, challenge] }
+        indicators:
+          type: array
+          items: { $ref: '#/components/schemas/Indicator' }
+
+    Indicator:
+      type: object
+      required: [id, code, name_th, sort_order, is_scored, indicator_kind]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, examples: [T-1.1] }
+        name_th: { type: string }
+        sort_order: { type: integer }
+        is_scored: { type: boolean }
+        indicator_kind: { type: string, enum: [standard, challenge, workload_gate] }
+        levels:
+          type: array
+          description: Present only when requested with include=levels
+          items: { $ref: '#/components/schemas/IndicatorLevel' }
+
+    IndicatorLevel:
+      type: object
+      required: [rank_level_code, rubric_level, expected_practice_th]
+      properties:
+        rank_level_code: { type: string, examples: [teacher_kru] }
+        rubric_level: { $ref: '#/components/schemas/RubricLevel' }
+        expected_practice_th: { type: string }
+
+    EvidenceCategory:
+      type: object
+      required: [id, code, label_th, allowed_mime_types, required_for_dpa]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, examples: [problem_inspiration_video_mp4] }
+        label_th: { type: string }
+        allowed_mime_types:
+          type: array
+          items: { type: string }
+        max_byte_size: { type: [integer, 'null'] }
+        max_duration_seconds:
+          type: [integer, 'null']
+          description: e.g. 600 for the problem/inspiration video (ว9)
+        required_for_dpa: { type: boolean }
+
+    Cycle:
+      type: object
+      required: [id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on]
+      properties:
+        id: { type: string, format: uuid }
+        school_id: { type: string, format: uuid }
+        framework_version_id: { type: string, format: uuid }
+        fiscal_year: { type: integer, examples: [2569] }
+        evaluation_kind: { $ref: '#/components/schemas/EvaluationKind' }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/CycleStatus' }
+        starts_on: { type: string, format: date }
+        ends_on: { type: string, format: date }
+
+    CycleCreate:
+      type: object
+      required: [framework_version_id, fiscal_year, evaluation_kind, title, starts_on, ends_on]
+      properties:
+        framework_version_id: { type: string, format: uuid }
+        fiscal_year: { type: integer }
+        evaluation_kind: { $ref: '#/components/schemas/EvaluationKind' }
+        title: { type: string, maxLength: 200 }
+        starts_on: { type: string, format: date }
+        ends_on: { type: string, format: date }
+
+    CyclePatch:
+      type: object
+      description: At least one property required
+      minProperties: 1
+      properties:
+        title: { type: string, maxLength: 200 }
+        status: { $ref: '#/components/schemas/CycleStatus' }
+        starts_on: { type: string, format: date }
+        ends_on: { type: string, format: date }
+
+    CycleDetail:
+      allOf:
+        - $ref: '#/components/schemas/Cycle'
+        - type: object
+          required: [rounds]
+          properties:
+            rounds:
+              type: array
+              items: { $ref: '#/components/schemas/Round' }
+
+    Round:
+      type: object
+      required: [id, cycle_id, round_number, purpose, period_start, period_end, status]
+      properties:
+        id: { type: string, format: uuid }
+        cycle_id: { type: string, format: uuid }
+        round_number: { type: integer, minimum: 1 }
+        purpose: { type: string, examples: [salary_round_1] }
+        period_start: { type: string, format: date }
+        period_end: { type: string, format: date }
+        status: { $ref: '#/components/schemas/RoundStatus' }
+
+    RoundCreate:
+      type: object
+      required: [round_number, purpose, period_start, period_end]
+      properties:
+        round_number: { type: integer, minimum: 1 }
+        purpose: { type: string, maxLength: 100 }
+        period_start: { type: string, format: date }
+        period_end: { type: string, format: date }
+
+    RoundPatch:
+      type: object
+      minProperties: 1
+      properties:
+        purpose: { type: string, maxLength: 100 }
+        period_start: { type: string, format: date }
+        period_end: { type: string, format: date }
+        status: { $ref: '#/components/schemas/RoundStatus' }
+
+    Evidence:
+      type: object
+      required: [id, school_id, owner_personnel_id, category_id, title, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        school_id: { type: string, format: uuid }
+        owner_personnel_id: { type: string, format: uuid }
+        uploaded_by_user_id: { type: string, format: uuid }
+        category_id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/EvidenceStatus' }
+        captured_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+
+    EvidenceCreate:
+      type: object
+      required: [category_id, title]
+      properties:
+        owner_personnel_id:
+          type: [string, 'null']
+          format: uuid
+          description: Defaults to the caller's own personnel profile; admins may set another owner
+        category_id: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 300 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        captured_at: { type: [string, 'null'], format: date-time }
+
+    EvidencePatch:
+      type: object
+      minProperties: 1
+      properties:
+        title: { type: string, minLength: 1, maxLength: 300 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        status: { $ref: '#/components/schemas/EvidenceStatus' }
+        captured_at: { type: [string, 'null'], format: date-time }
+
+    EvidenceDetail:
+      allOf:
+        - $ref: '#/components/schemas/Evidence'
+        - type: object
+          required: [files, mappings]
+          properties:
+            files:
+              type: array
+              items: { $ref: '#/components/schemas/EvidenceFile' }
+            mappings:
+              type: array
+              items: { $ref: '#/components/schemas/Mapping' }
+
+    EvidenceFile:
+      type: object
+      required: [id, evidence_id, content_type, byte_size, scan_status, uploaded_at]
+      properties:
+        id: { type: string, format: uuid }
+        evidence_id: { type: string, format: uuid }
+        content_type: { type: string }
+        byte_size: { type: integer, minimum: 0 }
+        checksum_sha256: { type: string }
+        duration_seconds: { type: [integer, 'null'] }
+        original_filename: { type: string }
+        scan_status: { $ref: '#/components/schemas/ScanStatus' }
+        download_url:
+          type: [string, 'null']
+          description: Short-lived read URL; null until scan_status=clean
+        uploaded_at: { type: string, format: date-time }
+
+    FileUploadInitiate:
+      type: object
+      required: [content_type, byte_size, checksum_sha256, original_filename]
+      properties:
+        content_type: { type: string }
+        byte_size: { type: integer, minimum: 1 }
+        checksum_sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        original_filename: { type: string, maxLength: 255 }
+        duration_seconds:
+          type: [integer, 'null']
+          description: Required for video categories (validated against category max, UPL-003)
+
+    FileUploadTarget:
+      type: object
+      required: [file_id, upload_url, method, expires_at]
+      properties:
+        file_id: { type: string, format: uuid }
+        upload_url: { type: string, description: Provider-agnostic presigned target }
+        method: { type: string, enum: [PUT, POST] }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+        expires_at: { type: string, format: date-time }
+
+    FileUploadComplete:
+      type: object
+      required: [checksum_sha256]
+      properties:
+        checksum_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Must equal the initiate value (UPL-005)
+
+    Mapping:
+      type: object
+      required: [id, evidence_id, indicator_id, mapping_source, status, mapped_at]
+      properties:
+        id: { type: string, format: uuid }
+        evidence_id: { type: string, format: uuid }
+        indicator_id: { type: string, format: uuid }
+        cycle_id: { type: [string, 'null'], format: uuid }
+        mapping_source: { $ref: '#/components/schemas/MappingSource' }
+        status: { $ref: '#/components/schemas/MappingStatus' }
+        rationale: { type: [string, 'null'] }
+        mapped_by_user_id: { type: string, format: uuid }
+        confirmed_by_user_id: { type: [string, 'null'], format: uuid }
+        mapped_at: { type: string, format: date-time }
+        confirmed_at: { type: [string, 'null'], format: date-time }
+
+    MappingCreate:
+      type: object
+      required: [indicator_id]
+      properties:
+        indicator_id: { type: string, format: uuid }
+        cycle_id: { type: [string, 'null'], format: uuid }
+        rationale: { type: [string, 'null'], maxLength: 1000 }
+
+    MappingAction:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [confirm, reject, revoke] }
+        rationale: { type: [string, 'null'], maxLength: 1000 }
+
+    Assignment:
+      type: object
+      required: [id, round_id, evaluatee_personnel_id, status, committee]
+      properties:
+        id: { type: string, format: uuid }
+        round_id: { type: string, format: uuid }
+        evaluatee_personnel_id: { type: string, format: uuid }
+        agreement_id: { type: [string, 'null'], format: uuid }
+        status: { type: string, enum: [pending, in_progress, completed, void] }
+        committee:
+          type: array
+          items: { $ref: '#/components/schemas/CommitteeMember' }
+
+    CommitteeMember:
+      type: object
+      required: [evaluator_user_id, committee_role, seat_number]
+      properties:
+        evaluator_user_id: { type: string, format: uuid }
+        committee_role: { type: string, enum: [chair, member] }
+        seat_number: { type: integer, minimum: 1, maximum: 3 }
+
+    AssignmentCreate:
+      type: object
+      required: [evaluatee_personnel_id, committee]
+      properties:
+        evaluatee_personnel_id: { type: string, format: uuid }
+        agreement_id: { type: [string, 'null'], format: uuid }
+        committee:
+          type: array
+          minItems: 3
+          maxItems: 3
+          description: Exactly 3 per ว9/ว10 (SCORE-001) — one chair, two members
+          items: { $ref: '#/components/schemas/CommitteeMember' }
+
+    AssignmentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Assignment'
+        - type: object
+          required: [workload_gate_declared, my_submission_state]
+          properties:
+            workload_gate_declared: { type: boolean }
+            workload_met: { type: [boolean, 'null'] }
+            my_submission_state:
+              type: string
+              enum: [not_member, not_submitted, submitted]
+              description: Scoring progress of the calling evaluator
+
+    ScoreSubmission:
+      type: object
+      required: [indicator_scores]
+      properties:
+        workload_met:
+          type: [boolean, 'null']
+          description: Chair may declare the workload gate in the same call (SCORE-004)
+        indicator_scores:
+          type: array
+          minItems: 1
+          description: Complete set — every scored indicator (standard + challenge) of the framework (SCORE-005)
+          items:
+            type: object
+            required: [indicator_id, rubric_level]
+            properties:
+              indicator_id: { type: string, format: uuid }
+              rubric_level: { $ref: '#/components/schemas/RubricLevel' }
+              comment: { type: [string, 'null'], maxLength: 2000 }
+
+    EvaluatorResult:
+      type: object
+      required: [assignment_id, evaluator_user_id, part1_percent, part2_percent, total_percent, passed_individual_threshold]
+      properties:
+        assignment_id: { type: string, format: uuid }
+        evaluator_user_id: { type: string, format: uuid }
+        part1_percent: { type: number, description: 'Weighted per framework data (e.g. /60)' }
+        part2_percent: { type: number }
+        total_percent: { type: number }
+        passed_individual_threshold: { type: boolean, description: total_percent >= 70 }
+        computed_at: { type: string, format: date-time }
+
+    AssignmentResults:
+      type: object
+      required: [assignment_id, workload_gate_met, evaluator_results, overall_pass, complete]
+      properties:
+        assignment_id: { type: string, format: uuid }
+        workload_gate_met: { type: [boolean, 'null'] }
+        evaluator_results:
+          type: array
+          items: { $ref: '#/components/schemas/EvaluatorResult' }
+        complete: { type: boolean, description: All 3 evaluators submitted }
+        overall_pass:
+          type: [boolean, 'null']
+          description: Null until complete; true iff workload gate met AND every evaluator >= 70%
+
+    PageMeta:
+      type: object
+      required: [page, page_size, total]
+      properties:
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+
+    EvidencePage:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Evidence' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+
+    MappingPage:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Mapping' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+
+    AssignmentPage:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Assignment' }
+        meta: { $ref: '#/components/schemas/PageMeta' }

@@ -1,0 +1,79 @@
+# SEIP Domain Event Contract
+# version: 0.1.0-draft — UNLOCKED until SEIP-ARCH-002 ratifies v1.0.
+# Protected contract (contract-policy.md).
+#
+# Delivery: transactional OUTBOX (module-boundaries.md rule 4).
+# The api/worker write the event row in the same DB transaction as the domain
+# change; a dispatcher relays to consumers (notification, projections).
+# No dual-writes inside request handlers.
+
+version: 0.1.0-draft
+status: draft
+
+envelope:
+  required:
+    event_id: uuid            # unique per event
+    event_type: string        # from `events` below, dot.case
+    schema_version: integer   # per-event payload version, starts at 1
+    occurred_at: iso8601      # domain time (transaction commit)
+    school_id: uuid           # tenancy tag (nullable only for system events)
+    actor_user_id: uuid|null  # who caused it (null = system/worker)
+  optional:
+    request_id: uuid          # correlates with API request + AuditEvent
+  ordering: per-aggregate (evidence_id / assignment_id); consumers must be idempotent on event_id
+
+events:
+  evidence.created:
+    payload: { evidence_id: uuid, owner_personnel_id: uuid, category_code: string }
+    consumers: [audit-projection]
+
+  evidence.file.registered:
+    payload: { evidence_id: uuid, file_id: uuid, content_type: string, byte_size: integer }
+    consumers: [scan-worker]
+    note: Emitted by completeFileUpload; triggers async virus scan + video probe.
+
+  evidence.file.scan_completed:
+    payload: { evidence_id: uuid, file_id: uuid, scan_status: 'enum[clean, blocked]' }
+    consumers: [notification, audit-projection]
+    note: blocked → file quarantined (UPL-006); owner notified.
+
+  evidence.mapping.suggested:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, mapping_source: 'enum[human, ai_suggested]' }
+    consumers: [notification]
+    note: ai_suggested reserved for Sprint 2 (x-deferred in openapi.yaml).
+
+  evidence.mapping.confirmed:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, confirmed_by_user_id: uuid }
+    consumers: [notification, audit-projection]
+
+  evidence.mapping.rejected:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, rationale: string|null }
+    consumers: [notification]
+
+  evidence.mapping.revoked:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid }
+    consumers: [audit-projection]
+
+  assignment.created:
+    payload: { assignment_id: uuid, round_id: uuid, evaluatee_personnel_id: uuid, committee_user_ids: 'uuid[3]' }
+    consumers: [notification]
+    note: Notifies the 3 committee members.
+
+  assignment.scores.submitted:
+    payload: { assignment_id: uuid, evaluator_user_id: uuid, total_percent: number, passed_individual_threshold: boolean }
+    consumers: [notification, audit-projection]
+    note: Per-evaluator grain — fires once per evaluator submission (upsert replaces, re-fires with schema_version rules).
+
+  assignment.completed:
+    payload: { assignment_id: uuid, overall_pass: boolean, workload_gate_met: boolean }
+    consumers: [notification, audit-projection]
+    note: Fires when the 3rd evaluator submits and the workload gate is declared.
+
+  round.closed:
+    payload: { round_id: uuid, cycle_id: uuid, assignment_count: integer, completed_count: integer }
+    consumers: [notification, audit-projection]
+    note: After this, score writes are rejected (SCORE-002).
+
+deferred:
+  report.*: contract v0.2 with report endpoints
+  ai.suggestion.*: Sprint 2 (OPEN-3)
