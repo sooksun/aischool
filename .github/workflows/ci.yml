@@ -1,0 +1,88 @@
+# SEIP CI skeleton — SEIP-OPS-001
+# One job per PR gate in docs/qa/QUALITY-GATES.md. Stub jobs echo their pending
+# status until SEIP-QA-001 supplies real commands; the ownership gate is live now.
+# "Code owner review" is enforced by GitHub branch protection + CODEOWNERS, not a job here.
+name: ci
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+jobs:
+  ownership:
+    name: "Gate: module ownership"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/orchestration/validate-ownership.mjs
+
+  format:
+    name: "Gate: format (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  lint:
+    name: "Gate: lint (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  typecheck:
+    name: "Gate: type check (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  unit:
+    name: "Gate: unit tests (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  integration:
+    name: "Gate: integration tests (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  build:
+    name: "Gate: build (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  migration-validation:
+    name: "Gate: migration validation (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  secret-scan:
+    name: "Gate: secret scan (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  dependency-audit:
+    name: "Gate: dependency audit (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  permission-tests:
+    name: "Gate: permission tests (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"
+
+  contract-compatibility:
+    name: "Gate: contract compatibility (stub)"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "pending SEIP-QA-001 — see docs/qa/QUALITY-GATES.md"

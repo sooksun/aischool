@@ -1,4 +1,16 @@
+# Module ownership — single source of truth for reviewers (ADR-0002 §4, §5)
+# Steady-state owner per path. A task's allowed_paths on the board may grant
+# temporary cross-module write access for that task only; the owner listed
+# here still reviews/integrates. Validated by scripts/orchestration/validate-ownership.mjs
 modules:
+  orchestration:
+    owner: claude
+    reviewer: grok
+    paths:
+      - .ai-team/**
+      - .github/**
+      - scripts/orchestration/**
+
   architecture:
     owner: claude
     reviewer: grok
@@ -6,6 +18,7 @@ modules:
       - docs/architecture/**
       - docs/contracts/**
       - docs/decisions/**
+      - docs/project/**
 
   backend:
     owner: codex
@@ -15,8 +28,11 @@ modules:
       - apps/worker/**
       - packages/database/**
       - packages/auth/**
+      - packages/backend-shared/**
       - prisma/**
       - database/**
+      - infra/docker/**
+      - tests/backend/**
 
   frontend:
     owner: antigravity
@@ -25,6 +41,8 @@ modules:
       - apps/web/**
       - packages/ui/**
       - packages/design-tokens/**
+      - public/**
+      - tests/frontend/**
 
   quality:
     owner: grok
@@ -33,5 +51,6 @@ modules:
       - tests/e2e/**
       - tests/security/**
       - tests/regression/**
+      - scripts/security/**
       - docs/qa/**
       - docs/reviews/**

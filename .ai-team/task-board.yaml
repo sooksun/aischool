@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-16T21:30:00+07:00
+updated_at: 2026-07-16T22:00:00+07:00
 # Sprint 0 laid out by Claude. See docs/project/SPRINT-0.md and docs/decisions/ADR-0001, ADR-0002.
 # HARD CONSTRAINT: no production feature code until the Definition of Ready to Build gate passes.
 sprint: 0
@@ -22,7 +22,7 @@ tasks:
     wave: 0
     owner: claude
     reviewer: grok
-    status: ready
+    status: in_progress       # started 2026-07-16T22:00+07:00
     branch: ai/claude/SEIP-OPS-001-repo-bootstrap
     allowed_paths:
       - .ai-team/**
@@ -102,8 +102,13 @@ tasks:
     wave: 2
     owner: codex
     reviewer: grok
-    status: blocked           # unblocks when SEIP-ARCH-001 approved
-    branch: ai/codex/SEIP-DB-000-data-model
+    status: review_requested
+    # NOTE (claude, 2026-07-16T22:00+07:00): executed EARLY by user dispatch,
+    # before OPS-001/ARCH-001 — out of wave order. Output landed in the genesis
+    # commit (no git existed; Codex documented this honestly and filed CCR-001).
+    # AC5 (contract feasibility) remains BLOCKED until ARCH-001 delivers v0.1.
+    # Grok reviews the domain design in SEIP-QA-002; feasibility amendment follows ARCH-001.
+    branch: ai/codex/SEIP-DB-000-data-model   # never created — work predates git; see note
     allowed_paths:
       - docs/architecture/data-model/**
       - docs/reviews/**

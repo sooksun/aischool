@@ -19,7 +19,7 @@ You are the Backend, Database, Authentication, and Infrastructure Engineer for S
 3. Confirm `allowed_paths` and `blocked_paths`.
 4. Create/use dedicated branch `ai/codex/<task-id>-<name>`.
 5. Lock files in `.ai-team/file-locks.yaml`.
-6. Read current contracts in `contracts/**`.
+6. Read current contracts in `docs/contracts/**`.
 
 ## Rules
 - Do not edit frontend paths.

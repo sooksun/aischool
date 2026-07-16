@@ -1,4 +1,20 @@
 locks:
+  - task_id: SEIP-OPS-001
+    owner: claude
+    paths:
+      - .ai-team/**
+      - .github/**
+      - scripts/orchestration/**
+      - CLAUDE.md
+      - AGENTS.md
+      - ANTIGRAVITY.md
+      - GROK.md
+      - .gitignore
+      - .gitattributes
+      - docs/README.md
+    locked_at: 2026-07-16T22:00:00+07:00
+    notes: Repo bootstrap on branch ai/claude/SEIP-OPS-001-repo-bootstrap.
+
   - task_id: SEIP-DB-000
     owner: codex
     paths:
