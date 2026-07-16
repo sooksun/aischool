@@ -1,0 +1,46 @@
+# CODEOWNERS — SEIP (SEIP-OPS-001)
+# All AI agents operate through the @sooksun GitHub account, so every rule
+# resolves to @sooksun. The comment on each block names the RESPONSIBLE AI
+# AGENT per .ai-team/module-ownership.yaml — the in-repo review flow
+# (docs/reviews/ + handoffs) is where agent-level review actually happens.
+
+# orchestration — owner: claude, reviewer: grok
+/.ai-team/                  @sooksun
+/.github/                   @sooksun
+/scripts/orchestration/     @sooksun
+/CLAUDE.md                  @sooksun
+/AGENTS.md                  @sooksun
+/ANTIGRAVITY.md             @sooksun
+/GROK.md                    @sooksun
+
+# architecture — owner: claude, reviewer: grok
+/docs/architecture/         @sooksun
+/docs/contracts/            @sooksun
+/docs/decisions/            @sooksun
+/docs/project/              @sooksun
+
+# backend — owner: codex, reviewer: grok
+/apps/api/                  @sooksun
+/apps/worker/               @sooksun
+/packages/database/         @sooksun
+/packages/auth/             @sooksun
+/packages/backend-shared/   @sooksun
+/prisma/                    @sooksun
+/database/                  @sooksun
+/infra/docker/              @sooksun
+/tests/backend/             @sooksun
+
+# frontend — owner: antigravity, reviewer: claude
+/apps/web/                  @sooksun
+/packages/ui/               @sooksun
+/packages/design-tokens/    @sooksun
+/public/                    @sooksun
+/tests/frontend/            @sooksun
+
+# quality — owner: grok, reviewer: claude
+/tests/e2e/                 @sooksun
+/tests/security/            @sooksun
+/tests/regression/          @sooksun
+/scripts/security/          @sooksun
+/docs/qa/                   @sooksun
+/docs/reviews/              @sooksun
