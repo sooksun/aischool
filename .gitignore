@@ -1,0 +1,27 @@
+# Dependencies / build output
+node_modules/
+dist/
+build/
+.next/
+coverage/
+*.tsbuildinfo
+
+# Environment & secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Uploaded evidence (personal data — lives in object storage, never in git)
+uploads/
+storage/
+
+# Agent worktrees (local working copies)
+.worktrees/
+
+# Legacy docs archive (decision: keep on disk, untracked — see SEIP-OPS-001 handoff)
+aischool-docs.zip
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log

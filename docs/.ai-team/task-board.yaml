@@ -1,0 +1,241 @@
+project: SEIP
+updated_at: 2026-07-16T21:30:00+07:00
+# Sprint 0 laid out by Claude. See docs/project/SPRINT-0.md and docs/decisions/ADR-0001, ADR-0002.
+# HARD CONSTRAINT: no production feature code until the Definition of Ready to Build gate passes.
+sprint: 0
+statuses:
+  - backlog
+  - ready
+  - assigned
+  - in_progress
+  - review_requested
+  - changes_requested
+  - approved
+  - merged
+  - blocked
+  - cancelled
+
+# --- Sprint 0: build the operating system (design, contracts, gates, scaffolding only) ---
+tasks:
+  - id: SEIP-OPS-001
+    title: Bootstrap repository and orchestration system
+    wave: 0
+    owner: claude
+    reviewer: grok
+    status: ready
+    branch: ai/claude/SEIP-OPS-001-repo-bootstrap
+    allowed_paths:
+      - .ai-team/**
+      - .github/**
+      - scripts/orchestration/**
+      - docs/reviews/**
+      - CLAUDE.md
+      - AGENTS.md
+      - ANTIGRAVITY.md
+      - GROK.md
+    blocked_paths:
+      - apps/**
+      - packages/**
+      - prisma/schema.prisma
+      - docs/contracts/**
+    dependencies: []
+    work_order: .ai-team/work-orders/SEIP-OPS-001.md
+    acceptance_criteria:
+      - git repo with protected main and develop
+      - Agent instruction files load from repo root
+      - Operating-system paths resolve as referenced
+      - Ownership complete with no double ownership (ADR-0002)
+      - CI skeleton with a job stub per quality gate, proven green on a throwaway branch
+
+  - id: SEIP-ARCH-001
+    title: Establish architecture and contracts v0.1 (draft)
+    wave: 1
+    owner: claude
+    reviewer: grok
+    status: blocked           # unblocks when SEIP-OPS-001 approved
+    branch: ai/claude/SEIP-ARCH-001-architecture-contracts
+    allowed_paths:
+      - docs/architecture/**
+      - docs/contracts/**
+      - docs/decisions/**
+    blocked_paths:
+      - apps/**
+      - packages/**
+      - prisma/**
+    dependencies:
+      - SEIP-OPS-001
+    work_order: .ai-team/work-orders/SEIP-ARCH-001.md
+    acceptance_criteria:
+      - Module boundaries documented
+      - openapi.yaml events.yaml permissions.yaml error-codes.yaml drafted at v0.1
+      - Permission contract documented (roles + school-scoped tenancy)
+      - Indicator taxonomy per ADR-0003 / architecture/evaluation-framework.md
+      - Contracts are DRAFT, not locked (lock happens in SEIP-ARCH-002)
+
+  - id: SEIP-QA-001
+    title: Define runnable QA and security gate baseline
+    wave: 1
+    owner: grok
+    reviewer: claude
+    status: blocked           # unblocks when SEIP-OPS-001 approved
+    branch: ai/grok/SEIP-QA-001-quality-gates
+    allowed_paths:
+      - docs/qa/**
+      - docs/reviews/**
+      - tests/security/**
+      - scripts/security/**
+    blocked_paths:
+      - apps/**
+      - packages/**
+      - prisma/**
+      - .github/workflows/**   # command owner is grok, wiring owner is claude
+    dependencies:
+      - SEIP-OPS-001
+    work_order: .ai-team/work-orders/SEIP-QA-001.md
+    acceptance_criteria:
+      - Every gate has a runnable command and a CI job mapping
+      - Security baseline created
+      - Finding severity model created
+
+  - id: SEIP-DB-000
+    title: Data model proposal (ERD + entity dictionary, no schema)
+    wave: 2
+    owner: codex
+    reviewer: grok
+    status: blocked           # unblocks when SEIP-ARCH-001 approved
+    branch: ai/codex/SEIP-DB-000-data-model
+    allowed_paths:
+      - docs/architecture/data-model/**
+      - docs/reviews/**
+    blocked_paths:
+      - prisma/**
+      - apps/**
+      - packages/**
+      - docs/contracts/**
+    dependencies:
+      - SEIP-ARCH-001
+    work_order: .ai-team/work-orders/SEIP-DB-000.md
+    acceptance_criteria:
+      - Two configurable evaluation rounds per year modelled
+      - Evidence maps many-to-many to teacher and administrator indicators
+      - Audit history preserved as an explicit design choice
+      - Backend-feasibility verdict on contracts v0.1
+
+  - id: SEIP-UI-000
+    title: Evidence submission UX flow (design, no implementation)
+    wave: 2
+    owner: antigravity
+    reviewer: claude
+    status: blocked           # unblocks when SEIP-ARCH-001 approved
+    branch: ai/antigravity/SEIP-UI-000-evidence-ux
+    allowed_paths:
+      - docs/architecture/ux/**
+    blocked_paths:
+      - apps/**
+      - packages/**
+      - tests/frontend/**
+      - docs/contracts/**
+      - prisma/**
+    dependencies:
+      - SEIP-ARCH-001
+    work_order: .ai-team/work-orders/SEIP-UI-000.md
+    acceptance_criteria:
+      - Teacher can submit evidence with minimal fields (flow level)
+      - All screen states inventoried
+      - Every UI field traced to a contract field
+      - Responsive and accessibility intent documented
+
+  - id: SEIP-QA-002
+    title: Adversarial review of Sprint 0 designs (verdict gate)
+    wave: 3
+    owner: grok
+    reviewer: claude
+    status: blocked           # unblocks when DB-000 and UI-000 approved
+    branch: ai/grok/SEIP-QA-002-design-review
+    allowed_paths:
+      - docs/reviews/**
+    blocked_paths:
+      - apps/**
+      - packages/**
+      - prisma/**
+      - docs/contracts/**
+    dependencies:
+      - SEIP-ARCH-001
+      - SEIP-DB-000
+      - SEIP-UI-000
+      - SEIP-QA-001
+    work_order: .ai-team/work-orders/SEIP-QA-002.md
+    acceptance_criteria:
+      - Full GROK.md scope reviewed against the designs
+      - Contracts, data model, and UX flow proven mutually consistent
+      - Explicit verdict APPROVE or CHANGES_REQUESTED
+
+  - id: SEIP-ARCH-002
+    title: Ratify and lock contracts v1.0
+    wave: 4
+    owner: claude
+    reviewer: grok
+    status: blocked           # unblocks when SEIP-QA-002 verdict = APPROVE
+    branch: ai/claude/SEIP-ARCH-002-contract-lock
+    allowed_paths:
+      - docs/contracts/**
+      - docs/decisions/**
+    blocked_paths:
+      - apps/**
+      - packages/**
+      - prisma/**
+    dependencies:
+      - SEIP-QA-002
+    acceptance_criteria:
+      - Contracts v1.0 locked and versioned
+      - Generated types refreshed
+      - AI-mapping contract explicitly deferred to Sprint 2 (not guessed)
+      - Definition of Ready to Build satisfied (docs/project/SPRINT-0.md)
+
+# --- Sprint 1: first production features. DO NOT START until the exit gate passes. ---
+  - id: SEIP-DB-001
+    title: Create core database design (implementation)
+    wave: sprint-1
+    owner: codex
+    reviewer: grok            # corrected per ADR-0002 section 4 (was claude)
+    status: backlog
+    branch: ai/codex/SEIP-DB-001-core-database
+    allowed_paths:
+      - prisma/**
+      - database/**
+      - packages/database/**
+      - tests/backend/**
+    blocked_paths:
+      - apps/web/**
+      - docs/contracts/**
+    dependencies:
+      - SEIP-DB-000
+      - SEIP-ARCH-002
+    acceptance_criteria:
+      - Supports two configurable evaluation rounds per year
+      - Evidence maps to multiple teacher and administrator indicators
+      - Audit history is preserved
+      - Migrations and constraint tests pass
+
+  - id: SEIP-UI-001
+    title: Implement evidence submission user flow
+    wave: sprint-1
+    owner: antigravity
+    reviewer: claude
+    status: backlog
+    branch: ai/antigravity/SEIP-UI-001-evidence-flow
+    allowed_paths:
+      - apps/web/**
+      - packages/ui/**
+      - tests/frontend/**
+    blocked_paths:
+      - apps/api/**
+      - prisma/**
+      - docs/contracts/**
+    dependencies:
+      - SEIP-UI-000
+      - SEIP-ARCH-002
+    acceptance_criteria:
+      - Teacher can submit evidence with minimal fields
+      - Responsive design supports mobile
+      - Accessibility checks pass

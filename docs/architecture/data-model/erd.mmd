@@ -1,0 +1,374 @@
+%% SEIP Domain ERD — SEIP-DB-000 (design only, stack-agnostic)
+%% Source: evaluation-framework.md, system-context.md, ADR-0003
+%% Not a Prisma schema. No migrations. Contracts v0.1 not yet available.
+
+erDiagram
+  %% ========== Tenancy & Identity ==========
+  School {
+    uuid id PK
+    string code UK
+    string name
+    uuid area_id "nullable FK to Area"
+    string status
+    timestamptz created_at
+  }
+
+  Area {
+    uuid id PK
+    string code UK
+    string name
+  }
+
+  UserAccount {
+    uuid id PK
+    string email UK
+    string display_name
+    string status
+    timestamptz created_at
+  }
+
+  SchoolMembership {
+    uuid id PK
+    uuid school_id FK
+    uuid user_id FK
+    string role "teacher|director|deputy|evaluator|school_admin|area_admin"
+    string membership_scope "school|area"
+    uuid area_id "nullable"
+    date effective_from
+    date effective_to "nullable"
+    string status
+  }
+
+  %% ========== Personnel ==========
+  RankLevel {
+    string code PK "e.g. assistant_teacher, skilled, expert"
+    string role_family "teacher|administrator"
+    string label_th
+    int sort_order
+  }
+
+  PersonnelProfile {
+    uuid id PK
+    uuid school_id FK
+    uuid user_id FK
+    string employee_code
+    string full_name
+    string position_role "teacher|administrator"
+    string rank_level_code FK
+    string status
+    timestamptz created_at
+  }
+
+  %% ========== Framework (versioned indicator taxonomy) ==========
+  FrameworkVersion {
+    uuid id PK
+    string code UK "e.g. w9-2564-teacher"
+    string role_family "teacher|administrator"
+    string legal_ref "ว9/2564|ว10/2564"
+    int revision_year
+    string status "draft|active|retired"
+    date effective_from
+    date effective_to "nullable"
+  }
+
+  EvaluationDomain {
+    uuid id PK
+    uuid framework_version_id FK
+    string code "T-1|A-1|..."
+    string name_th
+    int sort_order
+    string part "standards|challenge"
+  }
+
+  Indicator {
+    uuid id PK
+    uuid domain_id FK
+    string code UK_in_framework "T-1.1|A-1.1|T-C.1"
+    string name_th
+    int sort_order
+    boolean is_scored
+    string indicator_kind "standard|challenge|workload_gate"
+  }
+
+  IndicatorLevelDescription {
+    uuid id PK
+    uuid indicator_id FK
+    string rank_level_code FK
+    int rubric_level "1..4"
+    text expected_practice_th
+  }
+
+  ScoreWeight {
+    uuid id PK
+    uuid framework_version_id FK
+    string weight_key "part1_standards|part2_challenge|challenge_method|..."
+    decimal weight_value "e.g. 0.60"
+    string notes
+  }
+
+  EvidenceCategory {
+    uuid id PK
+    string code UK "lesson_plan_pdf|teaching_video_mp4|..."
+    string label_th
+    string allowed_mime_csv
+    int max_duration_seconds "nullable"
+    boolean required_for_dpa
+  }
+
+  %% ========== Cycles, rounds, PA ==========
+  EvaluationCycle {
+    uuid id PK
+    uuid school_id FK
+    uuid framework_version_id FK
+    string fiscal_year "e.g. 2568"
+    string evaluation_kind "pa|dpa"
+    string title
+    string status "planned|open|closed"
+    date starts_on
+    date ends_on
+  }
+
+  EvaluationRound {
+    uuid id PK
+    uuid cycle_id FK
+    int round_number "1..n"
+    string purpose "pa_formal|salary_increment|ad_hoc"
+    date period_start
+    date period_end
+    string status "planned|open|scoring|closed"
+  }
+
+  PerformanceAgreement {
+    uuid id PK
+    uuid school_id FK
+    uuid cycle_id FK
+    uuid personnel_id FK
+    string form_variant "PA1_s|PA1_bs"
+    string status "draft|submitted|accepted|closed"
+    timestamptz submitted_at
+  }
+
+  WorkloadDeclaration {
+    uuid id PK
+    uuid agreement_id FK
+    uuid round_id FK
+    boolean workload_met "ภาระงาน gate"
+    text notes
+    uuid declared_by_user_id FK
+    timestamptz declared_at
+  }
+
+  AgreementChallenge {
+    uuid id PK
+    uuid agreement_id FK
+    uuid indicator_id FK "challenge item def"
+    text method_plan
+    text quantitative_target
+    text qualitative_target
+  }
+
+  %% ========== Evidence (upload once) ==========
+  Evidence {
+    uuid id PK
+    uuid school_id FK
+    uuid owner_personnel_id FK
+    uuid uploaded_by_user_id FK
+    uuid category_id FK
+    string title
+    text description
+    string status "draft|active|archived|rejected"
+    timestamptz captured_at
+    timestamptz created_at
+    timestamptz deleted_at "nullable soft-delete"
+  }
+
+  EvidenceFile {
+    uuid id PK
+    uuid evidence_id FK
+    string storage_provider "OPEN-4 agnostic"
+    string storage_uri
+    string content_type
+    bigint byte_size
+    string checksum_sha256
+    int duration_seconds "nullable"
+    string original_filename
+    string scan_status "pending|clean|blocked"
+    timestamptz uploaded_at
+  }
+
+  %% ========== Governed many-to-many mappings ==========
+  EvidenceIndicatorMapping {
+    uuid id PK
+    uuid school_id FK
+    uuid evidence_id FK
+    uuid indicator_id FK
+    uuid cycle_id FK "optional scope"
+    string mapping_source "human|ai_suggested"
+    string status "suggested|confirmed|rejected|revoked"
+    uuid mapped_by_user_id FK
+    uuid confirmed_by_user_id "nullable"
+    text rationale
+    timestamptz mapped_at
+    timestamptz confirmed_at "nullable"
+  }
+
+  %% ========== Committee & per-evaluator scores ==========
+  EvaluationAssignment {
+    uuid id PK
+    uuid school_id FK
+    uuid round_id FK
+    uuid evaluatee_personnel_id FK
+    uuid agreement_id FK
+    string status "pending|in_progress|completed|void"
+  }
+
+  CommitteeMember {
+    uuid id PK
+    uuid assignment_id FK
+    uuid evaluator_user_id FK
+    string committee_role "chair|member"
+    int seat_number "1..3"
+  }
+
+  IndicatorScore {
+    uuid id PK
+    uuid assignment_id FK
+    uuid indicator_id FK
+    uuid evaluator_user_id FK
+    int rubric_level "1..4"
+    decimal points_awarded "nullable derived"
+    text comment
+    timestamptz scored_at
+  }
+
+  ChallengeScore {
+    uuid id PK
+    uuid assignment_id FK
+    uuid indicator_id FK "challenge item"
+    uuid evaluator_user_id FK
+    int rubric_level "1..4"
+    decimal points_awarded
+    text comment
+    timestamptz scored_at
+  }
+
+  RoundResult {
+    uuid id PK
+    uuid assignment_id FK
+    uuid evaluator_user_id FK
+    decimal part1_percent
+    decimal part2_percent
+    decimal total_percent
+    boolean passed_workload_gate
+    boolean passed_individual_threshold "each evaluator >= 70"
+    string status "provisional|final"
+    timestamptz computed_at
+  }
+
+  %% ========== Reports & approvals ==========
+  Report {
+    uuid id PK
+    uuid school_id FK
+    uuid cycle_id FK
+    uuid round_id "nullable"
+    uuid subject_personnel_id FK
+    string template_code "PA1_s|PA2_s|PA3_s|PA1_bs|..."
+    string status "draft|pending_approval|approved|issued|superseded"
+    jsonb payload "structured form data"
+    timestamptz generated_at
+  }
+
+  ReportSectionRef {
+    uuid id PK
+    uuid report_id FK
+    uuid evidence_id "nullable FK"
+    uuid mapping_id "nullable FK"
+    string section_key
+    int sort_order
+  }
+
+  Approval {
+    uuid id PK
+    uuid school_id FK
+    uuid report_id FK
+    uuid approver_user_id FK
+    string step_code
+    string decision "pending|approved|rejected|returned"
+    text comment
+    timestamptz decided_at "nullable"
+  }
+
+  %% ========== Audit (append-only) ==========
+  AuditEvent {
+    uuid id PK
+    uuid school_id "nullable for system"
+    uuid actor_user_id "nullable system"
+    string action
+    string entity_type
+    uuid entity_id
+    jsonb before_state
+    jsonb after_state
+    string request_id
+    timestamptz occurred_at
+  }
+
+  %% ========== Relationships ==========
+  Area ||--o{ School : contains
+  School ||--o{ SchoolMembership : tenancy
+  UserAccount ||--o{ SchoolMembership : has
+  School ||--o{ PersonnelProfile : employs
+  UserAccount ||--o{ PersonnelProfile : identity
+  RankLevel ||--o{ PersonnelProfile : rank
+  RankLevel ||--o{ IndicatorLevelDescription : level_text
+
+  FrameworkVersion ||--o{ EvaluationDomain : has
+  EvaluationDomain ||--o{ Indicator : has
+  Indicator ||--o{ IndicatorLevelDescription : describes
+  FrameworkVersion ||--o{ ScoreWeight : configures
+
+  School ||--o{ EvaluationCycle : runs
+  FrameworkVersion ||--o{ EvaluationCycle : applies
+  EvaluationCycle ||--o{ EvaluationRound : has_rounds
+  EvaluationCycle ||--o{ PerformanceAgreement : agreements
+  PersonnelProfile ||--o{ PerformanceAgreement : subject
+  PerformanceAgreement ||--o{ WorkloadDeclaration : gate
+  EvaluationRound ||--o{ WorkloadDeclaration : per_round
+  PerformanceAgreement ||--o{ AgreementChallenge : challenges
+  Indicator ||--o{ AgreementChallenge : challenge_def
+
+  School ||--o{ Evidence : owns_tenant
+  PersonnelProfile ||--o{ Evidence : owns
+  UserAccount ||--o{ Evidence : uploads
+  EvidenceCategory ||--o{ Evidence : classifies
+  Evidence ||--|{ EvidenceFile : stores
+
+  Evidence ||--o{ EvidenceIndicatorMapping : mapped_from
+  Indicator ||--o{ EvidenceIndicatorMapping : mapped_to
+  School ||--o{ EvidenceIndicatorMapping : tenant
+  EvaluationCycle ||--o{ EvidenceIndicatorMapping : scoped_optional
+
+  EvaluationRound ||--o{ EvaluationAssignment : evaluates
+  PersonnelProfile ||--o{ EvaluationAssignment : evaluatee
+  PerformanceAgreement ||--o{ EvaluationAssignment : based_on
+  EvaluationAssignment ||--|{ CommitteeMember : committee
+  UserAccount ||--o{ CommitteeMember : evaluator
+
+  EvaluationAssignment ||--o{ IndicatorScore : scores
+  Indicator ||--o{ IndicatorScore : on
+  UserAccount ||--o{ IndicatorScore : by_evaluator
+
+  EvaluationAssignment ||--o{ ChallengeScore : scores
+  Indicator ||--o{ ChallengeScore : on
+  UserAccount ||--o{ ChallengeScore : by_evaluator
+
+  EvaluationAssignment ||--o{ RoundResult : summarizes
+  UserAccount ||--o{ RoundResult : per_evaluator
+
+  School ||--o{ Report : tenant
+  EvaluationCycle ||--o{ Report : for_cycle
+  PersonnelProfile ||--o{ Report : subject
+  Report ||--o{ ReportSectionRef : cites
+  Evidence ||--o{ ReportSectionRef : reused
+  EvidenceIndicatorMapping ||--o{ ReportSectionRef : via_mapping
+  Report ||--o{ Approval : workflow
+  UserAccount ||--o{ Approval : approver
