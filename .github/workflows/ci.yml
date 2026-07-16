@@ -36,17 +36,33 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Contract validity (lint + typegen + parse)
+      - name: Contract validity (lint + typegen + parse + authz coverage)
         run: npm run gate:contracts
-      - name: Breaking-change check vs base (PRs only)
-        if: github.event_name == 'pull_request'
+      - name: Breaking-change check vs base
+        # Runs on BOTH events: ADR-0004 sanctions committing straight to develop,
+        # so a pull_request-only check would almost never execute in practice.
+        # PR  -> compare against the target branch.
+        # push -> compare against the commit the branch was at before this push.
+        # Image pinned by digest per SECURITY-BASELINE SEC-REPO-2 (= oasdiff at 2026-07-17).
         run: |
-          BASE="${{ github.base_ref }}"
-          if git show "origin/${BASE}:docs/contracts/openapi.yaml" > /tmp/base-openapi.yaml 2>/dev/null; then
-            docker run --rm -v /tmp:/tmp -v "$PWD":/repo tufin/oasdiff breaking /tmp/base-openapi.yaml /repo/docs/contracts/openapi.yaml --fail-on ERR
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
           else
-            echo "::notice::no openapi.yaml on base ${BASE} — first introduction, skipping diff"
+            BASE="${{ github.event.before }}"
           fi
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "::notice::no base commit to diff against (new branch)"; exit 0
+          fi
+          mkdir -p /tmp/spec
+          if ! git show "$BASE:docs/contracts/openapi.yaml" > /tmp/spec/base.yaml 2>/dev/null; then
+            echo "::notice::openapi.yaml absent at $BASE — first introduction, nothing to diff"; exit 0
+          fi
+          cp docs/contracts/openapi.yaml /tmp/spec/head.yaml
+          echo "diffing $BASE -> ${{ github.sha }}"
+          docker run --rm -v /tmp/spec:/spec \
+            tufin/oasdiff@sha256:e7f1b7531e9bbb12d61fc28c4d2a59896a47ee4fb8159eef0ff7aa76804acfb6 \
+            breaking /spec/base.yaml /spec/head.yaml --fail-on ERR
 
   secret-scan:
     name: "Gate: secret scan"
