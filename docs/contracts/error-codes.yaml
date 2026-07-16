@@ -1,5 +1,5 @@
 # SEIP Error Code Contract
-# version: 1.0.0 — LOCKED 2026-07-17 by SEIP-ARCH-002 (user approved).
+# version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
 # Protected contract (contract-policy.md): changes require an approved CCR.
 # Codes are a stable API surface — clients map them to localized text. Adding a
 # code is additive (1.x); changing the meaning or HTTP status of an existing code,

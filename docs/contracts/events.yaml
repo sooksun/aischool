@@ -1,5 +1,5 @@
 # SEIP Domain Event Contract
-# version: 1.0.0 — LOCKED 2026-07-17 by SEIP-ARCH-002 (user approved).
+# version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 # Adding an event or an optional payload field is additive (1.x); removing or
 # retyping a field, or changing an event name, is breaking (2.0).
