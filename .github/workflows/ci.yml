@@ -162,15 +162,46 @@ jobs:
   migration-validation:
     name: "Gate: migration validation"
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: seip
+          POSTGRES_PASSWORD: seip_ci
+          POSTGRES_DB: seip
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U seip -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
     steps:
       - uses: actions/checkout@v4
-      - name: Run if prisma/schema.prisma exists
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Arm only when a schema exists
+        id: arm
         run: |
-          if [ -f prisma/schema.prisma ]; then
-            npx --yes prisma validate
-          else
-            echo "::notice::migration gate not yet armed — arms when prisma/schema.prisma lands (SEIP-DB-001)"
-          fi
+          if [ -f prisma/schema.prisma ]; then echo "armed=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::migration gate not yet armed — arms when prisma/schema.prisma lands"; fi
+      - name: Validate schema
+        if: steps.arm.outputs.armed == 'true'
+        run: npx --yes prisma@6 validate
+      - name: Apply migrations up (proves the up-path against a real Postgres)
+        if: steps.arm.outputs.armed == 'true'
+        run: npx --yes prisma@6 migrate deploy
+        # No `migrate diff` drift check on purpose: the constraints migration adds
+        # generated columns, CHECKs, partial indexes and triggers that Prisma's schema
+        # language cannot represent, so diff(schema, migrations) always reports a
+        # difference. The constraint tests below verify those objects exist and bite,
+        # which is stronger than a structural diff would be anyway.
+      - name: Constraint tests (the ว9/ว10 DB rules actually bite)
+        if: steps.arm.outputs.armed == 'true'
+        run: |
+          npm install --no-save pg@8
+          npm run test:backend
 
   permission-tests:
     name: "Gate: permission tests"

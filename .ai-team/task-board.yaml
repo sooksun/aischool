@@ -98,13 +98,29 @@ tasks:
 # --- Sprint 1: first production features. DO NOT START until ARCH-002 done. ---
   - id: SEIP-DB-001
     title: Core database implementation (schema + migrations + tests)
-    status: backlog
-    dependencies: [SEIP-ARCH-002]
+    status: review              # 2026-07-17 — close-out at .ai-team/handoffs/SEIP-DB-001.md; awaiting user
+    branch: feat/SEIP-DB-001-core-database
+    dependencies: [SEIP-ARCH-002, ADR-0005]
+    notes: >
+      28-model Prisma schema + 2 migrations (init + hand-written constraints for the
+      rules Prisma can't express). 7 constraint tests pass on a from-zero migrate deploy
+      against Postgres 17. Arms the migration-validation CI gate (now spins up Postgres,
+      applies migrations, runs the tests). DB-000 review obs#1 applied (score tables merged).
     acceptance_criteria:
-      - Configurable evaluation rounds per year
-      - Evidence maps many-to-many to indicators (both role taxonomies)
-      - Append-only audit history per DB-000 design
-      - Migrations and constraint tests pass
+      - Configurable evaluation rounds per year                          # DONE — round_number 1..n, no cap; CHECK >=1
+      - Evidence maps many-to-many to indicators (both role taxonomies)  # DONE — evidence_indicator_mapping + partial-unique active rule
+      - Append-only audit history per DB-000 design                      # DONE — trigger-enforced, tested
+      - Migrations and constraint tests pass                             # DONE — 7/7 on clean migrate deploy
+
+  - id: SEIP-DB-002
+    title: Seed ว9/ว10 taxonomy (frameworks, 15+15 indicators, level descriptions, weights)
+    status: ready
+    dependencies: [SEIP-DB-001]
+    notes: Values reviewed against docs/architecture/evaluation-framework.md + the source PDFs.
+    acceptance_criteria:
+      - Both frameworks seeded with correct domain/indicator codes (T-x.x, A-x.x)
+      - Score weights (60/40, 20/10/10) and rank levels seeded
+      - Idempotent seed script; re-runnable
 
   - id: SEIP-UI-001
     title: Evidence submission flow implementation

@@ -2,12 +2,21 @@
   "name": "seip",
   "private": true,
   "version": "0.0.0",
-  "description": "School Evidence Intelligence Platform — root gate-runner (SEIP-QA-001). Workspace/build scripts arrive with Sprint 1; adding scripts.{format:check,lint,typecheck,test:unit,test:integration,build} auto-arms the matching CI gate.",
+  "description": "School Evidence Intelligence Platform. Root gate-runner + backend workspace (Sprint 1). Adding scripts arms the matching CI gate (see docs/qa/QUALITY-GATES.md).",
   "license": "UNLICENSED",
+  "type": "module",
   "scripts": {
     "gate:ownership": "node scripts/orchestration/validate-ownership.mjs",
     "gate:contracts": "node scripts/security/validate-contracts.mjs",
     "gate:secret-scan": "node scripts/security/run-gitleaks.mjs",
-    "gate:dep-audit": "npm audit --audit-level=high"
+    "gate:dep-audit": "npm audit --audit-level=high",
+    "db:migrate": "prisma migrate deploy",
+    "db:generate": "prisma generate",
+    "test:backend": "node --test \"tests/backend/*.test.mjs\"",
+    "test:security": "node --test \"tests/security/*.test.mjs\""
+  },
+  "devDependencies": {
+    "prisma": "^6.19.3",
+    "pg": "^8.13.1"
   }
 }

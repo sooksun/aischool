@@ -4,21 +4,22 @@
 School Evidence Intelligence Platform (SEIP)
 
 ## Current Phase
-Sprint 0 — Foundation (single-agent mode per ADR-0004, since 2026-07-17)
+**Sprint 1 — First production features** (opened 2026-07-17 when the ARCH-002 merge went green on develop, run `b5c6d6a`). Single-agent mode per ADR-0004.
 
 ## Development Model
 Claude Code is the sole developer (architect + backend + frontend + QA); the user is the final approver. The multi-AI team model (Codex/Antigravity/Grok) was retired by ADR-0004 — its docs remain with SUPERSEDED banners.
 
-## Hard Constraint
-No production feature code until the Sprint 0 exit gate passes: contracts v1.0 locked (SEIP-ARCH-002) + data model and UX designs approved.
-Status 2026-07-17: contracts locked; gate is 7 pass / 1 accepted deviation / 2 superseded / **1 pending — item 7 (PR pipeline proof) + user approval**. See `.ai-team/handoffs/SEIP-ARCH-002.md` for the item-by-item evaluation.
+## Sprint 0 exit — CLEARED 2026-07-17
+Gate result: 8 pass, 1 accepted deviation (direct commits to develop — sanctioned by ADR-0004), 2 superseded by ADR-0004. Item-by-item evaluation in `.ai-team/handoffs/SEIP-ARCH-002.md`.
+The no-production-code constraint is **lifted**. Contracts are locked at v1.0.0 and now bind implementation: no invented fields, changes need a CCR + version bump (enforced by the contract-compatibility gate on every push and PR).
 
-## Current Objectives (sequence)
-1. ~~SEIP-OPS-001~~ DONE 2026-07-17 — repo live, CI green (close-out in `.ai-team/handoffs/`)
-2. ~~SEIP-ARCH-001~~ DONE 2026-07-17 — contracts v0.1 drafted + verified; CCR-001 resolved; DB-000 review PASS
-3. ~~SEIP-UI-000~~ DONE 2026-07-17 — UX design + field trace (CCR-002 applied); ~~SEIP-QA-001~~ DONE 2026-07-17 — 4 LIVE + 8 self-arming gates
-4. SEIP-ARCH-002 — contracts **locked at v1.0.0** 2026-07-17; ← **awaiting user approval of the PR** (this is the Sprint 0 exit gate; PR also provides the item-7 pipeline proof)
-5. Sprint 1 (opens on that merge): SEIP-DB-001 (schema + migrations), SEIP-UI-001 (evidence flow)
+## Sprint 0 — all done 2026-07-17
+OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherited from Codex, review PASS) · UI-000 (evidence UX + CCR-002) · QA-001 (gates) · ARCH-002 (lock v1.0.0). QA-002 cancelled by ADR-0004.
+
+## Current Objectives (Sprint 1)
+1. **SEIP-DB-001** — Prisma schema + migrations + constraint tests from `docs/architecture/data-model/entity-dictionary.md` ← **in progress**
+2. SEIP-UI-001 — evidence submission flow from `docs/architecture/ux/`
+3. Infra: docker-compose (PostgreSQL + MinIO) per ADR-0005
 
 ## Active Tasks
 See `.ai-team/task-board.yaml` (single tracker).
@@ -28,11 +29,11 @@ See `.ai-team/task-board.yaml` (single tracker).
 - ADR-0002 — Repository layout canonicalization (Accepted; per-agent ownership parts superseded by ADR-0004)
 - ADR-0003 — Evaluation framework: วPA ว9/2564 (ครู) + ว10/2564 (ผู้บริหาร); taxonomy in `docs/architecture/evaluation-framework.md` (Accepted)
 - ADR-0004 — Single-agent development by Claude Code (Accepted)
+- ADR-0005 — Object storage: MinIO / S3-compatible; deployment: on-premise (Accepted)
 
 ## Open Questions
-- OPEN-3: AI provider + PDPA data-residency (blocks Sprint 2 AI-mapping contract)
-- OPEN-4: object storage choice (blocks storage strategy in SEIP-DB-001)
-- ~~OPEN-1~~ GitHub (github.com/sooksun/aischool, public) · ~~OPEN-2~~ วPA per ADR-0003 · ~~OPEN-5~~ AI-mapping task will be created in Sprint 2 planning
+- OPEN-3: AI provider + PDPA data-residency (blocks Sprint 2 AI-mapping only). **Note: ADR-0005 keeps all evidence on Thai on-prem hardware — sending it to a foreign AI provider would cross the border this decision avoids. OPEN-3 must respect that.**
+- ~~OPEN-1~~ GitHub · ~~OPEN-2~~ วPA per ADR-0003 · ~~OPEN-4~~ MinIO on-prem per ADR-0005 · ~~OPEN-5~~ AI-mapping task created in Sprint 2 planning
 
 ## Known Risks
 - Criteria and official forms may change by year → framework versioned as data (ADR-0003)
