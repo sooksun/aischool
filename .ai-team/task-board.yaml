@@ -11,18 +11,14 @@ statuses: [backlog, ready, in_progress, review, done, blocked, cancelled]
 tasks:
   - id: SEIP-OPS-001
     title: Bootstrap repository (git, layout, CI skeleton, GitHub)
-    status: in_progress
-    branch: ai/claude/SEIP-OPS-001-repo-bootstrap   # pre-ADR-0004 name, kept as pushed
+    status: done                # 2026-07-17 — close-out at .ai-team/handoffs/SEIP-OPS-001.md
+    branch: ai/claude/SEIP-OPS-001-repo-bootstrap   # merged to develop
     work_order: .ai-team/work-orders/SEIP-OPS-001.md
-    notes: >
-      Remaining per ADR-0004 rescope: merge to develop, prove CI green on GitHub,
-      record recommended branch-protection settings for the user (protection
-      itself is optional in solo mode and needs gh auth or web UI).
     acceptance_criteria:
-      - Repo pushed to github.com/sooksun/aischool with main + develop
-      - CLAUDE.md at root reflects ADR-0004 solo model
-      - Ownership validator passes (functional-area map, no overlaps)
-      - CI runs green on develop (verified via public API)
+      - Repo pushed to github.com/sooksun/aischool with main + develop  # DONE
+      - CLAUDE.md at root reflects ADR-0004 solo model                  # DONE
+      - Ownership validator passes (functional-area map, no overlaps)   # DONE
+      - CI runs green on develop (verified via public API)              # DONE 2026-07-17
 
   - id: SEIP-ARCH-001
     title: Contracts v0.1 draft (openapi, permissions, error-codes, events)
