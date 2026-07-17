@@ -29,13 +29,27 @@ export function EvidenceDetailPage() {
   const [actingId, setActingId] = useState<string | null>(null);
 
   const reload = useCallback(() => {
-    if (!evidenceId) return;
-    api.GET('/evidence/{evidenceId}', { params: { path: { evidenceId } } })
-      .then((res) => setEvidence(unwrap(res) as EvidenceDetail))
+    if (!evidenceId) return Promise.resolve();
+    return api.GET('/evidence/{evidenceId}', { params: { path: { evidenceId } } })
+      .then((res) => {
+        setEvidence(unwrap(res) as EvidenceDetail);
+        setError(false);
+      })
       .catch(() => setError(true));
   }, [evidenceId]);
 
-  useEffect(reload, [reload]);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  // Poll while any file is still scanning so download appears when worker marks clean.
+  useEffect(() => {
+    if (!evidence) return;
+    const pending = evidence.files.some((f) => f.scan_status === 'pending');
+    if (!pending) return;
+    const t = setInterval(() => { void reload(); }, 3000);
+    return () => clearInterval(t);
+  }, [evidence, reload]);
 
   useEffect(() => {
     api.GET('/frameworks', {})
@@ -118,6 +132,28 @@ export function EvidenceDetailPage() {
               <span className="status-dot" data-state={f.scan_status} aria-hidden="true" />
               {scanStatusLabel(f.scan_status)}
             </span>
+            {f.scan_status === 'pending' && (
+              <p className="field-hint">กำลังตรวจสอบความปลอดภัย — หน้านี้อัปเดตอัตโนมัติ</p>
+            )}
+            {f.scan_status === 'blocked' && (
+              <p className="field-hint" role="alert">ไฟล์ถูกกักไว้ — ดาวน์โหลดไม่ได้ (UPL-006)</p>
+            )}
+            {f.scan_status === 'clean' && f.download_url && (
+              <p style={{ marginTop: 8 }}>
+                <a
+                  className="btn btn-primary"
+                  href={f.download_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download={f.original_filename}
+                >
+                  ดาวน์โหลด
+                </a>
+              </p>
+            )}
+            {f.scan_status === 'clean' && !f.download_url && (
+              <p className="field-hint">ปลอดภัยแล้ว แต่ยังไม่มีลิงก์ดาวน์โหลด — ลองรีเฟรช</p>
+            )}
           </li>
         ))}
       </ul>

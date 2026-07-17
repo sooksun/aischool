@@ -14,7 +14,8 @@ import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import { Prisma } from '@prisma/client';
 import { requireCurrentSchool } from '../plugins/auth.js';
 import { resolveGrant, requireOwnership, requireCommitteeAccessToPersonnel } from '../lib/permission-guard.js';
-import { createS3Client, evidenceObjectKey, presignUpload } from '../lib/s3.js';
+import type { S3Client } from '@aws-sdk/client-s3';
+import { createS3Client, evidenceObjectKey, presignUpload, presignDownload } from '../lib/s3.js';
 import type { Env } from '../env.js';
 
 function serializeEvidence(e: { id: string; schoolId: string; ownerPersonnelId: string; uploadedByUserId: string; categoryId: string; title: string; description: string | null; status: string; capturedAt: Date | null; createdAt: Date }) {
@@ -26,11 +27,38 @@ function serializeEvidence(e: { id: string; schoolId: string; ownerPersonnelId: 
   };
 }
 
-function serializeFile(f: { id: string; evidenceId: string; contentType: string; byteSize: bigint; checksumSha256: string; durationSeconds: number | null; originalFilename: string; scanStatus: string; uploadedAt: Date }) {
+/** UPL-006: download_url only when scan_status=clean; never expose storageUri. */
+async function serializeFile(
+  f: {
+    id: string;
+    evidenceId: string;
+    contentType: string;
+    byteSize: bigint;
+    checksumSha256: string;
+    durationSeconds: number | null;
+    originalFilename: string;
+    scanStatus: string;
+    uploadedAt: Date;
+    storageUri: string;
+  },
+  s3: S3Client,
+  bucket: string,
+) {
+  let download_url: string | null = null;
+  if (f.scanStatus === 'clean') {
+    const { downloadUrl } = await presignDownload(s3, bucket, f.storageUri, f.originalFilename);
+    download_url = downloadUrl;
+  }
   return {
-    id: f.id, evidence_id: f.evidenceId, content_type: f.contentType, byte_size: Number(f.byteSize),
-    checksum_sha256: f.checksumSha256, duration_seconds: f.durationSeconds, original_filename: f.originalFilename,
-    scan_status: f.scanStatus, download_url: f.scanStatus === 'clean' ? null : null, // presigned GET issuance deferred — not needed for the submission flow
+    id: f.id,
+    evidence_id: f.evidenceId,
+    content_type: f.contentType,
+    byte_size: Number(f.byteSize),
+    checksum_sha256: f.checksumSha256,
+    duration_seconds: f.durationSeconds,
+    original_filename: f.originalFilename,
+    scan_status: f.scanStatus,
+    download_url,
     uploaded_at: f.uploadedAt.toISOString(),
   };
 }
@@ -136,7 +164,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
 
     return {
       ...serializeEvidence(detail),
-      files: detail.files.map(serializeFile),
+      files: await Promise.all(detail.files.map((f) => serializeFile(f, s3, env.S3_BUCKET))),
       mappings: detail.mappings.map((m) => ({
         id: m.id, evidence_id: m.evidenceId, indicator_id: m.indicatorId, cycle_id: m.cycleId,
         mapping_source: m.mappingSource, status: m.status, rationale: m.rationale,
@@ -288,7 +316,8 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
         entityId: file.id, after: file, requestId: request.id,
       });
 
-      return serializeFile(file);
+      // Just registered → scan_status is still pending → download_url null (UPL-006).
+      return serializeFile(file, s3, env.S3_BUCKET);
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         throw new ApiError('UPL-004', 'Upload already completed for this file id');

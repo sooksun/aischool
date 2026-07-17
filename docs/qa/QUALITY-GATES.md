@@ -20,6 +20,7 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 | Build | `npm run build` | `Gate: build` | self-arming | `scripts.build` defined |
 | Migration validation | `npx prisma validate` (DB-001 extends: `migrate diff` up/down) | `Gate: migration validation` | self-arming | `prisma/schema.prisma` exists |
 | Permission tests | `npm run test:security` — asserts the `permissions.yaml` matrix (esp. cross-school RES-001) | `Gate: permission tests` | self-arming | files in `tests/security/` |
+| E2E smoke | `npm run test:e2e` (Playwright: login → evidence list → open submit) | `Gate: e2e smoke` | **LIVE** (SEIP-QA-004) | always; needs Postgres+MinIO+api+web |
 | Code owner review | — (not a CI job) | branch protection + CODEOWNERS | policy | requires branch protection (below) |
 
 **Pass thresholds:** every gate is binary (exit 0). `dep-audit` fails on **high+** advisories. oasdiff fails on **breaking** changes only (additive contract changes pass). Secret scan fails on any leak — a confirmed false positive gets an inline `// gitleaks:allow` comment on the exact flagged line (gitleaks' native line-level suppression), with a code comment explaining why it isn't a real secret, reviewed in the same PR. Never skip the gate to work around one. (A repo-wide `.gitleaks.toml` allowlist was tried first for SEIP-API-001's one false positive — `credentials: { ..., secretAccessKey: env.S3_SECRET_KEY }`, gitleaks' `generic-api-key` rule matching the *identifier* `secretAccessKey:` regardless of the RHS being a literal or a variable reference — but its regex/fingerprint matching didn't reliably suppress findings already baked into git history when run through the pinned docker image; the inline comment is simpler, guaranteed to work per-line, and keeps the justification next to the code it excuses.)
@@ -32,7 +33,7 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 
 | Gate | Owner (ADR-0004: claude executes, user approves) | Trigger | Command status |
 |---|---|---|---|
-| End-to-end tests | claude | before merge develop→main | defined in Sprint 1 with first UI (`tests/e2e`) |
+| End-to-end tests | claude | before merge develop→main | **smoke armed** — `npm run test:e2e` / CI `Gate: e2e smoke` (login→evidence); expand coverage per release |
 | Security tests | claude | before merge develop→main | scenario list seeded by SECURITY-BASELINE.md |
 | Backup/restore test | claude + user | before first production deploy, then per release | procedure written with DB-001 (needs real schema) |
 | Report accuracy | claude + user (คนตรวจแบบ ก.ค.ศ.) | any release touching report generation | golden-file compare vs PA2/PA3 samples — Sprint with reports |
@@ -49,7 +50,29 @@ Gate: module ownership
 Gate: contract compatibility
 Gate: secret scan
 Gate: dependency audit
+Gate: e2e smoke
 ```
+
+### E2E smoke (SEIP-QA-004)
+
+Local (API already on `PORT` matching Vite proxy, default proxy `3011`):
+
+```bash
+# terminal 1: Postgres + MinIO via docker compose, then:
+export DATABASE_URL=... JWT_SECRET=... S3_*=... PORT=3011
+npm run build:libs && npm run build --workspace apps/api
+node apps/api/dist/index.js
+
+# terminal 2:
+npm run dev --workspace apps/web
+
+# terminal 3:
+npx playwright install chromium
+npm run test:e2e
+```
+
+CI starts Postgres, MinIO, migrate+seed, API, Vite, then Playwright Chromium.
+Fixture user is created by `tests/e2e/global-setup.mjs` (`e2e-teacher@seip.local`).
 
 Add the self-arming gate names to the required list **when they arm** (a required check that always no-ops gives false confidence; a required check that's armed is real). Protection setup itself still needs `gh auth login` or the web UI — steps recorded in `.ai-team/handoffs/SEIP-OPS-001.md`.
 

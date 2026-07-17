@@ -346,7 +346,7 @@ tasks:
 
   - id: SEIP-API-003a
     title: Presigned download URL when scan_status=clean (UPL-006)
-    status: backlog
+    status: done                # 2026-07-18 - handoff SEIP-API-003a.md; wave branch feat/SEIP-WAVE-B-CF
     wave: B
     sprint: 2
     branch: feat/SEIP-API-003a-safe-download
@@ -427,7 +427,7 @@ tasks:
 
   - id: SEIP-UI-003b
     title: Teacher UI — scan status + download when clean
-    status: backlog
+    status: done                # 2026-07-18 - handoff SEIP-UI-003b.md; wave branch feat/SEIP-WAVE-B-CF
     wave: C
     sprint: 2
     branch: feat/SEIP-UI-003b-scan-download
@@ -600,7 +600,7 @@ tasks:
 
   - id: SEIP-QA-004
     title: Browser e2e smoke (login → submit evidence) in CI
-    status: backlog
+    status: done                # 2026-07-18 - handoff SEIP-QA-004.md; wave branch feat/SEIP-WAVE-B-CF
     wave: F
     sprint: 2
     branch: feat/SEIP-QA-004-e2e-smoke

@@ -26,3 +26,10 @@ aischool-docs.zip
 .DS_Store
 Thumbs.db
 *.log
+
+# Playwright e2e (SEIP-QA-004)
+tests/e2e/.auth/
+test-results/
+playwright-report/
+blob-report/
+
