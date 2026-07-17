@@ -1,6 +1,10 @@
-// SEIP-DB-003 — IndicatorLevelDescription seed builders.
-// See ./README.md for provenance. Rubric anchors from evaluation-framework.md
-// §Scoring model; indicator/rank labels from the same framework extraction.
+// SEIP-DB-003 (structure) + SEIP-DB-004 (real content) — IndicatorLevelDescription
+// seed builders. See ./README.md for provenance. Rubric anchors from
+// evaluation-framework.md §Scoring model; indicator/rank labels from the same
+// framework extraction; per-indicator×rank expected-practice text (rubricLevel=3
+// baseline) from level-description-anchors.mjs (real PA 2/ส / PA 2/บส transcription).
+
+import { REAL_ANCHOR_TEXT } from './level-description-anchors.mjs';
 
 /** @type {Record<number, string>} */
 export const RUBRIC_LEVEL_LABELS = {
@@ -36,9 +40,57 @@ export const ADMIN_RANK_CODES = [
 ];
 
 /**
+ * Frames the real anchor text (the "ตามที่คาดหวัง" / rubricLevel=3 reference
+ * standard, transcribed verbatim from the PA 2/ส|บส form) against each of the
+ * 4 generic rubric levels. Only rubricLevel=3 IS the source text; levels 1/2/4
+ * have no separate source paragraph (the PDF has one anchor per indicator×rank,
+ * not per rubric level) — they honestly reference the same anchor with
+ * comparison framing, never inventing new regulatory wording.
+ * @type {Record<number, (anchor: string) => string>}
+ */
+const LEVEL_FRAMING = {
+  1: (anchor) => `ปฏิบัติได้ต่ำกว่าระดับการปฏิบัติที่คาดหวังของวิทยฐานะ/ตำแหน่งนี้อย่างมาก เมื่อเทียบกับเกณฑ์ที่คาดหวัง ซึ่งกำหนดไว้ว่า "${anchor}"`,
+  2: (anchor) => `ปฏิบัติได้ต่ำกว่าระดับการปฏิบัติที่คาดหวังของวิทยฐานะ/ตำแหน่งนี้ เมื่อเทียบกับเกณฑ์ที่คาดหวัง ซึ่งกำหนดไว้ว่า "${anchor}"`,
+  3: (anchor) => `ปฏิบัติได้ตามระดับการปฏิบัติที่คาดหวังของวิทยฐานะ/ตำแหน่งนี้ กล่าวคือ "${anchor}"`,
+  4: (anchor) => `ปฏิบัติได้สูงกว่าระดับการปฏิบัติที่คาดหวังของวิทยฐานะ/ตำแหน่งนี้ โดยมีผลการปฏิบัติเกินกว่าเกณฑ์ที่คาดหวัง ซึ่งกำหนดไว้ว่า "${anchor}"`,
+};
+
+/**
+ * Structural placeholder — used only when no real anchor text exists for a
+ * (rankCode, indicatorCode) pair (currently: execute_learn/ครูผู้ช่วย, which
+ * has no PA 2/ส form of its own — see level-description-anchors.mjs header).
+ * @param {{
+ *   indicatorCode: string,
+ *   indicatorNameTh: string,
+ *   indicatorKind: string,
+ *   rankCode: string,
+ *   rankLabelTh: string,
+ *   rubricLevel: number,
+ *   legalRef: string,
+ * }} p
+ */
+function buildPlaceholderTh(p) {
+  const rubricLabel = RUBRIC_LEVEL_LABELS[p.rubricLevel];
+  const kindNote =
+    p.indicatorKind === 'challenge'
+      ? ' (ประเด็นท้าทาย — ระดับคะแนนตามสัดส่วน 4=100% … 1=25% ของคะแนนเต็มรายการ)'
+      : '';
+
+  return (
+    `[${p.rankLabelTh}] ตัวชี้วัด ${p.indicatorCode} ${p.indicatorNameTh}${kindNote}. ` +
+    `ระดับ ${p.rubricLevel}: ${rubricLabel}. ` +
+    `พิจารณาเทียบระดับการปฏิบัติที่คาดหวังของวิทยฐานะ/ตำแหน่งนี้ตาม ${p.legalRef}. ` +
+    `(ตำแหน่งนี้ไม่มีแบบฟอร์ม PA 2/ส ของตนเอง — ครูผู้ช่วยใช้กลไกการประเมิน ` +
+    `"เตรียมความพร้อมและพัฒนาอย่างเข้ม" แยกต่างหาก ไม่ใช่รอบ PA นี้ ` +
+    `จึงไม่มีข้อความอ้างอิงจาก PDF จริงสำหรับเซลล์นี้)`
+  );
+}
+
+/**
  * Builds Thai expected-practice text for one (indicator, rank, rubric) cell.
- * Structure is complete for runtime; wording is framework-anchored, not a
- * verbatim multi-page PDF transcription (see README.md).
+ * Uses the real PA 2/ส|บส anchor text when one exists for this (rankCode,
+ * indicatorCode) pair (see level-description-anchors.mjs); falls back to a
+ * clearly-labeled structural placeholder otherwise (execute_learn only).
  *
  * @param {{
  *   indicatorCode: string,
@@ -55,6 +107,12 @@ export function buildExpectedPracticeTh(p) {
   if (!rubricLabel) {
     throw new Error(`invalid rubricLevel ${p.rubricLevel}`);
   }
+
+  const anchor = REAL_ANCHOR_TEXT[p.rankCode]?.[p.indicatorCode];
+  if (!anchor) {
+    return buildPlaceholderTh(p);
+  }
+
   const kindNote =
     p.indicatorKind === 'challenge'
       ? ' (ประเด็นท้าทาย — ระดับคะแนนตามสัดส่วน 4=100% … 1=25% ของคะแนนเต็มรายการ)'
@@ -63,8 +121,7 @@ export function buildExpectedPracticeTh(p) {
   return (
     `[${p.rankLabelTh}] ตัวชี้วัด ${p.indicatorCode} ${p.indicatorNameTh}${kindNote}. ` +
     `ระดับ ${p.rubricLevel}: ${rubricLabel}. ` +
-    `พิจารณาเทียบระดับการปฏิบัติที่คาดหวังของวิทยฐานะ/ตำแหน่งนี้ตาม ${p.legalRef}. ` +
-    `(seed โครงสร้าง SEIP-DB-003 — แทนที่ด้วยข้อความเชิงพฤติกรรมจากคู่มือฉบับเต็มได้โดยไม่ต้อง migrate schema)`
+    `${LEVEL_FRAMING[p.rubricLevel](anchor)} (อ้างอิง ${p.legalRef})`
   );
 }
 

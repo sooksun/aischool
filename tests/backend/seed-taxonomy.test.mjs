@@ -158,4 +158,25 @@ test('SEIP-DB-003: level descriptions cover scored indicators × ranks × rubric
   assert.equal(text.rowCount, 1);
   assert.match(text.rows[0].expected_practice_th, /ตามที่คาดหวัง/);
   assert.match(text.rows[0].expected_practice_th, /T-1\.1/);
+
+  // SEIP-DB-004: real PA 2/ส text has replaced the DB-003 template placeholder
+  // for ranks that have a PA 2/ส form (regression guard against the swap
+  // silently reverting). The real T-1.1/apply_adapt anchor text does not
+  // literally contain "T-1.1" or "หลักสูตร" (see level-description-anchors.mjs),
+  // but does contain "หน่วยการเรียนรู้" — check for that plus absence of the
+  // old template's own self-describing marker string.
+  assert.match(text.rows[0].expected_practice_th, /หน่วยการเรียนรู้/);
+  assert.doesNotMatch(text.rows[0].expected_practice_th, /seed โครงสร้าง SEIP-DB-003/);
+
+  // execute_learn (ครูผู้ช่วย) has no PA 2/ส form of its own — it keeps the
+  // structural placeholder, and the placeholder must say so explicitly rather
+  // than silently reusing generic template wording.
+  const placeholder = await client.query(
+    `SELECT expected_practice_th FROM indicator_level_description ild
+     JOIN indicator i ON i.id = ild.indicator_id
+     WHERE i.code = 'T-1.1' AND ild.rank_level_code = 'execute_learn' AND ild.rubric_level = 3
+     LIMIT 1`,
+  );
+  assert.equal(placeholder.rowCount, 1);
+  assert.match(placeholder.rows[0].expected_practice_th, /ไม่มีแบบฟอร์ม PA 2\/ส/);
 });
