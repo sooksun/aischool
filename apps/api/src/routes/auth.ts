@@ -7,6 +7,7 @@ import { verifyPassword, signAccessToken, ACCESS_TOKEN_TTL_SECONDS, generateRefr
 import { findUserByEmailForLogin, getUserById, getMembershipsForUser, createRefreshToken } from '@seip/database';
 import { ApiError } from '@seip/backend-shared';
 import type { Env } from '../env.js';
+import { getLoginRateLimiter } from '../lib/login-rate-limit.js';
 
 const LoginBody = z.object({
   email: z.string().email(),
@@ -16,6 +17,16 @@ const LoginBody = z.object({
 export const authRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env }) => {
   app.post('/auth/login', { config: { operationId: 'login' } }, async (request, reply) => {
     const body = LoginBody.parse(request.body);
+
+    // SEC-AUTH-5 / OPS-004: throttle before password work (still constant AUTH-001 shape on fail).
+    const ip = request.ip || 'unknown';
+    const limited = getLoginRateLimiter().check(ip, body.email);
+    if (!limited.ok) {
+      if (limited.retryAfterSec) {
+        reply.header('retry-after', String(limited.retryAfterSec));
+      }
+      throw new ApiError('AUTH-004', 'Too many login attempts — try again later');
+    }
 
     const user = await findUserByEmailForLogin(body.email);
     // Constant-shape response whether the email exists or not (SEC-AUTH-5: never

@@ -1,0 +1,8 @@
+# Paste into the main nginx.conf `http { ... }` block (limit_req_zone is http-level only).
+# Used by infra/nginx/seip-staging.conf.example (SEIP-OPS-004).
+#
+# login: 5 requests/minute per IP (burst defined on the location)
+# api:   30 requests/second per IP background rate (burst on location)
+
+limit_req_zone $binary_remote_addr zone=seip_login:10m rate=5r/m;
+limit_req_zone $binary_remote_addr zone=seip_api:10m rate=30r/s;

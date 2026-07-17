@@ -8,7 +8,8 @@ On-prem / staging layout for SEIP. Architecture decisions: **ADR-0005** (MinIO +
 | `docker/Dockerfile.worker` | Multi-stage image for `apps/worker` (async jobs) |
 | `docker/Dockerfile.web` | Static SPA image for `apps/web` |
 | `docker/nginx-web.conf` | Static file server inside the web image |
-| `nginx/seip-staging.conf.example` | **Edge** TLS reverse proxy example (host or separate container) |
+| `nginx/seip-staging.conf.example` | **Edge** TLS reverse proxy + rate limit + security headers (OPS-004) |
+| `nginx/http-rate-zones.conf.example` | `limit_req_zone` lines for main `http {}` block |
 | `../docker-compose.staging.yml` | Staging stack: postgres, minio, api, worker, web |
 | `../docs/project/ops-runbook.md` | Backup/restore, TLS, secrets, bring-up checklist |
 

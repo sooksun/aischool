@@ -617,7 +617,7 @@ tasks:
 
   - id: SEIP-OPS-004
     title: Login rate limiting + security headers at edge
-    status: backlog
+    status: done                # 2026-07-18 - handoff SEIP-OPS-004.md; branch feat/SEIP-OPS-004-edge-security
     wave: F
     sprint: 2
     branch: feat/SEIP-OPS-004-edge-security

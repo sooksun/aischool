@@ -9,7 +9,7 @@ Updated 2026-07-17 (SEIP-ARCH-002) — approval flow rewritten for single-agent 
 | `openapi.yaml` | **2.1.0** (CCR-005 additive reports + AI suggest; CCR-004 was 2.0.0 breaking) | HTTP API — the only web↔api interface |
 | `events.yaml` | 1.1.0 | Domain events (outbox-delivered) |
 | `permissions.yaml` | 1.1.0 | Roles, tenancy rule, per-operation matrix |
-| `error-codes.yaml` | 1.1.0 | Stable error codes + response shape |
+| `error-codes.yaml` | 1.2.0 | Stable error codes + response shape (AUTH-004 login rate limit) |
 
 Reports ship as **structured JSON payload + section refs** (CCR-005). Official PA PDF layout remains deferred (openapi `x-deferred.report-pdf-layout`).
 
