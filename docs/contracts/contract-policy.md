@@ -6,7 +6,7 @@ Updated 2026-07-17 (SEIP-ARCH-002) — approval flow rewritten for single-agent 
 
 | File | Version | Surface |
 |---|---|---|
-| `openapi.yaml` | **2.2.0** (CCR-007 PDF; CCR-005 reports/AI; CCR-004 was 2.0.0 breaking) | HTTP API — the only web↔api interface |
+| `openapi.yaml` | **2.4.0** (CCR-009 cleanup B1–B2; CCR-008 session; CCR-007 PDF; …) | HTTP API — the only web↔api interface |
 | `events.yaml` | 1.1.0 | Domain events (outbox-delivered) |
 | `permissions.yaml` | 1.2.0 | Roles, tenancy rule, per-operation matrix |
 | `error-codes.yaml` | 1.3.0 | Stable error codes + response shape |

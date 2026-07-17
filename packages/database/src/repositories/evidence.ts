@@ -42,10 +42,22 @@ export async function listEvidence(schoolId: string, f: ListEvidenceFilter) {
       orderBy: { createdAt: 'desc' },
       skip: (f.page - 1) * f.pageSize,
       take: f.pageSize,
+      // scan_status aggregate for list badges (CCR-009) — only status columns, not bytes
+      include: { files: { select: { scanStatus: true } } },
     }),
     prisma.evidence.count({ where }),
   ]);
   return { items, total };
+}
+
+/** Worst-of file scan states for list/detail badges. null = no files. */
+export function aggregateScanStatus(
+  files: { scanStatus: string }[],
+): 'pending' | 'clean' | 'blocked' | null {
+  if (files.length === 0) return null;
+  if (files.some((f) => f.scanStatus === 'pending')) return 'pending';
+  if (files.some((f) => f.scanStatus === 'blocked')) return 'blocked';
+  return 'clean';
 }
 
 export async function createEvidence(schoolId: string, data: {

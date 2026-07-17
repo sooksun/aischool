@@ -16,12 +16,11 @@ type FrameworkDetail = components['schemas']['FrameworkDetail'];
 type Indicator = components['schemas']['Indicator'];
 type AssignmentResults = components['schemas']['AssignmentResults'];
 type EvaluatorResult = components['schemas']['EvaluatorResult'];
-type Cycle = components['schemas']['Cycle'];
-type CycleDetail = components['schemas']['CycleDetail'];
 type ScoreSubmission = components['schemas']['ScoreSubmission'];
 
 export function AssignmentScorePage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();
+  // Router state may still pass frameworkVersionId; API framework_version_id is source of truth (CCR-009).
   const location = useLocation();
   const navFrameworkId = (location.state as { frameworkVersionId?: string } | null)?.frameworkVersionId;
 
@@ -55,8 +54,7 @@ export function AssignmentScorePage() {
         if (cancelled) return;
         setDetail(d);
 
-        let fwId = navFrameworkId ?? null;
-        if (!fwId) fwId = await discoverFrameworkVersionId(assignmentId);
+        const fwId = d.framework_version_id || navFrameworkId;
         if (!fwId) {
           setError('ไม่พบกรอบตัวชี้วัดของการมอบหมายนี้');
           return;
@@ -89,7 +87,7 @@ export function AssignmentScorePage() {
     })();
 
     return () => { cancelled = true; };
-  }, [assignmentId, navFrameworkId]);
+  }, [assignmentId, navFrameworkId]); // navFrameworkId only as rare fallback before API field
 
   function setLevel(indicatorId: string, level: number) {
     setRows((prev) => prev.map((r) => (
@@ -344,23 +342,4 @@ export function AssignmentScorePage() {
       )}
     </main>
   );
-}
-
-/** When router state lacks framework id (refresh), discover via cycles → rounds → assignments. */
-async function discoverFrameworkVersionId(assignmentId: string): Promise<string | null> {
-  const cycles = unwrap(await api.GET('/cycles', {})) as Cycle[];
-  for (const c of cycles) {
-    const detail = unwrap(await api.GET('/cycles/{cycleId}', {
-      params: { path: { cycleId: c.id } },
-    })) as CycleDetail;
-    for (const r of detail.rounds) {
-      const page = unwrap(await api.GET('/rounds/{roundId}/assignments', {
-        params: { path: { roundId: r.id }, query: { page: 1, page_size: 100 } },
-      }));
-      if (page.items.some((a) => a.id === assignmentId)) {
-        return c.framework_version_id;
-      }
-    }
-  }
-  return null;
 }
