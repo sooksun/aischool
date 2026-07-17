@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-18T23:30:00+07:00
+updated_at: 2026-07-19T00:00:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -701,3 +701,20 @@ tasks:
       - Typed ReportPayloadV1 in backend-shared
       - generateReportPayload + getReport + PDF use it
       - OpenAPI ReportPayload + web generated types
+
+  - id: SEIP-CLEANUP-M3
+    title: App capability flags from memberships (no ad-hoc role arrays)
+    status: done
+    sprint: 2
+    branch: feat/cleanup-M3-capabilities
+    primary_paths:
+      - apps/web/src/lib/capabilities.ts
+      - apps/web/src/hooks/useAuth.tsx
+      - apps/web/src/App.tsx
+    notes: >
+      manageCycles / scoreAsCommittee / viewReports / createReports / governMappings
+      derived once from memberships. Handoff .ai-team/handoffs/SEIP-CLEANUP-M3.md
+    acceptance_criteria:
+      - No DIRECTOR_ROLES / REPORT_NAV_ROLES / EVALUATOR_NAV_ROLES in App.tsx
+      - Nav and route gates use capability flags
+      - CAPABILITY_ROLES comments cite permissions.yaml ops
