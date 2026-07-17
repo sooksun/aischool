@@ -82,3 +82,25 @@ Arms the `test:unit` CI gate for `apps/web` (aggregated into the root
 ## Next
 A future task should build director/school_admin mapping-confirmation and
 committee-scoring screens once `SEIP-API-002` (cycles/rounds/scoring) exists.
+
+## Close verification 2026-07-17 (post-merge on develop)
+
+Re-ran on `develop` @ current HEAD after merge `3db868d` + CI fix `556958c`:
+
+| Check | Result |
+|---|---|
+| `npm run build:libs` + `apps/api` build | pass |
+| `npm run test:unit` (auth 13 + web 12) | pass |
+| `packages/database` integration | 6/6 |
+| `apps/api` integration | 6/6 |
+| `npm run test:security` | 3/3 |
+| `npm run test:backend` | 18/18 |
+| `gate:ownership` / `gate:contracts` / `gate:dep-audit` | pass |
+
+**Code review (spot-check):**
+- Client uses openapi-fetch + generated types (no hand-written DTOs).
+- Bearer + optional `X-School-Id` injected in client middleware (CCR-003).
+- Client-side file validation mirrors UPL-001/002/003; server remains source of truth.
+- Login maps AUTH-001 to Thai message without leaking raw server text (tested).
+
+**Status: DONE** — vertical slice on `develop` is closed for Sprint 1 evidence-workflow.

@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-17T22:30:00+07:00
+updated_at: 2026-07-17T23:30:00+07:00
 # Single-agent mode per ADR-0004 (2026-07-17): Claude Code is the sole developer.
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
@@ -128,7 +128,7 @@ tasks:
 
   - id: SEIP-API-001
     title: Backend evidence-workflow API (15 of 27 contract operations)
-    status: done                # 2026-07-17 — verified green; handoff SEIP-API-001.md; branch feat/SEIP-API-001-evidence-workflow (merge to develop pending)
+    status: done                # 2026-07-17 — merged develop 3db868d; handoff SEIP-API-001.md
     branch: feat/SEIP-API-001-evidence-workflow
     dependencies: [SEIP-ARCH-002, SEIP-DB-001]
     notes: >
@@ -168,7 +168,7 @@ tasks:
 
   - id: SEIP-UI-001
     title: Evidence submission flow implementation
-    status: review              # close-out .ai-team/handoffs/SEIP-UI-001.md — awaiting user merge
+    status: done                # 2026-07-17 — merged develop 3db868d; verified re-run; handoff SEIP-UI-001.md
     branch: feat/SEIP-API-001-evidence-workflow
     dependencies: [SEIP-ARCH-002, SEIP-DB-001, SEIP-API-001]
     notes: >
