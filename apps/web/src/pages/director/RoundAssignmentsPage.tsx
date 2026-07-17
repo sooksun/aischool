@@ -167,6 +167,7 @@ function CreateAssignmentForm({ roundId, onCreated }: { roundId: string; onCreat
               style={{ flex: 1 }}
             />
             <select
+              aria-label={`บทบาทที่นั่ง ${i + 1}`}
               value={row.role}
               onChange={(e) => setCommittee((rows) => rows.map((r, idx) => (idx === i ? { ...r, role: e.target.value as CommitteeRole } : r)))}
             >
