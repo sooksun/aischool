@@ -90,6 +90,51 @@ curl -I https://seip.example.school.th/api/v1/auth/me   # expect 401 without tok
 
 ---
 
+## 4b. Rate limiting & security headers (SEIP-OPS-004 / SEC-AUTH-5)
+
+### Edge nginx (primary)
+
+1. Add zone definitions from `infra/nginx/http-rate-zones.conf.example` into the main `http { }` block:
+   - `seip_login` — 5 req/min per IP (location burst 8)
+   - `seip_api` — 30 req/s per IP background (location burst 60)
+2. Use `infra/nginx/seip-staging.conf.example` which applies:
+   - `limit_req` on `= /api/v1/auth/login` → HTTP **429** when exceeded
+   - `limit_req` on `/api/` for general API flood dampening
+   - Security headers: HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+     `Referrer-Policy`, `Permissions-Policy`, hide `server_tokens`
+
+```bash
+# After deploying edge config — hammer login and expect 429 from nginx:
+for i in $(seq 1 20); do
+  curl -sS -o /dev/null -w "%{http_code}\n" -X POST https://seip.example.school.th/api/v1/auth/login \
+    -H 'content-type: application/json' -d '{"email":"x@y.z","password":"wrong-password"}'
+done
+# Expect a mix of 401 (API) then 429 (edge limit)
+
+# Headers on SPA:
+curl -sSI https://seip.example.school.th/ | grep -iE 'strict-transport|x-content-type|x-frame|referrer'
+```
+
+### API defense-in-depth
+
+Even without nginx (local API on :3001), `apps/api` enforces:
+
+| Bucket | Default | Env override |
+|---|---|---|
+| Per IP | 40 / 15 min | `LOGIN_RATE_MAX_PER_IP`, `LOGIN_RATE_WINDOW_MS` |
+| Per email | 12 / 15 min | `LOGIN_RATE_MAX_PER_EMAIL` |
+
+Exceeded attempts return **AUTH-004** (HTTP 429) + `Retry-After`.  
+API also sets baseline headers (`nosniff`, `DENY` frame, `no-store` cache) via `security-headers` plugin.
+
+Set `TRUST_PROXY=true` (or `NODE_ENV=production`) so `request.ip` uses `X-Forwarded-For` from the edge.
+
+### Multi-instance note
+
+In-process counters are **per API process**. Edge `limit_req` still protects the fleet per IP. Shared Redis counters are a future enhancement if many API replicas are required without a trusted edge.
+
+---
+
 ## 5. Backup and restore (release gate subject)
 
 Evidence videos and evaluation rows are **irreplaceable**. Backup **both** Postgres and MinIO on the same schedule (or document RPO/RTO if staggered).

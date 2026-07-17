@@ -1,6 +1,7 @@
 # SEIP Error Code Contract
 # version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
 # version: 1.1.0 — CCR-005 (additive): RPT-001, AI-001.
+# version: 1.2.0 — SEIP-OPS-004 (additive): AUTH-004 login rate limit.
 # Protected contract (contract-policy.md): changes require an approved CCR.
 # Codes are a stable API surface — clients map them to localized text. Adding a
 # code is additive (1.x); changing the meaning or HTTP status of an existing code,
@@ -15,7 +16,7 @@
 #   }
 # HTTP status is authoritative for transport semantics; `code` for business semantics.
 
-version: 1.1.0
+version: 1.2.0
 status: locked
 locked_at: 2026-07-17
 error_shape:
@@ -40,6 +41,7 @@ codes:
   AUTH-001: { http: 401, meaning: Missing or malformed credentials/token }
   AUTH-002: { http: 401, meaning: Token expired }
   AUTH-003: { http: 401, meaning: Account disabled or not yet activated }
+  AUTH-004: { http: 429, meaning: Too many login attempts — throttled per IP and/or account (SEC-AUTH-5) }
 
   # --- PERM (403) ---
   PERM-001: { http: 403, meaning: Role not allowed for this operation (permissions.yaml matrix) }
