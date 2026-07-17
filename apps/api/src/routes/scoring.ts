@@ -169,6 +169,8 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
       workload_gate_declared: Boolean(workloadRow),
       workload_met: workloadRow?.workloadMet ?? null,
       my_submission_state: mySubmissionState,
+      // CCR-009: pin framework for scoring UI — no client graph walk over cycles.
+      framework_version_id: assignment.round.cycle.frameworkVersionId,
     };
   });
 

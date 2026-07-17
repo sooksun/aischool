@@ -1,15 +1,13 @@
 // Report detail — structured payload + section refs (SEIP-UI-004) + PDF download.
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, unwrap } from '../../api/client';
+import { api, unwrap, downloadAuthorized } from '../../api/client';
 import { ApiError, thaiMessageFor } from '../../api/errors';
-import { useAuth } from '../../hooks/useAuth';
 import type { components } from '../../api/schema.generated';
 
 type ReportDetail = components['schemas']['ReportDetail'];
 
 export function ReportDetailPage() {
-  const { schoolId } = useAuth();
   const { reportId } = useParams<{ reportId: string }>();
   const [report, setReport] = useState<ReportDetail | null>(null);
   const [error, setError] = useState(false);
@@ -80,23 +78,11 @@ export function ReportDetailPage() {
     setPdfError(null);
     setPdfBusy(true);
     try {
-      // Binary path — openapi-fetch types application/pdf as blob-ish; use raw fetch with same base.
-      const token = sessionStorage.getItem('seip.access_token');
-      const headers: Record<string, string> = {};
-      if (token) headers.authorization = `Bearer ${token}`;
-      if (schoolId) headers['x-school-id'] = schoolId;
-      const res = await fetch(`/api/v1/reports/${reportId}/pdf`, { headers });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { code?: string; message?: string };
-        throw new ApiError(body.code ?? 'SYS-001', body.message ?? 'ดาวน์โหลด PDF ไม่สำเร็จ');
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${templateCode}-${reportId.slice(0, 8)}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      // Same in-memory auth as openapi-fetch (cleanup B3) — no sessionStorage token reads.
+      await downloadAuthorized(
+        `/reports/${reportId}/pdf`,
+        `${templateCode}-${reportId.slice(0, 8)}.pdf`,
+      );
     } catch (err) {
       setPdfError(err instanceof ApiError ? thaiMessageFor(err) : 'ดาวน์โหลด PDF ไม่สำเร็จ');
     } finally {

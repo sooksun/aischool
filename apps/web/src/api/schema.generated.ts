@@ -758,6 +758,12 @@ export interface components {
             captured_at?: string | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * @description Aggregate of attached files (CCR-009). null when there are no files.
+             *     Worst-of order: pending > blocked > clean. Present on list and detail so
+             *     clients never need N+1 detail fetches for list badges.
+             */
+            scan_status?: null | components["schemas"]["ScanStatus"];
         };
         EvidenceCreate: {
             /**
@@ -938,6 +944,12 @@ export interface components {
              * @enum {string}
              */
             my_submission_state: "not_member" | "not_submitted" | "submitted";
+            /**
+             * Format: uuid
+             * @description Framework pinned by the assignment's cycle (CCR-009). Clients use this
+             *     to load taxonomy for scoring — no graph walk over cycles/rounds.
+             */
+            framework_version_id: string;
         };
         ScoreSubmission: {
             /** @description Chair may declare the workload gate in the same call (SCORE-004) */

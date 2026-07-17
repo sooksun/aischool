@@ -102,3 +102,50 @@ export function unwrap<T>(result: { data?: T; error?: unknown }): T {
   }
   return result.data as T;
 }
+
+/**
+ * Binary / non-JSON GETs that must use the same in-memory auth as openapi-fetch
+ * (cleanup B3). Never read sessionStorage for tokens — AuthProvider owns persistence.
+ * Path is under /api/v1 (e.g. `/reports/{id}/pdf`).
+ */
+export async function authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const url = path.startsWith('/api/') ? path : `/api/v1${path.startsWith('/') ? path : `/${path}`}`;
+  const headers = new Headers(init.headers);
+  if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
+  if (currentSchoolId) headers.set('x-school-id', currentSchoolId);
+
+  let response = await fetch(url, { ...init, headers });
+  // Mirror openapi-fetch 401 refresh for binary paths that skip the middleware.
+  if (response.status === 401 && !AUTH_PATHS.some((p) => url.includes(p))) {
+    if (await tryRefreshSession()) {
+      const retryHeaders = new Headers(init.headers);
+      if (accessToken) retryHeaders.set('authorization', `Bearer ${accessToken}`);
+      if (currentSchoolId) retryHeaders.set('x-school-id', currentSchoolId);
+      response = await fetch(url, { ...init, headers: retryHeaders });
+    } else {
+      sessionHooks.onExpired?.();
+    }
+  }
+  return response;
+}
+
+/** Download a file via authorizedFetch and trigger a browser save. Throws ApiError on non-2xx JSON errors. */
+export async function downloadAuthorized(path: string, filename: string): Promise<void> {
+  const res = await authorizedFetch(path);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as {
+      code?: string; message?: string; details?: { field: string; issue: string }[]; request_id?: string;
+    };
+    throw new ApiError(body.code ?? 'SYS-001', body.message ?? 'Download failed', body.details, body.request_id);
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    a.click();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}

@@ -11,6 +11,9 @@ openapi: 3.1.0
 # version 2.1.0 — CCR-005 (additive): Reports list/create/get + AI mapping suggest
 #   (local_heuristic per ADR-0007). No breaking changes vs 2.0.0.
 # version 2.2.0 — CCR-007 (additive): GET /reports/{reportId}/pdf (PA form PDF).
+# version 2.3.0 — CCR-008 (additive): auth refresh + logout session lifecycle.
+# version 2.4.0 — CCR-009 (additive, cleanup B1–B2): Evidence.scan_status aggregate;
+#   AssignmentDetail.framework_version_id (eliminates client N+1 / graph search).
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -19,14 +22,12 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.3.0
+  version: 2.4.0
   summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI + PDF)
   description: |
-    Contract v2.3 (CCR-008) — adds the session lifecycle SEC-AUTH-2 requires:
-    `refreshToken` (rotation with reuse detection) and `logout` (server-side
-    revocation). v2.2 (CCR-007) added the PA form PDF (`getReportPdf`); the core
-    remains evidence workflow, PA evaluation, structured reports, and AI mapping
-    suggest via on-prem `local_heuristic` (ADR-0007).
+    Contract v2.4 (CCR-009 cleanup) — list evidence carries aggregate `scan_status`;
+    assignment detail carries `framework_version_id`. v2.3 (CCR-008) session
+    lifecycle; v2.2 PDF; core remains evidence, PA evaluation, reports, AI suggest.
 
     **Business rules that bind every implementation**
     - Tenancy: every resource is school-scoped; cross-school access returns RES-001 (indistinguishable from not-found).
@@ -1177,6 +1178,14 @@ components:
         status: { $ref: '#/components/schemas/EvidenceStatus' }
         captured_at: { type: [string, 'null'], format: date-time }
         created_at: { type: string, format: date-time }
+        scan_status:
+          description: |
+            Aggregate of attached files (CCR-009). null when there are no files.
+            Worst-of order: pending > blocked > clean. Present on list and detail so
+            clients never need N+1 detail fetches for list badges.
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/ScanStatus'
 
     EvidenceCreate:
       type: object
@@ -1389,7 +1398,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/Assignment'
         - type: object
-          required: [workload_gate_declared, my_submission_state]
+          required: [workload_gate_declared, my_submission_state, framework_version_id]
           properties:
             workload_gate_declared: { type: boolean }
             workload_met: { type: [boolean, 'null'] }
@@ -1397,6 +1406,12 @@ components:
               type: string
               enum: [not_member, not_submitted, submitted]
               description: Scoring progress of the calling evaluator
+            framework_version_id:
+              type: string
+              format: uuid
+              description: |
+                Framework pinned by the assignment's cycle (CCR-009). Clients use this
+                to load taxonomy for scoring — no graph walk over cycles/rounds.
 
     ScoreSubmission:
       type: object

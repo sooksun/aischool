@@ -8,7 +8,7 @@ import { z } from 'zod';
 import {
   listEvidence, createEvidence, getEvidenceDetail, updateEvidence, softDeleteEvidence,
   registerEvidenceFileWithWorkerJobs, getEvidenceCategoryById, writeAuditEvent,
-  listEvaluateePersonnelIdsForCommitteeMember,
+  listEvaluateePersonnelIdsForCommitteeMember, aggregateScanStatus,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import { Prisma } from '@prisma/client';
@@ -18,12 +18,18 @@ import type { S3Client } from '@aws-sdk/client-s3';
 import { createS3Client, evidenceObjectKey, presignUpload, presignDownload } from '../lib/s3.js';
 import type { Env } from '../env.js';
 
-function serializeEvidence(e: { id: string; schoolId: string; ownerPersonnelId: string; uploadedByUserId: string; categoryId: string; title: string; description: string | null; status: string; capturedAt: Date | null; createdAt: Date }) {
+function serializeEvidence(e: {
+  id: string; schoolId: string; ownerPersonnelId: string; uploadedByUserId: string;
+  categoryId: string; title: string; description: string | null; status: string;
+  capturedAt: Date | null; createdAt: Date;
+  files?: { scanStatus: string }[];
+}) {
   return {
     id: e.id, school_id: e.schoolId, owner_personnel_id: e.ownerPersonnelId,
     uploaded_by_user_id: e.uploadedByUserId, category_id: e.categoryId, title: e.title,
     description: e.description, status: e.status,
     captured_at: e.capturedAt?.toISOString() ?? null, created_at: e.createdAt.toISOString(),
+    scan_status: aggregateScanStatus(e.files ?? []),
   };
 }
 
