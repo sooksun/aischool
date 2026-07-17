@@ -50,3 +50,26 @@ evidence-submission slice (the one Sprint 1's UI-001 needs to build against).
 
 ## Next
 `SEIP-UI-001` (apps/web, this session continues into it) now has a real API to call instead of a contract alone. A future `SEIP-API-002` should cover cycles/rounds/committee scoring; `SEIP-WORKER-001` should cover virus scan + duration probe + outbox dispatch.
+
+## Close verification 2026-07-17
+
+Independent re-run before marking **done** (Postgres 17 + MinIO healthy locally):
+
+| Check | Result |
+|---|---|
+| `npm run typecheck` (all workspaces) | pass |
+| `npm run test:unit` (auth 13 + web 12) | pass |
+| `packages/database` integration | 6/6 pass |
+| `apps/api` integration | 6/6 pass |
+| `npm run test:security` | 3/3 pass (matrix + area_admin + X-School-Id) |
+| `npm run test:backend` | 18/18 pass |
+| `gate:ownership` / `gate:contracts` / `gate:dep-audit` | pass |
+
+**Code review notes (spot-check, no blocking defects):**
+- Tenancy: repository queries require `schoolId` first; cross-school → null/RES-001 (proven by tests).
+- Authz: `resolveGrant` loads `permissions.yaml` at runtime (no hand-copied matrix).
+- Own-scope list/create forces owner filter; mapping self-confirm correctly denied for teacher.
+- Audit writer allowlists fields (SEC-PDPA-2); DB trigger blocks update/delete.
+- Upload path is metadata + MinIO presign (no bytes through API); worker verification still deferred (CCR-004).
+
+**Status: DONE** on branch `feat/SEIP-API-001-evidence-workflow`. Merge to `develop` is the remaining shipping step (user approves).

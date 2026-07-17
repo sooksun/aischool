@@ -63,3 +63,9 @@ the `auth.ts` fix to confirm no regression.
 Covers the 13 non-exempt of 15 implemented operations (login/getCurrentUser are
 exempt by design, not swept). The 12 deferred contract operations (cycles/rounds/
 scoring) have no sweep coverage yet — arrives with whatever task implements them.
+
+## Close verification 2026-07-17
+
+`npm run test:security` → **3/3 pass** on the same environment as API-001 close.
+
+**Status: DONE** (ships with API-001 branch).

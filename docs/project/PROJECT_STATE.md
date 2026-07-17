@@ -17,11 +17,12 @@ The no-production-code constraint is **lifted**. Contracts are locked at v1.0.0 
 OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherited from Codex, review PASS) · UI-000 (evidence UX + CCR-002) · QA-001 (gates) · ARCH-002 (lock v1.0.0). QA-002 cancelled by ADR-0004.
 
 ## Current Objectives (Sprint 1)
-1. ~~SEIP-DB-001~~ **DONE** — schema + migrations + constraints + taxonomy seed merged (be36eff); 18 backend tests pass; handoff .ai-team/handoffs/SEIP-DB-001.md
-2. SEIP-DB-002 residual — full IndicatorLevelDescription wording from official PDFs (structure seed already in DB-001)
-3. **SEIP-API-001** — evidence-workflow API (15/27 ops) ← **in review** on eat/SEIP-API-001-evidence-workflow
-4. SEIP-UI-001 — evidence submission flow (depends on API-001)
-5. Infra: docker-compose (PostgreSQL + MinIO) per ADR-0005 — landed with DB-001
+1. ~~SEIP-DB-001~~ **DONE** — schema + migrations + seed + 18 constraint tests (`be36eff`)
+2. ~~SEIP-DB-002~~ **DONE** (structure) — residual only: full IndicatorLevelDescription wording from PDFs
+3. ~~SEIP-API-001~~ **DONE** (verified) — evidence-workflow API 15/27 ops on `feat/SEIP-API-001-evidence-workflow` (awaiting merge to develop)
+4. ~~SEIP-QA-003~~ **DONE** — permission-matrix tests arm `test:security` / permission-tests gate
+5. **SEIP-UI-001** — evidence submission UI (WIP may exist on same branch as `apps/web/`; not closed)
+6. Future: SEIP-API-002 (cycles/rounds/scoring), SEIP-WORKER-001 (scan/duration/outbox)
 
 ## Active Tasks
 See `.ai-team/task-board.yaml` (single tracker).

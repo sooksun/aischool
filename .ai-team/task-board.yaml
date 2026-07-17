@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-17T21:00:00+07:00
+updated_at: 2026-07-17T22:30:00+07:00
 # Single-agent mode per ADR-0004 (2026-07-17): Claude Code is the sole developer.
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
@@ -114,7 +114,7 @@ tasks:
 
   - id: SEIP-DB-002
     title: Seed v9/v10 taxonomy (frameworks, indicators, level descriptions, weights)
-    status: review              # structure/codes/weights done in prisma/seed.mjs with DB-001; residual = full level text from PDFs
+    status: done                # structure/codes/weights verified (seed-taxonomy tests); residual = full level text from PDFs only
     dependencies: [SEIP-DB-001]
     notes: >
       Structure seed shipped with DB-001 (19 indicators per role, weights, ranks,
@@ -128,7 +128,7 @@ tasks:
 
   - id: SEIP-API-001
     title: Backend evidence-workflow API (15 of 27 contract operations)
-    status: review              # close-out .ai-team/handoffs/SEIP-API-001.md — awaiting user merge
+    status: done                # 2026-07-17 — verified green; handoff SEIP-API-001.md; branch feat/SEIP-API-001-evidence-workflow (merge to develop pending)
     branch: feat/SEIP-API-001-evidence-workflow
     dependencies: [SEIP-ARCH-002, SEIP-DB-001]
     notes: >
@@ -151,7 +151,7 @@ tasks:
 
   - id: SEIP-QA-003
     title: Permission matrix tests (arms the permission-tests CI gate)
-    status: review              # close-out .ai-team/handoffs/SEIP-QA-003.md — awaiting user merge
+    status: done                # 2026-07-17 — verified with API-001; handoff SEIP-QA-003.md
     branch: feat/SEIP-API-001-evidence-workflow
     dependencies: [SEIP-API-001]
     notes: >
