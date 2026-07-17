@@ -7,11 +7,14 @@ import { EvidenceDetailPage } from './pages/EvidenceDetailPage';
 import { CycleListPage } from './pages/director/CycleListPage';
 import { CycleDetailPage } from './pages/director/CycleDetailPage';
 import { RoundAssignmentsPage } from './pages/director/RoundAssignmentsPage';
+import { ReportListPage } from './pages/reports/ReportListPage';
+import { ReportDetailPage } from './pages/reports/ReportDetailPage';
 import type { components } from './api/schema.generated';
 
 type Role = components['schemas']['Role'];
 
 const DIRECTOR_ROLES: Role[] = ['director', 'school_admin'];
+const REPORT_NAV_ROLES: Role[] = ['director', 'school_admin', 'teacher', 'deputy', 'evaluator'];
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -39,11 +42,21 @@ function AppNav() {
   const location = useLocation();
   if (!user || location.pathname === '/login') return null;
   const isDirector = hasRole(user, DIRECTOR_ROLES);
-  if (!isDirector) return null;
+  const showReports = hasRole(user, REPORT_NAV_ROLES);
+  if (!isDirector && !showReports) return null;
   return (
     <nav className="app-nav" aria-label="เมนูหลัก">
       <Link to="/" className={location.pathname === '/' ? 'active' : ''}>หลักฐานของฉัน</Link>
-      <Link to="/director/cycles" className={location.pathname.startsWith('/director') ? 'active' : ''}>จัดการรอบการประเมิน</Link>
+      {isDirector && (
+        <Link to="/director/cycles" className={location.pathname.startsWith('/director') ? 'active' : ''}>
+          จัดการรอบการประเมิน
+        </Link>
+      )}
+      {showReports && (
+        <Link to="/reports" className={location.pathname.startsWith('/reports') ? 'active' : ''}>
+          รายงาน PA
+        </Link>
+      )}
     </nav>
   );
 }
@@ -67,6 +80,9 @@ export function App() {
         <Route path="/director/rounds/:roundId/assignments" element={
           <RequireRole roles={DIRECTOR_ROLES}><RoundAssignmentsPage /></RequireRole>
         } />
+
+        <Route path="/reports" element={<RequireAuth><ReportListPage /></RequireAuth>} />
+        <Route path="/reports/:reportId" element={<RequireAuth><ReportDetailPage /></RequireAuth>} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

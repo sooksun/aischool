@@ -6,12 +6,12 @@ Updated 2026-07-17 (SEIP-ARCH-002) — approval flow rewritten for single-agent 
 
 | File | Version | Surface |
 |---|---|---|
-| `openapi.yaml` | **2.0.0** (CCR-004, breaking — see History) | HTTP API — the only web↔api interface |
-| `events.yaml` | 1.0.0 | Domain events (outbox-delivered) |
-| `permissions.yaml` | 1.0.0 | Roles, tenancy rule, per-operation matrix |
-| `error-codes.yaml` | 1.0.0 | Stable error codes + response shape |
+| `openapi.yaml` | **2.1.0** (CCR-005 additive reports + AI suggest; CCR-004 was 2.0.0 breaking) | HTTP API — the only web↔api interface |
+| `events.yaml` | 1.1.0 | Domain events (outbox-delivered) |
+| `permissions.yaml` | 1.1.0 | Roles, tenancy rule, per-operation matrix |
+| `error-codes.yaml` | 1.1.0 | Stable error codes + response shape |
 
-Report data contracts remain **deferred to v0.2** (needs the official PA1/PA2/PA3 field inventory).
+Reports ship as **structured JSON payload + section refs** (CCR-005). Official PA PDF layout remains deferred (openapi `x-deferred.report-pdf-layout`).
 
 ## Rule
 

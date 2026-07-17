@@ -16,6 +16,7 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   Evidence: ['id', 'schoolId', 'ownerPersonnelId', 'categoryId', 'status'], // title/description excluded: may contain learner-identifying text
   EvidenceFile: ['id', 'evidenceId', 'scanStatus', 'contentType'], // storageUri/checksum excluded: not useful for audit review, unnecessary exposure
   EvidenceIndicatorMapping: ['id', 'evidenceId', 'indicatorId', 'status', 'mappingSource'],
+  Report: ['id', 'schoolId', 'cycleId', 'subjectPersonnelId', 'templateCode', 'status'],
   UserAccount: ['id', 'status'], // email/displayName excluded: direct PII
   SchoolMembership: ['id', 'userId', 'schoolId', 'role', 'status'],
 };

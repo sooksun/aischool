@@ -138,6 +138,8 @@ const OPERATIONS = () => ({
   initiateFileUpload: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/files/initiate`, payload: { content_type: 'application/pdf', byte_size: 10, checksum_sha256: 'a'.repeat(64), original_filename: 'x.pdf' } },
   listEvidenceMappings: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/mappings` },
   createMapping: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, payload: { indicator_id: randomUUID() } }, // random indicator: expected to fail VAL-002 for granted roles, never PERM-001
+  // Missing framework/cycle → AI-001 for granted roles (not PERM-001).
+  suggestMappings: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings/suggest`, payload: {} },
   listMappings: { method: 'GET', url: '/api/v1/mappings' },
   // 'revoke' (not 'reject'): teacher's own-revoke grant permits ONLY revoke, and
   // director/school_admin's 'school' grant permits any action — 'revoke' is the
@@ -181,6 +183,19 @@ const OPERATIONS = () => ({
   // "OWNER_ROLE must never see PERM-001" assumption for a reason that has nothing
   // to do with a matrix mismatch. That behavior (including the genuine-evaluatee
   // case, once closed) is covered directly by scoring-flow.test.mjs instead.
+
+  listReports: { method: 'GET', url: '/api/v1/reports' },
+  // random subject → RES-001 for granted roles (not PERM-001).
+  createReport: { method: 'POST', url: '/api/v1/reports', payload: {
+    cycle_id: cycleId,
+    subject_personnel_id: randomUUID(),
+    template_code: 'PA2_s',
+  } },
+  // Unknown report id → RES-001 for granted roles that pass ownership loosely;
+  // for 'own' roles without a real report, still not PERM-001 if grant exists —
+  // getReport needs a real resource for own checks, so use a random uuid:
+  // RES-001 before ownership (findFirst by school+id returns null → RES-001).
+  getReport: { method: 'GET', url: `/api/v1/reports/${randomUUID()}` },
 });
 
 // The fixture evidence/mapping above is owned by 'teacher', who is ALSO the
@@ -193,7 +208,7 @@ const OPERATIONS = () => ({
 const OWNER_ROLE = 'teacher';
 const OWN_SENSITIVE_OPS = new Set([
   'getEvidence', 'updateEvidence', 'deleteEvidence', 'initiateFileUpload',
-  'listEvidenceMappings', 'createMapping', 'actOnMapping', 'getAssignment',
+  'listEvidenceMappings', 'createMapping', 'suggestMappings', 'actOnMapping', 'getAssignment',
 ]);
 
 test('every implemented operation x every role matches its permissions.yaml disposition', async () => {
@@ -252,7 +267,7 @@ test('every implemented operation x every role matches its permissions.yaml disp
     }
   }
 
-  assert.ok(assertions >= 23 * 6, `sweep should cover at least 23 operations x 6 roles, got ${assertions} assertions`);
+  assert.ok(assertions >= 27 * 6, `sweep should cover at least 27 operations x 6 roles, got ${assertions} assertions`);
   assert.deepEqual(failures, [], `${failures.length} mismatch(es) between permissions.yaml and enforcement:\n${failures.join('\n')}`);
 });
 

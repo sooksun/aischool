@@ -25,13 +25,14 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 5. ~~SEIP-UI-001~~ **DONE** — evidence SPA (3db868d)
 6. ~~SEIP-OPS-002~~ **DONE** — develop CI fix (556958c)
 7. ~~SEIP-API-002~~ **DONE** — cycles + committee scoring (remaining 11 ops); all 27 contract operations implemented
-8. Contracts at **v2.0.0** (CCR-004)
+8. Contracts at **v2.1.0** (CCR-005 reports + AI suggest; was 2.0.0 after CCR-004)
 9. ~~SEIP-WORKER-001~~ **DONE** — outbox + file.process (scan/duration) + storage GC
 10. ~~SEIP-UI-002~~ **DONE** — director/admin UI for cycles, rounds, committee assignment; handoff `.ai-team/handoffs/SEIP-UI-002.md`
-11. ~~SEIP-OPS-003~~ **DONE** on branch `feat/SEIP-OPS-003-staging-ops` — staging compose + TLS/backup runbook (awaiting merge)
-12. **Sprint 2+ remaining** — UI-003, reports/AI (REPORTS-AI WIP), QA-004 e2e. See task board.
+11. ~~SEIP-OPS-003~~ **DONE** — staging compose + TLS/backup runbook + worker (`6b8b66c` on develop)
+12. ~~Wave D+E reports/AI~~ **DONE on branch `feat/SEIP-REPORTS-AI`** — ARCH-003/API-003/WORKER-002/UI-004 + ARCH-005/API-004/UI-005; handoff `.ai-team/handoffs/SEIP-REPORTS-AI.md` (awaiting merge)
+13. **Sprint 2+ remaining** — UI-003, API-003a, QA-004 e2e, official PA PDF layout (deferred).
 
-**develop vertical slice + full API surface:** login → evidence → MinIO (now with async virus-scan stub + duration probe via outbox/worker) → mapping + cycles/rounds + 3-evaluator scoring with per-evaluator ≥70% pass rule. Director/school_admin can drive the whole cycle→round→committee-assignment setup through the UI, not just the API.
+**Product slice (REPORTS-AI branch):** login → evidence → MinIO/worker scan → mapping (+ local AI suggest) → cycles/rounds → 3-evaluator scoring → structured PA report generation (JSON + section refs). PDF layout still deferred.
 
 
 ### Incident: develop CI broke on the API-001+UI-001 merge, fixed same-day
@@ -50,10 +51,11 @@ See `.ai-team/task-board.yaml` (single tracker).
 - ADR-0004 — Single-agent development by Claude Code (Accepted)
 - ADR-0005 — Object storage: MinIO / S3-compatible; deployment: on-premise (Accepted)
 - ADR-0006 — Implementation frameworks: Fastify (api), Vite+React (web), npm workspaces (Accepted)
+- ADR-0007 — AI mapping provider: on-prem `local_heuristic` only; cloud LLM forbidden while ADR-0005 holds (Accepted for product progress)
 
 ## Open Questions
-- OPEN-3: AI provider + PDPA data-residency (blocks Sprint 2 AI-mapping only). **Note: ADR-0005 keeps all evidence on Thai on-prem hardware — sending it to a foreign AI provider would cross the border this decision avoids. OPEN-3 must respect that.**
-- ~~OPEN-1~~ GitHub · ~~OPEN-2~~ วPA per ADR-0003 · ~~OPEN-4~~ MinIO on-prem per ADR-0005 · ~~OPEN-5~~ AI-mapping task created in Sprint 2 planning
+- ~~OPEN-3~~ **Closed by ADR-0007** — default path is local_heuristic; cloud/foreign LLM requires a superseding ADR.
+- ~~OPEN-1~~ GitHub · ~~OPEN-2~~ วPA per ADR-0003 · ~~OPEN-4~~ MinIO on-prem per ADR-0005 · ~~OPEN-5~~ AI-mapping implemented as local_heuristic
 
 ## Known Risks
 - Criteria and official forms may change by year → framework versioned as data (ADR-0003)

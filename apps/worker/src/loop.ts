@@ -9,6 +9,7 @@ import {
 import type { Env } from './env.js';
 import { processFileJob, type FileProcessPayload } from './jobs/file-process.js';
 import { processStorageGc } from './jobs/storage-gc.js';
+import { processReportGenerate, type ReportGeneratePayload } from './jobs/report-generate.js';
 import { dispatchOutboxBatch } from './jobs/outbox-dispatch.js';
 
 let gcScheduled = false;
@@ -54,6 +55,9 @@ export async function runOnce(
           payload: {},
           availableAt: new Date(Date.now() + 60 * 60 * 1000),
         });
+      } else if (job.jobType === 'report.generate') {
+        const payload = job.payload as unknown as ReportGeneratePayload;
+        await processReportGenerate(payload);
       } else {
         throw new Error(`unknown job type ${job.jobType}`);
       }

@@ -255,8 +255,30 @@ export interface paths {
         /** Mappings of one evidence item */
         get: operations["listEvidenceMappings"];
         put?: never;
-        /** Map evidence to an indicator (human; AI suggestions deferred to Sprint 2) */
+        /** Map evidence to an indicator (human proposal; status=suggested until confirmed) */
         post: operations["createMapping"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evidence/{evidenceId}/mappings/suggest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest indicator mappings for evidence (local heuristic; ADR-0007)
+         * @description Creates zero or more mappings with mapping_source=ai_suggested and
+         *     status=suggested. Never auto-confirms. On-prem only — no foreign LLM
+         *     while ADR-0005 holds. Empty suggestions return 200 with items=[].
+         */
+        post: operations["suggestMappings"];
         delete?: never;
         options?: never;
         head?: never;
@@ -379,6 +401,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List reports for the current school (filter by cycle/subject/status) */
+        get: operations["listReports"];
+        put?: never;
+        /**
+         * Request generation of a structured PA report (async worker fills payload)
+         * @description Creates a draft Report row and enqueues report.generate. Official PDF
+         *     layout is deferred (x-deferred.report-pdf-layout); clients consume
+         *     structured payload + section_refs. Section refs may only cite confirmed
+         *     mappings for official indicator sections.
+         */
+        post: operations["createReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/{reportId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report detail including payload and section refs */
+        get: operations["getReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -409,10 +472,17 @@ export interface components {
         /** @enum {string} */
         MappingStatus: "suggested" | "confirmed" | "rejected" | "revoked";
         /**
-         * @description ai_suggested reserved for Sprint 2 (x-deferred)
+         * @description ai_suggested set only by suggestMappings (ADR-0007 local_heuristic)
          * @enum {string}
          */
         MappingSource: "human" | "ai_suggested";
+        /** @enum {string} */
+        ReportStatus: "draft" | "pending_approval" | "approved" | "issued" | "superseded";
+        /**
+         * @description PA form family × ส/บส variant (layout deferred; code selects payload shape)
+         * @enum {string}
+         */
+        ReportTemplateCode: "PA1_s" | "PA1_bs" | "PA2_s" | "PA2_bs" | "PA3_s" | "PA3_bs";
         /** @enum {string} */
         ScanStatus: "pending" | "clean" | "blocked";
         RubricLevel: number;
@@ -727,6 +797,31 @@ export interface components {
             cycle_id?: string | null;
             rationale?: string | null;
         };
+        /** @description Optional filters for local_heuristic suggest (ADR-0007) */
+        MappingSuggestRequest: {
+            /**
+             * Format: uuid
+             * @description Attach suggested mappings to this cycle when set
+             */
+            cycle_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Limit candidate indicators to this framework; defaults to cycle's framework when cycle_id set
+             */
+            framework_version_id?: string | null;
+            /** @default 5 */
+            max_suggestions: number;
+        };
+        MappingSuggestResult: {
+            /**
+             * @description Always local_heuristic under ADR-0007
+             * @enum {string}
+             */
+            provider: "local_heuristic";
+            items: components["schemas"]["Mapping"][];
+            /** @description Count of candidate indicators skipped because an active mapping already exists */
+            skipped_active?: number;
+        };
         MappingAction: {
             /** @enum {string} */
             action: "confirm" | "reject" | "revoke";
@@ -821,6 +916,57 @@ export interface components {
             items: components["schemas"]["Assignment"][];
             meta: components["schemas"]["PageMeta"];
         };
+        Report: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            school_id: string;
+            /** Format: uuid */
+            cycle_id: string;
+            /** Format: uuid */
+            round_id?: string | null;
+            /** Format: uuid */
+            subject_personnel_id: string;
+            template_code: components["schemas"]["ReportTemplateCode"];
+            status: components["schemas"]["ReportStatus"];
+            /** Format: date-time */
+            generated_at: string;
+        };
+        ReportCreate: {
+            /** Format: uuid */
+            cycle_id: string;
+            /**
+             * Format: uuid
+             * @description Optional round scope (PA2/PA3 often round-scoped)
+             */
+            round_id?: string | null;
+            /** Format: uuid */
+            subject_personnel_id: string;
+            template_code: components["schemas"]["ReportTemplateCode"];
+        };
+        ReportSectionRef: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            report_id: string;
+            /** Format: uuid */
+            evidence_id?: string | null;
+            /** Format: uuid */
+            mapping_id?: string | null;
+            section_key: string;
+            sort_order: number;
+        };
+        ReportDetail: components["schemas"]["Report"] & {
+            /** @description Structured form data (schema_version inside); not official PDF */
+            payload: {
+                [key: string]: unknown;
+            };
+            section_refs: components["schemas"]["ReportSectionRef"][];
+        };
+        ReportPage: {
+            items: components["schemas"]["Report"][];
+            meta: components["schemas"]["PageMeta"];
+        };
     };
     responses: {
         /** @description AUTH-* — missing/expired/invalid credentials */
@@ -884,6 +1030,7 @@ export interface components {
         RoundId: string;
         EvidenceId: string;
         AssignmentId: string;
+        ReportId: string;
         Page: number;
         PageSize: number;
     };
@@ -1428,6 +1575,36 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
+    suggestMappings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evidenceId: components["parameters"]["EvidenceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["MappingSuggestRequest"];
+            };
+        };
+        responses: {
+            /** @description Suggestions created (may be empty) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MappingSuggestResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
     listMappings: {
         parameters: {
             query?: {
@@ -1615,6 +1792,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssignmentResults"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listReports: {
+        parameters: {
+            query?: {
+                cycle_id?: string;
+                subject_personnel_id?: string;
+                status?: components["schemas"]["ReportStatus"];
+                template_code?: components["schemas"]["ReportTemplateCode"];
+                page?: components["parameters"]["Page"];
+                page_size?: components["parameters"]["PageSize"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paged reports */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportCreate"];
+            };
+        };
+        responses: {
+            /** @description Draft created; generation job enqueued */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Report"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Report detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];

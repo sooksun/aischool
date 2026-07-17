@@ -8,32 +8,33 @@ openapi: 3.1.0
 #   gate. Acceptable now because Sprint 1 has no real external consumers yet
 #   (apps/api and apps/web are being built in the same change); a genuine
 #   external consumer at this point would need a migration plan per policy.
+# version 2.1.0 — CCR-005 (additive): Reports list/create/get + AI mapping suggest
+#   (local_heuristic per ADR-0007). No breaking changes vs 2.0.0.
 # Protected contract (contract-policy.md): changes now require a Contract Change
-# Request + version bump. Additive changes → 1.x; breaking changes → 2.0 with a
-# migration plan. The CI gate "contract compatibility" fails PRs that break this
-# surface (oasdiff --fail-on ERR).
+# Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
+# next major with a migration plan. The CI gate "contract compatibility" fails
+# PRs that break this surface (oasdiff --fail-on ERR).
 # Types are GENERATED from this file (ADR-0001); no implementation may invent
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.0.0
-  summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation)
+  version: 2.1.0
+  summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI)
   description: |
-    Contract v1.0 (locked, Sprint 0 exit) — drafted in SEIP-ARCH-001, validated against the
-    data model (SEIP-DB-000) and the evidence-submission UX (SEIP-UI-000, CCR-002 applied),
-    ratified in SEIP-ARCH-002. Scope: authentication, indicator taxonomy
-    (read), evaluation cycle/round configuration, evidence upload (two-phase,
-    storage-agnostic), governed evidence↔indicator mappings, and per-evaluator committee
-    scoring per ADR-0003 (วPA ว9/ว10 2564).
+    Contract v2.1 (CCR-005) — evidence workflow, PA evaluation, structured reports
+    (PA1/PA2/PA3 payload + section refs; official PDF layout remains a Protected
+    Artifact), and AI mapping suggest via on-prem `local_heuristic` (ADR-0007).
 
     **Business rules that bind every implementation**
     - Tenancy: every resource is school-scoped; cross-school access returns RES-001 (indistinguishable from not-found).
     - Taxonomy (frameworks/domains/indicators/weights) is versioned seed data — never hard-coded.
     - Scoring grain is per-evaluator (3 committee members); overall pass requires **every** evaluator ≥ 70% and the workload gate met.
     - Rounds are configurable 1..n per cycle; no endpoint assumes exactly 2.
+    - Reports cite evidence by reference only (ReportSectionRef) — never embed file bytes.
+    - AI mapping suggestions always land as mapping_source=ai_suggested + status=suggested; human confirm required.
     - Error bodies follow error-codes.yaml; codes are stable API surface.
 
-    **Deferred (explicitly out of v1.0)** — see `x-deferred`.
+    **Deferred** — see `x-deferred`.
   license:
     name: Proprietary — SEIP project internal
     url: https://github.com/sooksun/aischool
@@ -41,11 +42,10 @@ info:
     name: SEIP Architecture (Claude Code)
 
 x-deferred:
-  ai-mapping:
-    reason: Sprint 2 — blocked on OPEN-3 (AI provider + PDPA data residency)
-    planned-surface: POST /evidence/{evidenceId}/mappings/suggest, mapping_source=ai_suggested already reserved in schemas
-  reports:
-    reason: Contract v0.2 — needs UX (SEIP-UI-000) + official PA1/PA2/PA3 field inventory
+  report-pdf-layout:
+    reason: Official PA1/PA2/PA3 visual layout is a Protected Artifact; API returns structured JSON only
+  cloud-ai-provider:
+    reason: ADR-0007 forbids foreign/cloud LLM while ADR-0005 holds; local_heuristic is the only enabled path
   notifications:
     reason: Channel choice pending; events.yaml defines the triggering domain events
 
@@ -66,9 +66,11 @@ tags:
   - name: evidence
     description: Evidence metadata and two-phase file upload
   - name: mappings
-    description: Governed evidence↔indicator mappings (human-confirmed)
+    description: Governed evidence↔indicator mappings (human-confirmed; AI may suggest)
   - name: scoring
     description: Committee assignments and per-evaluator scoring
+  - name: reports
+    description: Structured PA report instances (payload JSON + evidence section refs)
 
 paths:
   /auth/login:
@@ -461,7 +463,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     post:
       operationId: createMapping
-      summary: Map evidence to an indicator (human; AI suggestions deferred to Sprint 2)
+      summary: Map evidence to an indicator (human proposal; status=suggested until confirmed)
       tags: [mappings]
       parameters:
         - $ref: '#/components/parameters/EvidenceId'
@@ -480,6 +482,33 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /evidence/{evidenceId}/mappings/suggest:
+    post:
+      operationId: suggestMappings
+      summary: Suggest indicator mappings for evidence (local heuristic; ADR-0007)
+      description: |
+        Creates zero or more mappings with mapping_source=ai_suggested and
+        status=suggested. Never auto-confirms. On-prem only — no foreign LLM
+        while ADR-0005 holds. Empty suggestions return 200 with items=[].
+      tags: [mappings]
+      parameters:
+        - $ref: '#/components/parameters/EvidenceId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MappingSuggestRequest' }
+      responses:
+        '200':
+          description: Suggestions created (may be empty)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MappingSuggestResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
   /mappings:
@@ -636,6 +665,74 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /reports:
+    get:
+      operationId: listReports
+      summary: List reports for the current school (filter by cycle/subject/status)
+      tags: [reports]
+      parameters:
+        - name: cycle_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: subject_personnel_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ReportStatus' }
+        - name: template_code
+          in: query
+          schema: { $ref: '#/components/schemas/ReportTemplateCode' }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paged reports
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createReport
+      summary: Request generation of a structured PA report (async worker fills payload)
+      description: |
+        Creates a draft Report row and enqueues report.generate. Official PDF
+        layout is deferred (x-deferred.report-pdf-layout); clients consume
+        structured payload + section_refs. Section refs may only cite confirmed
+        mappings for official indicator sections.
+      tags: [reports]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportCreate' }
+      responses:
+        '201':
+          description: Draft created; generation job enqueued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /reports/{reportId}:
+    get:
+      operationId: getReport
+      summary: Report detail including payload and section refs
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: Report detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -666,6 +763,11 @@ components:
       schema: { type: string, format: uuid }
     AssignmentId:
       name: assignmentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReportId:
+      name: reportId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -751,7 +853,14 @@ components:
     MappingSource:
       type: string
       enum: [human, ai_suggested]
-      description: ai_suggested reserved for Sprint 2 (x-deferred)
+      description: ai_suggested set only by suggestMappings (ADR-0007 local_heuristic)
+    ReportStatus:
+      type: string
+      enum: [draft, pending_approval, approved, issued, superseded]
+    ReportTemplateCode:
+      type: string
+      enum: [PA1_s, PA1_bs, PA2_s, PA2_bs, PA3_s, PA3_bs]
+      description: PA form family × ส/บส variant (layout deferred; code selects payload shape)
     ScanStatus:
       type: string
       enum: [pending, clean, blocked]
@@ -1115,6 +1224,39 @@ components:
         cycle_id: { type: [string, 'null'], format: uuid }
         rationale: { type: [string, 'null'], maxLength: 1000 }
 
+    MappingSuggestRequest:
+      type: object
+      description: Optional filters for local_heuristic suggest (ADR-0007)
+      properties:
+        cycle_id:
+          type: [string, 'null']
+          format: uuid
+          description: Attach suggested mappings to this cycle when set
+        framework_version_id:
+          type: [string, 'null']
+          format: uuid
+          description: Limit candidate indicators to this framework; defaults to cycle's framework when cycle_id set
+        max_suggestions:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+
+    MappingSuggestResult:
+      type: object
+      required: [provider, items]
+      properties:
+        provider:
+          type: string
+          enum: [local_heuristic]
+          description: Always local_heuristic under ADR-0007
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Mapping' }
+        skipped_active:
+          type: integer
+          description: Count of candidate indicators skipped because an active mapping already exists
+
     MappingAction:
       type: object
       required: [action]
@@ -1247,4 +1389,63 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/Assignment' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+
+    Report:
+      type: object
+      required: [id, school_id, cycle_id, subject_personnel_id, template_code, status, generated_at]
+      properties:
+        id: { type: string, format: uuid }
+        school_id: { type: string, format: uuid }
+        cycle_id: { type: string, format: uuid }
+        round_id: { type: [string, 'null'], format: uuid }
+        subject_personnel_id: { type: string, format: uuid }
+        template_code: { $ref: '#/components/schemas/ReportTemplateCode' }
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        generated_at: { type: string, format: date-time }
+
+    ReportCreate:
+      type: object
+      required: [cycle_id, subject_personnel_id, template_code]
+      properties:
+        cycle_id: { type: string, format: uuid }
+        round_id:
+          type: [string, 'null']
+          format: uuid
+          description: Optional round scope (PA2/PA3 often round-scoped)
+        subject_personnel_id: { type: string, format: uuid }
+        template_code: { $ref: '#/components/schemas/ReportTemplateCode' }
+
+    ReportSectionRef:
+      type: object
+      required: [id, report_id, section_key, sort_order]
+      properties:
+        id: { type: string, format: uuid }
+        report_id: { type: string, format: uuid }
+        evidence_id: { type: [string, 'null'], format: uuid }
+        mapping_id: { type: [string, 'null'], format: uuid }
+        section_key: { type: string, maxLength: 100 }
+        sort_order: { type: integer }
+
+    ReportDetail:
+      allOf:
+        - $ref: '#/components/schemas/Report'
+        - type: object
+          required: [payload, section_refs]
+          properties:
+            payload:
+              type: object
+              additionalProperties: true
+              description: Structured form data (schema_version inside); not official PDF
+            section_refs:
+              type: array
+              items: { $ref: '#/components/schemas/ReportSectionRef' }
+
+    ReportPage:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Report' }
         meta: { $ref: '#/components/schemas/PageMeta' }
