@@ -1,0 +1,69 @@
+# Example edge reverse proxy for SEIP staging / on-prem (SEIP-OPS-003).
+# Place on the host (or a dedicated nginx/caddy container) that owns public :443.
+# Replace:
+#   - seip.example.school.th
+#   - /etc/ssl/seip/*.pem paths with real certs from your CA or Let's Encrypt
+#   - upstream hostnames if not using docker compose network aliases
+#
+# Architecture (ADR-0005):
+#   Client ──TLS──► edge nginx ──► web:80 (SPA)
+#                         └──/api/──► api:3001
+#   api/web talk to postgres + minio only on the internal compose network.
+#
+# Do NOT commit real certificates or private keys (SEC-REPO-1).
+
+upstream seip_web {
+    server 127.0.0.1:8080;   # docker-compose.staging.yml publishes web on localhost:8080
+}
+
+upstream seip_api {
+    server 127.0.0.1:3001;   # api published on localhost:3001 only
+}
+
+server {
+    listen 80;
+    server_name seip.example.school.th;
+    # Redirect all HTTP to HTTPS
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name seip.example.school.th;
+
+    ssl_certificate     /etc/ssl/seip/fullchain.pem;
+    ssl_certificate_key /etc/ssl/seip/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    # --- security headers (baseline; tighten CSP after UI inventory) ---
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    # Optional: crude login brute-force dampening at the edge (OPS-004 can refine)
+    # limit_req_zone $binary_remote_addr zone=login:10m rate=5r/m;
+    # location = /api/v1/auth/login { limit_req zone=login burst=10 nodelay; proxy_pass http://seip_api; ... }
+
+    client_max_body_size 0;  # uploads go direct to MinIO via presigned URL, not through API body
+
+    location /api/ {
+        proxy_pass http://seip_api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    location / {
+        proxy_pass http://seip_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

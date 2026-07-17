@@ -1,0 +1,20 @@
+# SEIP web SPA image (SEIP-OPS-003) — static build served by nginx.
+# In staging/on-prem, nginx in front of this container (or this image alone on
+# :80 localhost) terminates user traffic and proxies /api to the api service.
+
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/web/package.json apps/web/
+RUN npm ci
+COPY apps/web apps/web
+COPY docs/contracts docs/contracts
+# Optional public API base; empty means same-origin /api (nginx reverse proxy).
+ARG VITE_API_BASE=
+ENV VITE_API_BASE=$VITE_API_BASE
+RUN npm run build --workspace apps/web
+
+FROM nginx:1.27-alpine AS runtime
+COPY infra/docker/nginx-web.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/apps/web/dist /usr/share/nginx/html
+EXPOSE 80

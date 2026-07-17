@@ -10,6 +10,7 @@ coverage/
 .env
 .env.*
 !.env.example
+!.env.staging.example
 
 # Uploaded evidence (personal data — lives in object storage, never in git)
 uploads/
