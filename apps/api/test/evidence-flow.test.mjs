@@ -103,6 +103,8 @@ test('full evidence submission flow: create -> upload -> map -> confirm', async 
   const detail = await app.inject({ method: 'GET', url: `/api/v1/evidence/${evidence.id}`, headers: auth(teacherToken) });
   assert.equal(detail.json().status, 'active', 'CCR-002 lifecycle: draft -> active on first completed upload');
   assert.equal(detail.json().files.length, 1);
+  assert.equal(detail.json().files[0].download_url, null, 'pending scan → no download_url (UPL-006)');
+  assert.equal(complete.json().download_url, null, 'complete response also null while pending');
 
   const mapping = await app.inject({
     method: 'POST', url: `/api/v1/evidence/${evidence.id}/mappings`, headers: auth(teacherToken),
@@ -110,6 +112,70 @@ test('full evidence submission flow: create -> upload -> map -> confirm', async 
   });
   assert.equal(mapping.statusCode, 201);
   assert.equal(mapping.json().status, 'suggested');
+});
+
+test('download_url issued only when scan_status=clean (UPL-006); never for blocked', async () => {
+  const create = await app.inject({
+    method: 'POST', url: '/api/v1/evidence', headers: auth(teacherToken),
+    payload: { category_id: categoryId, title: 'download url test' },
+  });
+  assert.equal(create.statusCode, 201);
+  const evidence = create.json();
+
+  const fileContent = Buffer.from('%PDF-1.4 download-url');
+  const checksum = createHash('sha256').update(fileContent).digest('hex');
+  const initiate = await app.inject({
+    method: 'POST', url: `/api/v1/evidence/${evidence.id}/files/initiate`, headers: auth(teacherToken),
+    payload: {
+      content_type: 'application/pdf', byte_size: fileContent.length,
+      checksum_sha256: checksum, original_filename: 'dl.pdf',
+    },
+  });
+  const target = initiate.json();
+  const putRes = await fetch(target.upload_url, {
+    method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: fileContent,
+  });
+  assert.ok(putRes.ok);
+
+  const complete = await app.inject({
+    method: 'POST',
+    url: `/api/v1/evidence/${evidence.id}/files/${target.file_id}/complete`,
+    headers: auth(teacherToken),
+    payload: {
+      checksum_sha256: checksum, content_type: 'application/pdf',
+      byte_size: fileContent.length, original_filename: 'dl.pdf',
+    },
+  });
+  assert.equal(complete.statusCode, 200);
+  assert.equal(complete.json().scan_status, 'pending');
+  assert.equal(complete.json().download_url, null);
+
+  // Simulate worker marking clean
+  await prisma.evidenceFile.update({
+    where: { id: target.file_id },
+    data: { scanStatus: 'clean' },
+  });
+
+  const cleanDetail = await app.inject({
+    method: 'GET', url: `/api/v1/evidence/${evidence.id}`, headers: auth(teacherToken),
+  });
+  assert.equal(cleanDetail.statusCode, 200);
+  const cleanFile = cleanDetail.json().files[0];
+  assert.equal(cleanFile.scan_status, 'clean');
+  assert.ok(typeof cleanFile.download_url === 'string' && cleanFile.download_url.startsWith('http'),
+    'clean files must get a presigned GET URL');
+  assert.ok(!JSON.stringify(cleanDetail.json()).includes('storage_uri'),
+    'storage_uri must never appear in API responses');
+
+  // Blocked → still null
+  await prisma.evidenceFile.update({
+    where: { id: target.file_id },
+    data: { scanStatus: 'blocked' },
+  });
+  const blockedDetail = await app.inject({
+    method: 'GET', url: `/api/v1/evidence/${evidence.id}`, headers: auth(teacherToken),
+  });
+  assert.equal(blockedDetail.json().files[0].download_url, null);
 });
 
 test('cross-school access returns RES-001, never leaks existence', async () => {

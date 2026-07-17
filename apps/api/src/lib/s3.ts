@@ -2,7 +2,13 @@
 // endpoint (ADR-0005: consumed through the S3 API only, so migrating to real S3/R2
 // later is a config change, not a rewrite). forcePathStyle is required for MinIO
 // (it doesn't do virtual-hosted-style bucket addressing by default).
-import { S3Client, PutObjectCommand, HeadBucketCommand, CreateBucketCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Env } from '../env.js';
 
@@ -60,4 +66,39 @@ export async function presignUpload(
   const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType });
   const uploadUrl = await getSignedUrl(client, command, { expiresIn: UPLOAD_URL_TTL_SECONDS });
   return { uploadUrl, expiresAt: new Date(Date.now() + UPLOAD_URL_TTL_SECONDS * 1000) };
+}
+
+export interface PresignedDownload {
+  downloadUrl: string;
+  expiresAt: Date;
+}
+
+const DOWNLOAD_URL_TTL_SECONDS = 15 * 60;
+
+/**
+ * Short-lived GET for a stored object. Callers MUST gate on scan_status=clean
+ * (UPL-006) before issuing — this helper does not enforce that rule.
+ * storageUri/key never leaves the server except inside the signed query string.
+ */
+export async function presignDownload(
+  client: S3Client,
+  bucket: string,
+  key: string,
+  originalFilename?: string,
+): Promise<PresignedDownload> {
+  const safeName = originalFilename
+    ? originalFilename.replace(/[^\w.\-()+ ]+/g, '_').slice(0, 180)
+    : undefined;
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ...(safeName
+      ? { ResponseContentDisposition: `attachment; filename="${safeName}"` }
+      : {}),
+  });
+  const downloadUrl = await getSignedUrl(client, command, { expiresIn: DOWNLOAD_URL_TTL_SECONDS });
+  return {
+    downloadUrl,
+    expiresAt: new Date(Date.now() + DOWNLOAD_URL_TTL_SECONDS * 1000),
+  };
 }
