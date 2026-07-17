@@ -73,10 +73,11 @@ npm run test:e2e
 
 CI starts Postgres, MinIO, migrate+seed, API, Vite, then Playwright Chromium.
 Fixture users from `tests/e2e/global-setup.mjs`:
-- `e2e-teacher@seip.local` — evidence + reports nav
-- `e2e-director@seip.local` — cycles, reports, evaluator nav
+- `e2e-teacher@seip.local` — evidence upload + reports nav
+- `e2e-director@seip.local` — cycles, create report, PDF, chair scoring
+- committee fixtures + ready report seeded in global-setup (no worker required for PDF)
 
-Smoke coverage (expanded): login → evidence list → submit pick-step; director cycles/reports/evaluator shell.
+Smoke + depth (L2): login → evidence list/submit/upload; director cycles/reports/evaluator; session refresh; create report; PDF download; chair score submit.
 
 Add the self-arming gate names to the required list **when they arm** (a required check that always no-ops gives false confidence; a required check that's armed is real). Protection setup itself still needs `gh auth login` or the web UI — steps recorded in `.ai-team/handoffs/SEIP-OPS-001.md`.
 
