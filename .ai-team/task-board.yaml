@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-19T02:00:00+07:00
+updated_at: 2026-07-19T03:00:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -753,3 +753,20 @@ tasks:
       - Download CTA not labeled as official form
       - List/detail note denies ก.ค.ศ. plate
       - PDF banner matches draft/review wording
+
+  - id: SEIP-CLEANUP-L2
+    title: E2e depth — upload, score, report/PDF, session refresh
+    status: done
+    sprint: 2
+    branch: feat/cleanup-L2-e2e-depth
+    primary_paths:
+      - tests/e2e/**
+      - docs/qa/QUALITY-GATES.md
+    notes: >
+      Beyond shell nav. SEC-002 refresh path exercised. Fixtures seed committee + ready report.
+      Handoff .ai-team/handoffs/SEIP-CLEANUP-L2.md
+    acceptance_criteria:
+      - Upload PDF through stepper to done
+      - Access-token refresh after corruption
+      - Director create report + download PDF
+      - Chair submits scores on seeded assignment
