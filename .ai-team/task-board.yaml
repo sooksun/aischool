@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-19T00:00:00+07:00
+updated_at: 2026-07-19T01:00:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -718,3 +718,21 @@ tasks:
       - No DIRECTOR_ROLES / REPORT_NAV_ROLES / EVALUATOR_NAV_ROLES in App.tsx
       - Nav and route gates use capability flags
       - CAPABILITY_ROLES comments cite permissions.yaml ops
+
+  - id: SEIP-CLEANUP-M4
+    title: Login rate limiter process-global singleton + multi-instance docs
+    status: done
+    sprint: 2
+    branch: feat/cleanup-M4-login-rate-singleton
+    primary_paths:
+      - apps/api/src/lib/login-rate-limit.ts
+      - apps/api/src/server.ts
+      - apps/api/test/login-rate-limit.test.mjs
+      - docs/project/ops-runbook.md
+    notes: >
+      globalThis singleton; tests install/restore process state. Edge is primary
+      for multi-instance — Redis not a launch blocker. Handoff SEIP-CLEANUP-M4.md
+    acceptance_criteria:
+      - Single process-wide limiter used by auth routes
+      - Tests mutate singleton and restore
+      - Multi-instance documented as edge-primary MVP

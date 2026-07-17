@@ -129,9 +129,16 @@ API also sets baseline headers (`nosniff`, `DENY` frame, `no-store` cache) via `
 
 Set `TRUST_PROXY=true` (or `NODE_ENV=production`) so `request.ip` uses `X-Forwarded-For` from the edge.
 
-### Multi-instance note
+### Multi-instance note (cleanup M4 — accepted MVP)
 
-In-process counters are **per API process**. Edge `limit_req` still protects the fleet per IP. Shared Redis counters are a future enhancement if many API replicas are required without a trusted edge.
+| Layer | Scope | Launch status |
+|---|---|---|
+| Edge nginx `limit_req` on `/api/v1/auth/login` | Fleet-wide per client IP | **Primary — required in staging/prod** |
+| API `LoginRateLimiter` (`apps/api/src/lib/login-rate-limit.ts`) | **One process** (`globalThis` singleton) | Defense-in-depth; local/dev still safe |
+
+In-process counters are **not** shared across API replicas. That is **not a launch blocker** while the edge is always primary. Shared Redis (or similar) only if we scale many API instances *without* a trusted edge — see PROJECT_STATE Sprint 2+ remaining.
+
+Tests may replace the process singleton via `installLoginRateLimiterForTests` and must restore it so other files in the same Node process are not left throttled.
 
 ---
 
