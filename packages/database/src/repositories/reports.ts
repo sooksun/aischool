@@ -1,18 +1,19 @@
 // Report + ReportSectionRef — structured PA payloads; evidence cited by reference only.
 import { randomUUID } from 'node:crypto';
 import type { Prisma, ReportStatus } from '@prisma/client';
+import {
+  pendingReportPayloadV1,
+  REPORT_TEMPLATE_CODES,
+  type ReportPayloadV1Ready,
+  type ReportTemplateCode,
+  isReportTemplateCode,
+} from '@seip/backend-shared';
 import { prisma } from '../client.js';
 import { enqueueWorkerJob } from './jobs.js';
 import { enqueueOutboxEvent } from './outbox.js';
 
-export const REPORT_TEMPLATE_CODES = [
-  'PA1_s', 'PA1_bs', 'PA2_s', 'PA2_bs', 'PA3_s', 'PA3_bs',
-] as const;
-export type ReportTemplateCode = (typeof REPORT_TEMPLATE_CODES)[number];
-
-export function isReportTemplateCode(v: string): v is ReportTemplateCode {
-  return (REPORT_TEMPLATE_CODES as readonly string[]).includes(v);
-}
+export { REPORT_TEMPLATE_CODES, isReportTemplateCode };
+export type { ReportTemplateCode };
 
 export interface ListReportsFilter {
   cycleId?: string;
@@ -93,11 +94,7 @@ export async function createReportDraft(input: {
         subjectPersonnelId: input.subjectPersonnelId,
         templateCode: input.templateCode,
         status: 'draft',
-        payload: {
-          schema_version: 1,
-          generation_status: 'pending',
-          template_code: input.templateCode,
-        },
+        payload: pendingReportPayloadV1(input.templateCode) as unknown as Prisma.InputJsonValue,
       },
     });
     await enqueueWorkerJob(
@@ -173,7 +170,7 @@ export async function generateReportPayload(reportId: string) {
     },
   });
 
-  const payload = {
+  const payload: ReportPayloadV1Ready = {
     schema_version: 1,
     generation_status: 'ready',
     template_code: report.templateCode,
@@ -219,7 +216,7 @@ export async function generateReportPayload(reportId: string) {
         part1_percent: Number(r.part1Percent),
         part2_percent: Number(r.part2Percent),
         total_percent: Number(r.totalPercent),
-        passed_individual_threshold: r.passedIndividualThreshold,
+        passed_individual_threshold: r.passedIndividualThreshold ?? false,
         computed_at: r.computedAt.toISOString(),
       })),
     })),
@@ -245,7 +242,7 @@ export async function generateReportPayload(reportId: string) {
     await tx.report.update({
       where: { id: reportId },
       data: {
-        payload: payload as Prisma.InputJsonValue,
+        payload: payload as unknown as Prisma.InputJsonValue,
         status: 'pending_approval',
         generatedAt: new Date(),
       },

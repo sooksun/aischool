@@ -1,10 +1,15 @@
 // Official-style PA form PDF (SEIP) — structure aligned with PA1/PA2/PA3 × ส/บส.
 // Not a pixel-perfect ก.ค.ศ. print plate (Protected Artifact); generated from
-// Report.payload + section_refs so layout can be refined without schema changes.
+// ReportPayloadV1 + section_refs so layout can be refined without schema changes.
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import PDFDocument from 'pdfkit';
+import {
+  coerceReportPayloadV1,
+  isReportPayloadReady,
+  type ReportPayloadV1,
+} from '@seip/backend-shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -24,7 +29,8 @@ export interface PaReportPdfInput {
   templateCode: string;
   status: string;
   generatedAt: Date | string;
-  payload: Record<string, unknown>;
+  /** Prefer typed ReportPayloadV1; unknown JSON is coerced. */
+  payload: ReportPayloadV1 | Record<string, unknown> | unknown;
   sectionRefs: { sectionKey: string; evidenceId: string | null; mappingId: string | null; sortOrder: number }[];
 }
 
@@ -48,9 +54,8 @@ function str(v: unknown): string {
  * Throws if payload generation is still pending (caller should map to RPT-002).
  */
 export async function buildPaReportPdf(input: PaReportPdfInput): Promise<Buffer> {
-  const payload = input.payload ?? {};
-  const gen = payload.generation_status;
-  if (gen === 'pending' || input.status === 'draft') {
+  const payload = coerceReportPayloadV1(input.payload);
+  if (!isReportPayloadReady(payload) || input.status === 'draft') {
     throw new Error('REPORT_NOT_READY');
   }
 
@@ -92,9 +97,7 @@ export async function buildPaReportPdf(input: PaReportPdfInput): Promise<Buffer>
   doc.fillColor('#000');
   doc.moveDown(1);
 
-  const subject = (payload.subject ?? {}) as Record<string, unknown>;
-  const cycle = (payload.cycle ?? {}) as Record<string, unknown>;
-  const round = payload.round as Record<string, unknown> | null;
+  const { subject, cycle, round } = payload;
 
   section(doc, '1. ข้อมูลผู้รับการประเมินและรอบ');
   line(doc, 'ชื่อ-สกุล', str(subject.full_name));
@@ -114,16 +117,14 @@ export async function buildPaReportPdf(input: PaReportPdfInput): Promise<Buffer>
 
   doc.moveDown(0.8);
   section(doc, '2. ผลการประเมิน (ต่อกรรมการ)');
-  const assignments = Array.isArray(payload.assignments) ? payload.assignments as Record<string, unknown>[] : [];
-  if (assignments.length === 0) {
+  if (payload.assignments.length === 0) {
     doc.fontSize(10).text('ยังไม่มีผลคะแนนจากกรรมการในรอบนี้');
   } else {
-    for (const a of assignments) {
+    for (const a of payload.assignments) {
       doc.fontSize(10).text(
         `มอบหมาย ${str(a.assignment_id).slice(0, 8)}… · รอบที่ ${str(a.round_number)} · สถานะ ${str(a.status)} · กรรมการ ${str(a.committee_size)} คน`,
       );
-      const results = Array.isArray(a.evaluator_results) ? a.evaluator_results as Record<string, unknown>[] : [];
-      for (const r of results) {
+      for (const r of a.evaluator_results) {
         const pass = r.passed_individual_threshold ? 'ผ่าน ≥70%' : 'ไม่ถึงเกณฑ์';
         doc.fontSize(9).text(
           `  • ${str(r.evaluator_user_id).slice(0, 8)}… รวม ${str(r.total_percent)}% (ส่วน1 ${str(r.part1_percent)}% · ส่วน2 ${str(r.part2_percent)}%) — ${pass}`,
@@ -135,13 +136,10 @@ export async function buildPaReportPdf(input: PaReportPdfInput): Promise<Buffer>
 
   doc.moveDown(0.5);
   section(doc, '3. หลักฐานที่ผูกตัวชี้วัด (ยืนยันแล้ว)');
-  const mappings = Array.isArray(payload.confirmed_mappings)
-    ? payload.confirmed_mappings as Record<string, unknown>[]
-    : [];
-  if (mappings.length === 0) {
+  if (payload.confirmed_mappings.length === 0) {
     doc.fontSize(10).text('ไม่มี mapping ที่ยืนยันแล้ว');
   } else {
-    for (const m of mappings) {
+    for (const m of payload.confirmed_mappings) {
       doc.fontSize(9).text(
         `• [${str(m.indicator_code)}] ${str(m.indicator_name_th)} — หลักฐาน: ${str(m.evidence_title)}`,
       );

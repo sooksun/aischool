@@ -3,12 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Error codes, event envelopes, and the permissions.yaml loader — mirrors docs/contracts/* (module-boundaries.md). Consumed by apps/api and apps/worker only.",
+  "description": "Error codes, event envelopes, permissions.yaml loader, ReportPayloadV1 — mirrors docs/contracts/* (module-boundaries.md). Consumed by apps/api, apps/worker, packages/database.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:unit": "node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "js-yaml": "^4.1.0"

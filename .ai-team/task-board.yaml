@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-18T22:00:00+07:00
+updated_at: 2026-07-18T23:30:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -681,3 +681,23 @@ tasks:
       - GET .../files/{fileId}/download-url issues URL only when clean
       - pending/blocked → UPL-006 (423)
       - UI downloads via lazy endpoint on click
+
+  - id: SEIP-CLEANUP-M2
+    title: Shared ReportPayloadV1 type across worker/API/PDF/UI
+    status: done
+    sprint: 2
+    branch: feat/cleanup-M2-report-payload-v1
+    primary_paths:
+      - packages/backend-shared/src/report-payload-v1.ts
+      - packages/database/src/repositories/reports.ts
+      - apps/api/src/lib/pa-report-pdf.ts
+      - apps/api/src/routes/reports.ts
+      - apps/web/src/pages/reports/ReportDetailPage.tsx
+      - docs/contracts/openapi.yaml
+    notes: >
+      CCR-011 / openapi 2.6.0. Ends Record<string, unknown> casts on report payload.
+      Handoff .ai-team/handoffs/SEIP-CLEANUP-M2.md
+    acceptance_criteria:
+      - Typed ReportPayloadV1 in backend-shared
+      - generateReportPayload + getReport + PDF use it
+      - OpenAPI ReportPayload + web generated types

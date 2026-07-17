@@ -1080,11 +1080,78 @@ export interface components {
             sort_order: number;
         };
         ReportDetail: components["schemas"]["Report"] & {
-            /** @description Structured form data (schema_version inside); not official PDF */
-            payload: {
-                [key: string]: unknown;
-            };
+            payload: components["schemas"]["ReportPayload"];
             section_refs: components["schemas"]["ReportSectionRef"][];
+        };
+        ReportPayload: {
+            /**
+             * @description Payload schema major version (ReportPayloadV1)
+             * @constant
+             */
+            schema_version: 1;
+            /** @enum {string} */
+            generation_status: "pending" | "ready";
+            template_code: components["schemas"]["ReportTemplateCode"];
+            subject?: {
+                /** Format: uuid */
+                personnel_id: string;
+                full_name: string;
+                position_role: string;
+                rank_level_code: string;
+            };
+            cycle?: {
+                /** Format: uuid */
+                id: string;
+                title: string;
+                fiscal_year: number;
+                evaluation_kind: string;
+                framework_code: string;
+                framework_legal_ref: string;
+            };
+            round?: {
+                /** Format: uuid */
+                id: string;
+                round_number: number;
+                purpose: string;
+                status: string;
+            } | null;
+            confirmed_mappings?: {
+                /** Format: uuid */
+                mapping_id: string;
+                /** Format: uuid */
+                evidence_id: string;
+                evidence_title: string;
+                /** Format: uuid */
+                indicator_id: string;
+                indicator_code: string;
+                indicator_name_th: string;
+                /** Format: date-time */
+                confirmed_at: string | null;
+            }[];
+            assignments?: {
+                /** Format: uuid */
+                assignment_id: string;
+                /** Format: uuid */
+                round_id: string;
+                round_number: number;
+                status: string;
+                committee_size: number;
+                evaluator_results: {
+                    /** Format: uuid */
+                    evaluator_user_id: string;
+                    part1_percent: number;
+                    part2_percent: number;
+                    total_percent: number;
+                    passed_individual_threshold: boolean;
+                    /** Format: date-time */
+                    computed_at: string;
+                }[];
+            }[];
+            /**
+             * Format: date-time
+             * @description Present when generation_status=ready
+             */
+            generated_at?: string;
         };
         ReportPage: {
             items: components["schemas"]["Report"][];

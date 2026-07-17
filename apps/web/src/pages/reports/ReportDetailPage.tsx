@@ -1,4 +1,5 @@
-// Report detail — structured payload + section refs (SEIP-UI-004) + PDF download.
+// Report detail — structured ReportPayload + section refs (SEIP-UI-004) + PDF download.
+// Cleanup M2: payload typed via OpenAPI ReportPayload (schema_version=1) — no ad-hoc casts.
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, unwrap, downloadAuthorized } from '../../api/client';
@@ -6,6 +7,11 @@ import { ApiError, thaiMessageFor } from '../../api/errors';
 import type { components } from '../../api/schema.generated';
 
 type ReportDetail = components['schemas']['ReportDetail'];
+type ReportPayload = components['schemas']['ReportPayload'];
+
+function isPayloadReady(p: ReportPayload): boolean {
+  return p.generation_status === 'ready';
+}
 
 export function ReportDetailPage() {
   const { reportId } = useParams<{ reportId: string }>();
@@ -28,7 +34,7 @@ export function ReportDetailPage() {
         if (cancelled) return;
         const data = unwrap(res) as ReportDetail;
         setReport(data);
-        const gen = (data.payload as { generation_status?: string } | null)?.generation_status;
+        const gen = data.payload.generation_status;
         if (data.status === 'draft' || gen === 'pending') {
           setPolling(true);
           timer = setTimeout(load, 2000);
@@ -63,15 +69,10 @@ export function ReportDetailPage() {
     return <main className="page" aria-busy="true"><p>กำลังโหลด…</p></main>;
   }
 
-  const payload = report.payload as {
-    generation_status?: string;
-    subject?: { full_name?: string };
-    confirmed_mappings?: unknown[];
-    assignments?: unknown[];
-  };
-
-  const pdfReady = report.status !== 'draft' && payload.generation_status !== 'pending';
+  const payload = report.payload;
+  const pdfReady = report.status !== 'draft' && isPayloadReady(payload);
   const templateCode = report.template_code;
+  const subjectName = isPayloadReady(payload) ? payload.subject?.full_name : undefined;
 
   async function downloadPdf() {
     if (!reportId) return;
@@ -122,8 +123,8 @@ export function ReportDetailPage() {
         </div>
       )}
 
-      {payload.subject?.full_name && (
-        <p><strong>ผู้รับการประเมิน:</strong> {payload.subject.full_name}</p>
+      {subjectName && (
+        <p><strong>ผู้รับการประเมิน:</strong> {subjectName}</p>
       )}
 
       <h2>การอ้างอิงหลักฐาน (section refs)</h2>
