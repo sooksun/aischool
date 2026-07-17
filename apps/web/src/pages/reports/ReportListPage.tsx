@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { api, unwrap } from '../../api/client';
 import { ApiError, thaiMessageFor } from '../../api/errors';
 import type { components } from '../../api/schema.generated';
-import { useAuth, hasRole } from '../../hooks/useAuth';
+import { useAuth } from '../../hooks/useAuth';
 
 type Report = components['schemas']['Report'];
 type Cycle = components['schemas']['Cycle'];
@@ -20,8 +20,8 @@ const TEMPLATES: { code: TemplateCode; label: string }[] = [
 ];
 
 export function ReportListPage() {
-  const { user } = useAuth();
-  const canCreate = user ? hasRole(user, ['director', 'school_admin']) : false;
+  const { capabilities } = useAuth();
+  const canCreate = capabilities.createReports;
   const [reports, setReports] = useState<Report[] | null>(null);
   const [error, setError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);

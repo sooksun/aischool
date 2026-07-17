@@ -6,7 +6,7 @@ import { Link, useParams } from 'react-router-dom';
 import { api, unwrap } from '../api/client';
 import { ApiError, thaiMessageFor } from '../api/errors';
 import type { components } from '../api/schema.generated';
-import { useAuth, hasRole } from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuth';
 
 type EvidenceDetail = components['schemas']['Evidence'] & {
   files: components['schemas']['EvidenceFile'][];
@@ -16,8 +16,8 @@ type Mapping = components['schemas']['Mapping'];
 type Framework = components['schemas']['Framework'];
 
 export function EvidenceDetailPage() {
-  const { user } = useAuth();
-  const canGovernMappings = user ? hasRole(user, ['director', 'school_admin']) : false;
+  const { capabilities } = useAuth();
+  const canGovernMappings = capabilities.governMappings;
   const { evidenceId } = useParams<{ evidenceId: string }>();
   const [evidence, setEvidence] = useState<EvidenceDetail | null>(null);
   const [error, setError] = useState(false);

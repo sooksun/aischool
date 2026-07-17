@@ -16,6 +16,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, unwrap, setAccessToken, setRefreshToken, setCurrentSchoolId, registerSessionHooks } from '../api/client';
 import type { components } from '../api/schema.generated';
+import { capabilitiesFromMemberships, type Capabilities } from '../lib/capabilities';
 
 type CurrentUser = components['schemas']['CurrentUser'];
 type Role = components['schemas']['Role'];
@@ -25,6 +26,11 @@ interface AuthState {
   loading: boolean;
   /** null = ambiguous (multiple schools, none picked yet) or user has none. */
   schoolId: string | null;
+  /**
+   * UI affordance flags from memberships (once per user). Nav/routes should use
+   * these instead of ad-hoc role arrays. Not a substitute for permissions.yaml.
+   */
+  capabilities: Capabilities;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -109,7 +115,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSchoolId(null);
   }, []);
 
-  const value = useMemo(() => ({ user, loading, schoolId, login, logout }), [user, loading, schoolId, login, logout]);
+  const capabilities = useMemo(
+    () => capabilitiesFromMemberships(user?.memberships),
+    [user],
+  );
+
+  const value = useMemo(
+    () => ({ user, loading, schoolId, capabilities, login, logout }),
+    [user, loading, schoolId, capabilities, login, logout],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
