@@ -1,10 +1,13 @@
-// POST /auth/login, GET /auth/me — the two operations in permissions.yaml's
-// unauthenticated/any_authenticated exemptions (CCR-002 §GAP-1 for /me's
-// `personnel` shape).
+// POST /auth/login, POST /auth/refresh, POST /auth/logout, GET /auth/me — the
+// operations in permissions.yaml's unauthenticated/any_authenticated exemptions
+// (CCR-002 §GAP-1 for /me's `personnel` shape; CCR-008 for the session lifecycle).
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { verifyPassword, signAccessToken, ACCESS_TOKEN_TTL_SECONDS, generateRefreshToken, hashRefreshToken, refreshTokenExpiryDate } from '@seip/auth';
-import { findUserByEmailForLogin, getUserById, getMembershipsForUser, createRefreshToken } from '@seip/database';
+import {
+  findUserByEmailForLogin, getUserById, getMembershipsForUser, createRefreshToken,
+  findActiveRefreshToken, rotateRefreshToken, revokeRefreshToken, revokeAllRefreshTokensForUser,
+} from '@seip/database';
 import { ApiError } from '@seip/backend-shared';
 import type { Env } from '../env.js';
 import { getLoginRateLimiter } from '../lib/login-rate-limit.js';
@@ -12,6 +15,14 @@ import { getLoginRateLimiter } from '../lib/login-rate-limit.js';
 const LoginBody = z.object({
   email: z.string().email(),
   password: z.string().min(8),
+});
+
+const RefreshBody = z.object({
+  refresh_token: z.string().min(1),
+});
+
+const LogoutBody = z.object({
+  refresh_token: z.string().min(1).optional(),
 });
 
 export const authRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env }) => {
@@ -47,6 +58,52 @@ export const authRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env })
       refresh_token: rawRefresh,
       expires_in: ACCESS_TOKEN_TTL_SECONDS,
     });
+  });
+
+  app.post('/auth/refresh', { config: { operationId: 'refreshToken' } }, async (request, reply) => {
+    const body = RefreshBody.parse(request.body);
+    const row = await findActiveRefreshToken(hashRefreshToken(body.refresh_token));
+
+    // One AUTH-001 shape for unknown/replayed tokens — never an oracle for
+    // "this was once valid" (CCR-008). A replayed (already-rotated) token is
+    // the SEC-AUTH-2 theft signal: kill the whole family before failing.
+    if (!row) throw new ApiError('AUTH-001', 'Invalid refresh token');
+    if (row.revokedAt) {
+      await revokeAllRefreshTokensForUser(row.userId);
+      throw new ApiError('AUTH-001', 'Invalid refresh token');
+    }
+    if (row.expiresAt < new Date()) throw new ApiError('AUTH-002', 'Refresh token expired');
+
+    const user = await getUserById(row.userId);
+    if (!user || user.status !== 'active') throw new ApiError('AUTH-003', 'Account disabled or not found');
+
+    const rawRefresh = generateRefreshToken();
+    const newRow = await createRefreshToken(user.id, hashRefreshToken(rawRefresh), refreshTokenExpiryDate());
+    await rotateRefreshToken(row.id, newRow.id);
+    const accessToken = await signAccessToken(user.id, env.JWT_SECRET);
+
+    reply.status(200).send({
+      access_token: accessToken,
+      refresh_token: rawRefresh,
+      expires_in: ACCESS_TOKEN_TTL_SECONDS,
+    });
+  });
+
+  app.post('/auth/logout', { config: { operationId: 'logout' } }, async (request, reply) => {
+    const auth = request.auth!; // any_authenticated — preHandler populated this
+    const body = LogoutBody.parse(request.body ?? {});
+
+    if (body.refresh_token) {
+      const row = await findActiveRefreshToken(hashRefreshToken(body.refresh_token));
+      // Only the caller's own token; someone else's (or a bogus one) is ignored —
+      // idempotent 204 either way, never an existence oracle (CCR-008).
+      if (row && row.userId === auth.userId && !row.revokedAt) {
+        await revokeRefreshToken(row.id);
+      }
+    } else {
+      await revokeAllRefreshTokensForUser(auth.userId);
+    }
+    reply.status(204).send();
   });
 
   app.get('/auth/me', { config: { operationId: 'getCurrentUser' } }, async (request) => {

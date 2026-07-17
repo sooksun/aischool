@@ -322,3 +322,55 @@ test('createAssignment enforces exactly one chair and 3 distinct evaluators (VAL
   assert.equal(duplicateEvaluator.statusCode, 422);
   assert.equal(duplicateEvaluator.json().code, 'VAL-002');
 });
+
+test('committee seats require an eligible membership at the school, and the evaluatee can never sit on their own committee (2026-07-18 audit fix)', async () => {
+  const { round } = await makeOpenRound(3007);
+  const committeeWith = (thirdSeatUserId) => ({
+    evaluatee_personnel_id: teacherPersonnelId,
+    committee: [
+      { evaluator_user_id: director.id, committee_role: 'chair', seat_number: 1 },
+      { evaluator_user_id: evaluator2.id, committee_role: 'member', seat_number: 2 },
+      { evaluator_user_id: thirdSeatUserId, committee_role: 'member', seat_number: 3 },
+    ],
+  });
+
+  // A real account with NO membership at this school (exists, so the pre-existing
+  // existence check passes — exactly the gap the audit found).
+  const foreign = await prisma.userAccount.create({
+    data: { email: `score-foreign-${randomUUID()}@x.io`, displayName: 'Foreign', status: 'active', passwordHash: 'x' },
+  });
+  const crossSchool = await app.inject({
+    method: 'POST', url: `/api/v1/rounds/${round.id}/assignments`, headers: auth(directorToken),
+    payload: committeeWith(foreign.id),
+  });
+  assert.equal(crossSchool.statusCode, 422, 'an account from outside the school must not be seatable');
+  assert.equal(crossSchool.json().code, 'VAL-002');
+
+  // A member of THIS school whose role (teacher) can never submit scores.
+  const wrongRole = await app.inject({
+    method: 'POST', url: `/api/v1/rounds/${round.id}/assignments`, headers: auth(directorToken),
+    payload: committeeWith(teacherEvaluatee.id),
+  });
+  assert.equal(wrongRole.statusCode, 422, 'a teacher-role member must not be seatable');
+  assert.equal(wrongRole.json().code, 'VAL-002');
+
+  // Self-scoring: give the evaluatee an evaluator membership too (dual-role staff
+  // are real) — role-eligible now, but still their own evaluatee.
+  await prisma.schoolMembership.create({
+    data: { userId: teacherEvaluatee.id, schoolId: school.id, role: 'evaluator', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
+  });
+  const selfScoring = await app.inject({
+    method: 'POST', url: `/api/v1/rounds/${round.id}/assignments`, headers: auth(directorToken),
+    payload: committeeWith(teacherEvaluatee.id),
+  });
+  assert.equal(selfScoring.statusCode, 422, 'the evaluatee must never sit on their own committee');
+  assert.equal(selfScoring.json().code, 'VAL-002');
+  assert.match(selfScoring.json().message, /own committee/);
+
+  // Sanity: a fully-eligible committee on the same round still succeeds.
+  const valid = await app.inject({
+    method: 'POST', url: `/api/v1/rounds/${round.id}/assignments`, headers: auth(directorToken),
+    payload: committeeWith(evaluator3.id),
+  });
+  assert.equal(valid.statusCode, 201, `eligible committee must still create: ${valid.body}`);
+});

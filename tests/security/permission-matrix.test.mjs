@@ -25,6 +25,7 @@ let app;
 const ROLES = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin'];
 const tokenFor = {};
 const userIdFor = {};
+let secondEvaluatorUserId;
 let school, area, evidenceId, indicatorId, mappingId, frameworkId, deletableEvidenceId, categoryId;
 let cycleId, roundId, assignmentId, teacherPersonnelId;
 
@@ -61,6 +62,17 @@ before(async () => {
     tokenFor[role] = login.json().access_token;
     userIdFor[role] = user.id;
   }
+
+  // createAssignment's committee needs THREE eligible seats (active evaluator or
+  // director membership at the school — 2026-07-18 audit fix), and the per-role
+  // fixture has only one of each. A second evaluator account fills seat 3.
+  const secondEvaluator = await prisma.userAccount.create({
+    data: { email: `perm-evaluator2-${randomUUID()}@x.io`, displayName: 'evaluator2', status: 'active', passwordHash: await argonHash('perm-test-evaluator2-password') },
+  });
+  await prisma.schoolMembership.create({
+    data: { userId: secondEvaluator.id, schoolId: school.id, role: 'evaluator', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
+  });
+  secondEvaluatorUserId = secondEvaluator.id;
 
   // Real resource ids, created via the teacher (who has genuine grants for these),
   // so every role's requests below hit an ACTUAL resource rather than a 404 that
@@ -164,9 +176,11 @@ const OPERATIONS = () => ({
   createAssignment: { method: 'POST', url: `/api/v1/rounds/${roundId}/assignments`, payload: {
     evaluatee_personnel_id: teacherPersonnelId,
     committee: [
+      // All three seats hold eligible memberships (evaluator/director at this
+      // school — 2026-07-18 audit fix); school_admin no longer qualifies.
       { evaluator_user_id: userIdFor.evaluator, committee_role: 'chair', seat_number: 1 },
       { evaluator_user_id: userIdFor.director, committee_role: 'member', seat_number: 2 },
-      { evaluator_user_id: userIdFor.school_admin, committee_role: 'member', seat_number: 3 },
+      { evaluator_user_id: secondEvaluatorUserId, committee_role: 'member', seat_number: 3 },
     ],
   } },
   getAssignment: { method: 'GET', url: `/api/v1/assignments/${assignmentId}` },

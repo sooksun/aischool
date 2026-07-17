@@ -21,6 +21,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate a refresh token into a new token pair (CCR-008, SEC-AUTH-2)
+         * @description The presented refresh token is the credential (no bearer header). On
+         *     success the old token is revoked and a NEW pair is returned — the client
+         *     must replace both stored tokens. Presenting an already-rotated (revoked)
+         *     token is treated as a theft signal: every live token for that account is
+         *     revoked and the request fails AUTH-001.
+         */
+        post: operations["refreshToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke refresh token(s) server-side (CCR-008, SEC-AUTH-2)
+         * @description With a `refresh_token` in the body, revokes that token (this session).
+         *     Without one, revokes every live refresh token for the caller (logout
+         *     everywhere). The short-lived access token is not blacklisted — it ages
+         *     out within ACCESS_TOKEN_TTL_SECONDS.
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -517,6 +564,13 @@ export interface components {
             refresh_token: string;
             /** @description Access token TTL seconds */
             expires_in: number;
+        };
+        RefreshRequest: {
+            refresh_token: string;
+        };
+        LogoutRequest: {
+            /** @description Revoke only this token (this session). Omit to revoke all the caller's tokens. */
+            refresh_token?: string;
         };
         CurrentUser: {
             /** Format: uuid */
@@ -1084,6 +1138,55 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    refreshToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Rotated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenPair"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LogoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Revoked (idempotent — also 204 if the token was already revoked) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             401: components["responses"]["Unauthorized"];
         };
     };

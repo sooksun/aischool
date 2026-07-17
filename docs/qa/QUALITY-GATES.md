@@ -89,3 +89,31 @@ Add the self-arming gate names to the required list **when they arm** (a require
 | `npm run gate:dep-audit` | exit 0 — 0 vulnerabilities |
 | `npm run gate:secret-scan` | exit 0 — 7 commits scanned, no leaks (docker image, pinned v8.18.4) |
 | oasdiff breaking (develop v0.1-draft → ARCH-002 v1.0.0) | exit 0 — "No breaking changes to report" (docker, digest-pinned) |
+
+## Verified runs (2026-07-18, local — SEIP-SEC-002, full suite; closes the audit's "no recorded test run" finding)
+
+Against disposable Postgres 16 (:15439, fresh migrate deploy + seed) and MinIO
+(:19001) — never the shared dev stack. Every suite the CI defines, executed and
+passing on the same tree that introduced CCR-008 + the committee-integrity fix:
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 — all 6 workspaces |
+| `npm run lint` | exit 0 — **now a real gate**: apps/web ESLint (typescript-eslint + react-hooks + jsx-a11y), 0 problems. Before this, no workspace defined `lint`, so the CI job was a silent no-op |
+| `npm run test:backend` | 19/19 |
+| `npm run test:integration --workspace apps/api` | 27/27 (incl. 4 new CCR-008 session tests + committee-eligibility test) |
+| `npm run test:integration --workspace apps/worker` | 9/9 |
+| `npm run test:integration --workspace packages/database` | 9/9 |
+| `npm run test:unit --workspace packages/auth` | 13/13 |
+| `npm run test:unit --workspace apps/web` | 20/20 |
+| `npm run test:security` | 3/3 (permission sweep now covers 34 operations · 4 exemptions) |
+| `npm run gate:contracts` | exit 0 — openapi 2.3.0, generated types + constants in sync |
+| `npm run gate:ownership` | exit 0 |
+| `npm run gate:dep-audit` | exit 0 — 0 vulnerabilities |
+
+**Branch protection (user action still required):** `test:unit` / `test:integration` /
+`test:security` / `typecheck` / `build` / `lint` are armed and green but NOT in the
+required-check list above — a PR can still merge with them failing. Add them via
+GitHub → Settings → Branches → develop/main, or:
+`gh api -X PATCH repos/sooksun/aischool/branches/develop/protection/required_status_checks -f "contexts[]=..."`
+(needs `gh auth login`; agent sessions here run unauthenticated by design).

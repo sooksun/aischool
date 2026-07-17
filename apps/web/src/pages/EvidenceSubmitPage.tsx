@@ -93,7 +93,11 @@ export function EvidenceSubmitPage() {
   function toggleIndicator(id: string) {
     setSelectedIndicatorIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   }
@@ -218,14 +222,16 @@ function DetailsStep(props: {
       <p className="field-hint">ไฟล์: {file.name} ({(file.size / (1024 * 1024)).toFixed(1)} MB)</p>
 
       <div className="field">
-        <label id="category-label">หมวดหลักฐาน</label>
+        {/* span, not <label>: no single form control to associate with — the
+            radiogroup below is labelled via aria-labelledby (jsx-a11y fix). */}
+        <span id="category-label" className="field-label">หมวดหลักฐาน</span>
         {categories === null && <p className="field-hint">กำลังโหลดหมวดหมู่…</p>}
         {categories !== null && (
           <div className="category-grid" role="radiogroup" aria-labelledby="category-label">
             {categories.map((c) => (
               <button
                 key={c.id} type="button" className="category-card"
-                role="radio" aria-checked={category?.id === c.id} aria-pressed={category?.id === c.id}
+                role="radio" aria-checked={category?.id === c.id}
                 onClick={() => onCategoryChange(c)}
               >
                 <span className="icon" aria-hidden="true">{categoryIcon(c.code)}</span>
