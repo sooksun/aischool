@@ -2,6 +2,7 @@
 # version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
 # version: 1.1.0 — CCR-005 (additive): RPT-001, AI-001.
 # version: 1.2.0 — SEIP-OPS-004 (additive): AUTH-004 login rate limit.
+# version: 1.3.0 — CCR-007 (additive): RPT-002 report PDF not ready.
 # Protected contract (contract-policy.md): changes require an approved CCR.
 # Codes are a stable API surface — clients map them to localized text. Adding a
 # code is additive (1.x); changing the meaning or HTTP status of an existing code,
@@ -16,7 +17,7 @@
 #   }
 # HTTP status is authoritative for transport semantics; `code` for business semantics.
 
-version: 1.2.0
+version: 1.3.0
 status: locked
 locked_at: 2026-07-17
 error_shape:
@@ -82,6 +83,7 @@ codes:
 
   # --- RPT (reports) ---
   RPT-001: { http: 422, meaning: Invalid report request — unknown template, cycle/round/subject mismatch, or generation preconditions not met }
+  RPT-002: { http: 422, meaning: Report PDF not ready — still draft or generation_status pending }
 
   # --- AI (mapping suggest) ---
   AI-001: { http: 422, meaning: Mapping suggest rejected — evidence not eligible, framework unknown, or provider unavailable }

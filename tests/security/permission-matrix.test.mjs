@@ -196,6 +196,8 @@ const OPERATIONS = () => ({
   // getReport needs a real resource for own checks, so use a random uuid:
   // RES-001 before ownership (findFirst by school+id returns null → RES-001).
   getReport: { method: 'GET', url: `/api/v1/reports/${randomUUID()}` },
+  // Missing report → RES-001 for granted roles after PERM check.
+  getReportPdf: { method: 'GET', url: `/api/v1/reports/${randomUUID()}/pdf` },
 });
 
 // The fixture evidence/mapping above is owned by 'teacher', who is ALSO the
@@ -267,7 +269,7 @@ test('every implemented operation x every role matches its permissions.yaml disp
     }
   }
 
-  assert.ok(assertions >= 27 * 6, `sweep should cover at least 27 operations x 6 roles, got ${assertions} assertions`);
+  assert.ok(assertions >= 28 * 6, `sweep should cover at least 28 operations x 6 roles, got ${assertions} assertions`);
   assert.deepEqual(failures, [], `${failures.length} mismatch(es) between permissions.yaml and enforcement:\n${failures.join('\n')}`);
 });
 

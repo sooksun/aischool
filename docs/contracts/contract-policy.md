@@ -6,12 +6,12 @@ Updated 2026-07-17 (SEIP-ARCH-002) — approval flow rewritten for single-agent 
 
 | File | Version | Surface |
 |---|---|---|
-| `openapi.yaml` | **2.1.0** (CCR-005 additive reports + AI suggest; CCR-004 was 2.0.0 breaking) | HTTP API — the only web↔api interface |
+| `openapi.yaml` | **2.2.0** (CCR-007 PDF; CCR-005 reports/AI; CCR-004 was 2.0.0 breaking) | HTTP API — the only web↔api interface |
 | `events.yaml` | 1.1.0 | Domain events (outbox-delivered) |
-| `permissions.yaml` | 1.1.0 | Roles, tenancy rule, per-operation matrix |
-| `error-codes.yaml` | 1.2.0 | Stable error codes + response shape (AUTH-004 login rate limit) |
+| `permissions.yaml` | 1.2.0 | Roles, tenancy rule, per-operation matrix |
+| `error-codes.yaml` | 1.3.0 | Stable error codes + response shape |
 
-Reports ship as **structured JSON payload + section refs** (CCR-005). Official PA PDF layout remains deferred (openapi `x-deferred.report-pdf-layout`).
+Reports ship as **structured JSON + section refs** (CCR-005) and **on-demand PA form PDF** (CCR-007). Pixel-perfect ก.ค.ศ. plates remain deferred (`x-deferred.official-paper-signature-fidelity`).
 
 ## Rule
 
