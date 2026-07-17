@@ -51,9 +51,9 @@ export async function processFileJob(
   s3: S3Client,
   payload: FileProcessPayload,
 ): Promise<void> {
-  const file = await getEvidenceFileById(payload.file_id);
+  const file = await getEvidenceFileById(payload.school_id, payload.file_id);
   if (!file) {
-    throw new Error(`file ${payload.file_id} not found`);
+    throw new Error(`file ${payload.file_id} not found for school ${payload.school_id}`);
   }
   if (file.evidenceId !== payload.evidence_id) {
     throw new Error('payload evidence_id does not match file row');

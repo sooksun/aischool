@@ -33,15 +33,33 @@ export async function enqueueOutboxEvent(
   });
 }
 
-/** Claim unpublished outbox rows for dispatch (FOR UPDATE SKIP LOCKED pattern via statusless claim). */
+/** Claim unpublished outbox rows for dispatch. Same optimistic-CAS pattern as
+ * jobs.ts's claimPendingJobs: select candidates, then a per-row conditional
+ * updateMany (only succeeds if still unpublished) before treating a row as
+ * claimed — a losing racer's updateMany affects 0 rows and the row is skipped,
+ * rather than two concurrent dispatch passes both processing it. There's no
+ * separate "claimed" flag on this table, so the claim reuses `attempts`
+ * (already incremented on failure by markOutboxFailed) as the CAS gate — after
+ * this change it also increments once per claim, which is the more standard
+ * meaning for an attempts counter anyway. */
 export async function claimUnpublishedOutbox(limit = 20) {
-  // Postgres: select ids then update — sufficient for single-worker MVP; multi-worker can upgrade to SKIP LOCKED.
-  const pending = await prisma.outboxEvent.findMany({
+  const candidates = await prisma.outboxEvent.findMany({
     where: { publishedAt: null, attempts: { lt: 10 } },
     orderBy: { occurredAt: 'asc' },
     take: limit,
   });
-  return pending;
+
+  const claimed = [];
+  for (const row of candidates) {
+    const result = await prisma.outboxEvent.updateMany({
+      where: { id: row.id, publishedAt: null },
+      data: { attempts: { increment: 1 } },
+    });
+    if (result.count === 1) {
+      claimed.push(row);
+    }
+  }
+  return claimed;
 }
 
 export async function markOutboxPublished(id: string) {

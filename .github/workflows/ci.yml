@@ -221,6 +221,8 @@ jobs:
         run: npm run test:integration --workspace apps/api
       - name: packages/database repository integration tests
         run: npm run test:integration --workspace packages/database
+      - name: apps/worker outbox/scan/duration/GC integration tests
+        run: npm run test:integration --workspace apps/worker
 
   build:
     name: "Gate: build"

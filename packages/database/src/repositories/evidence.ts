@@ -219,9 +219,12 @@ export async function countFilesForEvidence(evidenceId: string): Promise<number>
   return prisma.evidenceFile.count({ where: { evidenceId } });
 }
 
-export async function getEvidenceFileById(fileId: string) {
-  return prisma.evidenceFile.findUnique({
-    where: { id: fileId },
+/** schoolId first and folded into the query, matching this file's own
+ * tenancy-by-construction convention (module header) — a cross-school file id
+ * returns null here rather than a row the caller must remember to reject. */
+export async function getEvidenceFileById(schoolId: string, fileId: string) {
+  return prisma.evidenceFile.findFirst({
+    where: { id: fileId, evidence: { schoolId } },
     include: { evidence: { select: { id: true, schoolId: true, deletedAt: true } } },
   });
 }
