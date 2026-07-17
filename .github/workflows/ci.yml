@@ -37,7 +37,14 @@ jobs:
         with:
           node-version: 24
       - name: Contract validity (lint + typegen + parse + authz coverage)
-        run: npm run gate:contracts
+        # npm ci is required here even though validate-contracts.mjs's header says
+        # "no repo dependencies required" — that was true when every check ran via
+        # `npx --yes pkg@major`. Its later-added codegen-diff check shells out to
+        # generate-contract-constants.mjs, which bare-imports js-yaml from
+        # node_modules; this job never installed anything before that step existed.
+        run: |
+          npm ci
+          npm run gate:contracts
       - name: Breaking-change check vs base
         # Runs on BOTH events: ADR-0004 sanctions committing straight to develop,
         # so a pull_request-only check would almost never execute in practice.
@@ -148,6 +155,13 @@ jobs:
     # unseeded DB. Together: migrations apply cleanly AND the seed produces a
     # working dataset the tests still pass against AND the real API/DB/storage
     # wiring works end-to-end (apps/api's evidence-flow.test.mjs).
+    #
+    # MinIO is NOT a `services:` entry (see the "Start MinIO" step below) — a
+    # services container can't be given a command, and minio/minio's default
+    # CMD just prints usage instead of starting the server; it requires an
+    # explicit `server /data` argument. Verified locally: `--entrypoint sh`
+    # (the previous approach here) overrides startup with a no-op shell that
+    # exits immediately, so the server process never runs at all.
     services:
       postgres:
         image: postgres:17-alpine
@@ -160,17 +174,6 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U seip -d seip"
           --health-interval 5s --health-timeout 5s --health-retries 10
-      minio:
-        image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-        env:
-          MINIO_ROOT_USER: seip_ci
-          MINIO_ROOT_PASSWORD: seip_ci_only_change_me
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-          --entrypoint sh
     env:
       DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
       S3_ENDPOINT: http://localhost:9000
@@ -185,6 +188,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          for i in $(seq 1 20); do
+            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
+              echo "minio healthy"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::minio did not become healthy in time"
+          docker logs minio
+          exit 1
       - name: Run if package.json defines scripts.test:integration
         run: |
           ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['test:integration']?'true':'false')}catch{process.stdout.write('false')}")
@@ -265,7 +282,8 @@ jobs:
     runs-on: ubuntu-latest
     # Generated FROM permissions.yaml (SEC-TEN-5) against the real API, so it needs
     # the same Postgres + MinIO as the integration gate — see that job's comments
-    # for why services has no compose-style init container.
+    # for why services has no compose-style init container, and why MinIO is
+    # started as a manual step below rather than a `services:` entry.
     services:
       postgres:
         image: postgres:17-alpine
@@ -278,17 +296,6 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U seip -d seip"
           --health-interval 5s --health-timeout 5s --health-retries 10
-      minio:
-        image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-        env:
-          MINIO_ROOT_USER: seip_ci
-          MINIO_ROOT_PASSWORD: seip_ci_only_change_me
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-          --entrypoint sh
     env:
       DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
       S3_ENDPOINT: http://localhost:9000
@@ -303,6 +310,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          for i in $(seq 1 20); do
+            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
+              echo "minio healthy"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::minio did not become healthy in time"
+          docker logs minio
+          exit 1
       - name: Run if tests/security has test files
         run: |
           if [ -z "$(find tests/security -type f ! -name '.gitkeep' -print -quit 2>/dev/null)" ]; then
