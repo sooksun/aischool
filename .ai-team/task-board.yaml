@@ -1,6 +1,5 @@
 project: SEIP
-updated_at: 2026-07-17T23:59:00+07:00
-# Single-agent mode per ADR-0004 (2026-07-17): Claude Code is the sole developer.
+updated_at: 2026-07-18T00:15:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -204,7 +203,7 @@ tasks:
 
   - id: SEIP-API-002
     title: Cycles + committee scoring (remaining 11 of 27 contract operations)
-    status: done                # 2026-07-17 — feat/SEIP-API-002-cycles-scoring, awaiting merge
+    status: done                # 2026-07-17 — merged develop 82a6bd7; re-verified green
     branch: feat/SEIP-API-002-cycles-scoring
     dependencies: [SEIP-API-001, SEIP-DB-001]
     notes: >

@@ -113,3 +113,16 @@ highest-value next increments per `PROJECT_STATE.md` are `SEIP-WORKER-001` (viru
 scan / duration probe / outbox dispatch) and director/evaluator UI screens for cycle
 management and committee scoring — apps/web's flow now has a real API to call for
 the latter, same relationship API-001 had to UI-001.
+
+## Close verification 2026-07-17 (independent re-run)
+
+| Check | Result |
+|---|---|
+| Clean rebuild (`build:libs` + `apps/api`) | pass (stale-dist flake resolved by full dist wipe) |
+| `apps/api` integration (`test/*.test.mjs`) | **12/12** (6 evidence + 6 cycles/scoring) |
+| `npm run test:security` | **3/3** (matrix now covers 23 ops × 6 roles) |
+| unit / DB integration / backend constraints / LIVE gates | pass (same session) |
+
+**Code review notes:** scoring formula uses ScoreWeight + maxPoints defaults; overall_pass requires every evaluator ≥70% (test asserts false when one scorer is at 25%); committee size/chair enforced at API; round state machine CYCLE-001; own-grant uses requireOwnership → PERM-001 (not RES-001).
+
+**Status: DONE** — ready for merge to `develop` (completed this session).

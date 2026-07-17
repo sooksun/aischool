@@ -17,37 +17,24 @@ The no-production-code constraint is **lifted**. Contracts are locked at v1.0.0 
 OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherited from Codex, review PASS) · UI-000 (evidence UX + CCR-002) · QA-001 (gates) · ARCH-002 (lock v1.0.0). QA-002 cancelled by ADR-0004.
 
 ## Current Objectives (Sprint 1)
-1. ~~SEIP-DB-001~~ **DONE** — schema + migrations + seed + 18 constraint tests (`be36eff`)
-2. ~~SEIP-DB-002~~ **DONE** (structure) — residual only: full IndicatorLevelDescription wording from PDFs
-3. ~~SEIP-API-001~~ **DONE** — evidence-workflow API 16/27 ops, merged to `develop` (`3db868d`)
-4. ~~SEIP-QA-003~~ **DONE** — permission-matrix tests arm `test:security` / permission-tests gate
-5. ~~SEIP-UI-001~~ **DONE** — evidence submission SPA (`apps/web`), verified end-to-end in a real browser against the real API + Postgres + MinIO, merged to `develop` (`3db868d`)
-6. ~~SEIP-OPS-002~~ **DONE** — develop CI break fixed same-day (`556958c`) — see incident note below
-7. ~~SEIP-API-002~~ **DONE** — cycles + committee scoring, the remaining 11/27 ops, on `feat/SEIP-API-002-cycles-scoring` — **all 27 contract operations now implemented**; awaiting user review/merge
-8. Contracts at **v2.0.0** (CCR-004, breaking: `FileUploadComplete` gained required metadata fields) — was v1.0.0 at Sprint 0 exit
-9. Future: SEIP-WORKER-001 (virus scan/video-duration probe/outbox event dispatch — events.yaml defines events but nothing dispatches them yet), director/evaluator UI screens (cycle management, committee scoring UI — apps/web still only has the teacher evidence-submission flow), full IndicatorLevelDescription rubric text from the official PDFs (SEIP-DB-002 residual), PA1/PA2/PA3 report generation (deferred, needs official form field inventory)
+1. ~~SEIP-DB-001~~ **DONE** — schema + migrations + seed + constraint tests
+2. ~~SEIP-DB-002~~ **DONE** (structure) — residual: full IndicatorLevelDescription from PDFs
+3. ~~SEIP-API-001~~ **DONE** — evidence-workflow 15 ops (3db868d)
+4. ~~SEIP-QA-003~~ **DONE** — permission matrix tests
+5. ~~SEIP-UI-001~~ **DONE** — evidence SPA (3db868d)
+6. ~~SEIP-OPS-002~~ **DONE** — develop CI fix (556958c)
+7. ~~SEIP-API-002~~ **DONE** — cycles + committee scoring (remaining 11 ops); all 27 contract operations implemented
+8. Contracts at **v2.0.0** (CCR-004)
+9. Future: SEIP-WORKER-001 (scan/duration/outbox), director/evaluator UI, PA reports
 
-**`develop` now contains a complete, working vertical slice**: real login → evidence submission → real MinIO upload → indicator mapping → governed confirmation, provable end-to-end. **`feat/SEIP-API-002-cycles-scoring` (awaiting merge) completes the API surface**: cycle/round setup → committee assignment → per-evaluator scoring → ≥70%-per-evaluator pass verdict, also provable end-to-end (`apps/api/test/scoring-flow.test.mjs`).
+**develop vertical slice + full API surface:** login → evidence → MinIO → mapping + cycles/rounds + 3-evaluator scoring with per-evaluator ≥70% pass rule.
+
 
 ### Incident: develop CI broke on the API-001+UI-001 merge, fixed same-day
 The merge (`3db868d`, 2026-07-17) went in with CI never having exercised real
 Postgres+MinIO service containers on GitHub's runners before — 3 of 12 gates
-failed (`contract compatibility`, `integration tests`, `permission tests`).
-Root causes (both pre-existing latent bugs, unrelated to the merge's own
-code) and fix in `556958c`:
-- `contract-compatibility` never ran `npm ci`, so its codegen-diff step's
-  bare `js-yaml` import had nothing to resolve against.
-- `integration`/`permission-tests`' MinIO `services:` entry used
-  `--entrypoint sh`, which replaces startup with a no-op shell — GitHub
-  Actions services can't pass MinIO's required `server /data` command, so
-  MinIO now starts as a manual `docker run` step instead.
-Fix verified against disposable containers matching CI's exact image
-tags/credentials before push, then confirmed green on GitHub's own runners
-(run `29549242802`, all 12 jobs `success`). Lesson: a CI gate that only
-self-arms once real code lands (per this file's own "self-arming gates"
-pattern) is, by definition, unverified against real infra until that day —
-worth a deliberate dry-run next time a self-arming gate is about to arm for
-the first time, rather than discovering it via a broken merge.
+failed. Fix in `556958c` (contract gate missing npm ci; MinIO services entrypoint).
+Verified green on GitHub Actions run 29549242802.
 
 ## Active Tasks
 See `.ai-team/task-board.yaml` (single tracker).
