@@ -71,6 +71,17 @@ step('authz coverage (every operationId has a reviewed rule)', () => {
   if (orphans.length) console.warn(`    warning: rules with no matching operation: ${orphans.join(', ')}`);
 });
 
+step('generated apps/web API types match openapi.yaml', () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const file = join(root, 'apps/web/src/api/schema.generated.ts');
+  const before = readFileSync(file, 'utf8');
+  run(`${NPX} --yes openapi-typescript@7 docs/contracts/openapi.yaml -o apps/web/src/api/schema.generated.ts`);
+  const after = readFileSync(file, 'utf8');
+  if (before !== after) {
+    throw new Error('apps/web/src/api/schema.generated.ts is stale — run `npm run codegen:api-types` and commit the diff');
+  }
+});
+
 step('generated backend-shared constants match error-codes.yaml/events.yaml', () => {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
   const before = {

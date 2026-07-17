@@ -15,6 +15,7 @@
     "gate:secret-scan": "node scripts/security/run-gitleaks.mjs",
     "gate:dep-audit": "npm audit --audit-level=high",
     "codegen:contracts": "node scripts/codegen/generate-contract-constants.mjs",
+    "codegen:api-types": "npx --yes openapi-typescript@7 docs/contracts/openapi.yaml -o apps/web/src/api/schema.generated.ts",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",

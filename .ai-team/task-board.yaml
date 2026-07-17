@@ -168,9 +168,16 @@ tasks:
 
   - id: SEIP-UI-001
     title: Evidence submission flow implementation
-    status: backlog
+    status: review              # close-out .ai-team/handoffs/SEIP-UI-001.md — awaiting user merge
+    branch: feat/SEIP-API-001-evidence-workflow
     dependencies: [SEIP-ARCH-002, SEIP-DB-001, SEIP-API-001]
+    notes: >
+      apps/web (Vite+React+TS, ADR-0006) — full S1-S7 flow against the real API.
+      Verified end-to-end through a real browser (not just tests): real MinIO
+      upload, real ว9 taxonomy chips (T-1.1..T-3.3 from the actual ก.ค.ศ. PDF),
+      server-side DB+MinIO verification after each step. 12 unit/component
+      tests. Mobile viewport (375px) verified: no overflow, 56px touch targets.
     acceptance_criteria:
-      - Teacher submits evidence with minimal fields
-      - Responsive mobile support
-      - Accessibility checks pass
+      - Teacher submits evidence with minimal fields   # DONE — verified live in browser
+      - Responsive mobile support                       # DONE — verified live, 375px viewport
+      - Accessibility checks pass                        # DONE — semantic roles/aria verified via accessibility tree

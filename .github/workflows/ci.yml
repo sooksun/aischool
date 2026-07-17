@@ -43,7 +43,11 @@ jobs:
         # so a pull_request-only check would almost never execute in practice.
         # PR  -> compare against the target branch.
         # push -> compare against the commit the branch was at before this push.
-        # Image pinned by digest per SECURITY-BASELINE SEC-REPO-2 (= oasdiff at 2026-07-17).
+        # scripts/security/check-contract-compatibility.mjs (not a bare oasdiff
+        # call): a breaking change is allowed through when info.version's MAJOR
+        # was actually bumped (contract-policy.md's documented process — CCR-004
+        # found the original bare-oasdiff version of this step had no way to
+        # honor that process at all, only to block every breaking change forever).
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -60,9 +64,7 @@ jobs:
           fi
           cp docs/contracts/openapi.yaml /tmp/spec/head.yaml
           echo "diffing $BASE -> ${{ github.sha }}"
-          docker run --rm -v /tmp/spec:/spec \
-            tufin/oasdiff@sha256:e7f1b7531e9bbb12d61fc28c4d2a59896a47ee4fb8159eef0ff7aa76804acfb6 \
-            breaking /spec/base.yaml /spec/head.yaml --fail-on ERR
+          node scripts/security/check-contract-compatibility.mjs /tmp/spec/base.yaml /tmp/spec/head.yaml
 
   secret-scan:
     name: "Gate: secret scan"

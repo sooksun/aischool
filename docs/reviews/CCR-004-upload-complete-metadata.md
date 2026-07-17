@@ -1,10 +1,22 @@
 # Contract Change Request: CCR-004
 
 ## Requested By
-claude (SEIP-API-001 implementation)
+claude (SEIP-API-001 implementation; contract actually applied during SEIP-UI-001 when apps/web's typecheck required the generated types to match reality)
 
 ## Contract Affected
-`docs/contracts/openapi.yaml` — `FileUploadComplete` schema. Widening, not breaking.
+`docs/contracts/openapi.yaml` — `FileUploadComplete` schema.
+
+**Correction (2026-07-17, same day):** this CCR originally shipped only as a
+code comment in `apps/api` — the YAML file itself was never edited to match, so
+`openapi.yaml` silently described a narrower contract than the API actually
+required. It also *claimed* "widening, not breaking" without running it through
+`oasdiff`. When the schema was finally edited to match reality (while wiring
+`apps/web`'s generated types), `oasdiff breaking` correctly flagged it: adding
+new **required** request properties breaks any client that conformed to the old,
+narrower requirement. Self-corrected rather than silencing the gate — see
+Breaking Change below. This is exactly the class of drift contract-first
+development exists to prevent, caught by actually running the tool instead of
+asserting the outcome.
 
 ## Reason
 `completeFileUpload`'s request body (`FileUploadComplete`) has one field:
@@ -24,12 +36,10 @@ DB table with a TTL) is disproportionate for a 15-operation MVP slice.
 
 ## Resolution
 `completeFileUpload`'s request body is **widened**: the client resends
-`content_type`, `byte_size`, `original_filename`, `duration_seconds` alongside
-`checksum_sha256`. This is additive at the transport level — `openapi.yaml`'s
-`FileUploadComplete` schema has no `additionalProperties: false`, so extra fields
-don't violate it — but the *contract's implied behavior* (server remembers, client
-only confirms) is not what's implemented. Recorded here rather than silently
-diverging.
+`content_type`, `byte_size`, `original_filename` (all now **required**) and
+`duration_seconds` (nullable) alongside `checksum_sha256`. `openapi.yaml` is
+edited to match — the schema is the source of truth apps/web's generated types
+are built from, so it cannot describe a narrower contract than the API enforces.
 
 ## Known Limitations (carried forward honestly, not hidden)
 1. **The server does not re-read the uploaded object from MinIO** to verify
@@ -49,12 +59,26 @@ diverging.
    and is also what `evidence.file.registered` (events.yaml) exists to trigger.
 
 ## Breaking Change
-No — additive request fields.
+**Yes — corrected from an initial "no" claim.** `oasdiff breaking` (run for real,
+not asserted): 3 findings, all `new-required-request-property`. Accepted because
+Sprint 1 has no real external consumer of this contract yet (apps/api and
+apps/web are built in the same change) — a genuine external consumer at this
+point would require a real migration plan, not just a version bump. Version
+bumped `1.0.0 -> 2.0.0` per `contract-policy.md`'s stated rule for breaking
+changes. `scripts/security/check-contract-compatibility.mjs` (new, this CCR)
+makes that rule an automated CI check instead of a purely human-trusted one —
+the original `contract-compatibility` gate had no mechanism to accept ANY
+breaking change, even a deliberate, disclosed, correctly-versioned one, which
+meant the policy's own documented process was unimplementable through the gate
+as it stood.
 
 ## Affected Modules
 apps/api (this task), apps/web (must send the widened body — implemented in the
-same branch), a future apps/worker (closes the verification gap noted above).
+same branch), a future apps/worker (closes the verification gap noted above),
+`.github/workflows/ci.yml` (contract-compatibility gate logic).
 
 ## Approval Status
 **APPLIED 2026-07-17** — self-review under ADR-0004. Flagged for the user as a
-carried limitation, not silently shipped as if it were complete verification.
+carried limitation (§Known Limitations), not silently shipped as if it were
+complete verification. Version bump ratified by the same merge that ratifies
+the rest of this branch.

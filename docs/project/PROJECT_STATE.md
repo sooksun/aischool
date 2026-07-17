@@ -19,10 +19,12 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 ## Current Objectives (Sprint 1)
 1. ~~SEIP-DB-001~~ **DONE** — schema + migrations + seed + 18 constraint tests (`be36eff`)
 2. ~~SEIP-DB-002~~ **DONE** (structure) — residual only: full IndicatorLevelDescription wording from PDFs
-3. ~~SEIP-API-001~~ **DONE** (verified) — evidence-workflow API 15/27 ops on `feat/SEIP-API-001-evidence-workflow` (awaiting merge to develop)
+3. ~~SEIP-API-001~~ **DONE** — evidence-workflow API 15/27 ops on `feat/SEIP-API-001-evidence-workflow` (awaiting merge to develop)
 4. ~~SEIP-QA-003~~ **DONE** — permission-matrix tests arm `test:security` / permission-tests gate
-5. **SEIP-UI-001** — evidence submission UI (WIP may exist on same branch as `apps/web/`; not closed)
-6. Future: SEIP-API-002 (cycles/rounds/scoring), SEIP-WORKER-001 (scan/duration/outbox)
+5. ~~SEIP-UI-001~~ **DONE** — evidence submission SPA (`apps/web`), verified end-to-end in a real browser against the real API + Postgres + MinIO (same branch, awaiting merge)
+6. Future: SEIP-API-002 (cycles/rounds/scoring), SEIP-WORKER-001 (scan/duration probe/outbox dispatch), director/evaluator UI screens
+
+**Branch `feat/SEIP-API-001-evidence-workflow` now contains a complete, working vertical slice**: real login → evidence submission → real MinIO upload → indicator mapping → governed confirmation, provable end-to-end. Awaiting user review/merge to `develop`.
 
 ## Active Tasks
 See `.ai-team/task-board.yaml` (single tracker).
@@ -33,6 +35,7 @@ See `.ai-team/task-board.yaml` (single tracker).
 - ADR-0003 — Evaluation framework: วPA ว9/2564 (ครู) + ว10/2564 (ผู้บริหาร); taxonomy in `docs/architecture/evaluation-framework.md` (Accepted)
 - ADR-0004 — Single-agent development by Claude Code (Accepted)
 - ADR-0005 — Object storage: MinIO / S3-compatible; deployment: on-premise (Accepted)
+- ADR-0006 — Implementation frameworks: Fastify (api), Vite+React (web), npm workspaces (Accepted)
 
 ## Open Questions
 - OPEN-3: AI provider + PDPA data-residency (blocks Sprint 2 AI-mapping only). **Note: ADR-0005 keeps all evidence on Thai on-prem hardware — sending it to a foreign AI provider would cross the border this decision avoids. OPEN-3 must respect that.**

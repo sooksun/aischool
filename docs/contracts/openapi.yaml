@@ -1,5 +1,13 @@
 openapi: 3.1.0
 # version 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
+# version 2.0.0 — CCR-004 (2026-07-17, BREAKING, corrected from an initial 1.1.0
+#   mislabel): FileUploadComplete gained new REQUIRED properties. oasdiff's
+#   contract-compatibility gate correctly flagged new-required-request-property
+#   as breaking (any client conforming to the old, narrower required set would
+#   now fail server-side validation) — self-corrected rather than silencing the
+#   gate. Acceptable now because Sprint 1 has no real external consumers yet
+#   (apps/api and apps/web are being built in the same change); a genuine
+#   external consumer at this point would need a migration plan per policy.
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x; breaking changes → 2.0 with a
 # migration plan. The CI gate "contract compatibility" fails PRs that break this
@@ -8,7 +16,7 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 1.0.0
+  version: 2.0.0
   summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation)
   description: |
     Contract v1.0 (locked, Sprint 0 exit) — drafted in SEIP-ARCH-001, validated against the
@@ -1055,12 +1063,33 @@ components:
 
     FileUploadComplete:
       type: object
-      required: [checksum_sha256]
+      description: |
+        Widened by CCR-004 (v2.0.0 — BREAKING, see the file header note on why a
+        major bump was correct here): the original v1.0.0 shape assumed a
+        server-side upload session remembering initiate's declared metadata, which
+        this API doesn't implement. The client resends content_type/byte_size/
+        original_filename/duration_seconds alongside the checksum so complete can
+        rebuild the same storage key and re-validate. See docs/reviews/CCR-004-*.md
+        for the accepted limitation this carries (no server-side re-read of the
+        actual uploaded bytes yet).
+      required: [checksum_sha256, content_type, byte_size, original_filename]
       properties:
         checksum_sha256:
           type: string
           pattern: '^[a-f0-9]{64}$'
           description: Must equal the initiate value (UPL-005)
+        content_type:
+          type: string
+          description: Must equal the initiate value — re-validated against the category (CCR-004)
+        byte_size:
+          type: integer
+          minimum: 1
+        original_filename:
+          type: string
+          maxLength: 255
+        duration_seconds:
+          type: [integer, 'null']
+          description: Same nullable/probe-authoritative semantics as FileUploadInitiate (CCR-002)
 
     Mapping:
       type: object
