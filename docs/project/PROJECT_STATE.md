@@ -28,7 +28,8 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 8. Contracts at **v2.0.0** (CCR-004)
 9. ~~SEIP-WORKER-001~~ **DONE** — outbox + file.process (scan/duration) + storage GC
 10. ~~SEIP-UI-002~~ **DONE** — director/admin UI for cycles, rounds, committee assignment; handoff `.ai-team/handoffs/SEIP-UI-002.md`
-11. **Sprint 2+ roadmap on board** (SEIP-PLAN-001) — waves A–F: OPS-003, DB-003, WORKER-001, UI-002/003, ARCH-003→reports, ARCH-005 AI (blocked OPEN-3), QA-004 e2e. See .ai-team/task-board.yaml for deps + primary_paths (anti-collision).
+11. ~~SEIP-OPS-003~~ **DONE** on branch `feat/SEIP-OPS-003-staging-ops` — staging compose + TLS/backup runbook (awaiting merge)
+12. **Sprint 2+ remaining** — UI-003, reports/AI (REPORTS-AI WIP), QA-004 e2e. See task board.
 
 **develop vertical slice + full API surface:** login → evidence → MinIO (now with async virus-scan stub + duration probe via outbox/worker) → mapping + cycles/rounds + 3-evaluator scoring with per-evaluator ≥70% pass rule. Director/school_admin can drive the whole cycle→round→committee-assignment setup through the UI, not just the API.
 

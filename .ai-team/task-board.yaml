@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-18T18:00:00+07:00
+updated_at: 2026-07-18T20:00:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -263,7 +263,7 @@ tasks:
 
   - id: SEIP-OPS-003
     title: Staging-oriented compose + secrets/TLS/backup checklist (on-prem)
-    status: backlog
+    status: done                # 2026-07-18 — handoff SEIP-OPS-003.md; branch feat/SEIP-OPS-003-staging-ops
     wave: A
     sprint: 2
     branch: feat/SEIP-OPS-003-staging-ops
