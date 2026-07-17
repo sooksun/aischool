@@ -14,6 +14,9 @@ openapi: 3.1.0
 # version 2.3.0 — CCR-008 (additive): auth refresh + logout session lifecycle.
 # version 2.4.0 — CCR-009 (additive, cleanup B1–B2): Evidence.scan_status aggregate;
 #   AssignmentDetail.framework_version_id (eliminates client N+1 / graph search).
+# version 2.5.0 — CCR-010 (additive + semantic, cleanup H2): lazy
+#   getEvidenceFileDownloadUrl; EvidenceFile.download_url always null on
+#   detail/complete (no MinIO presign on metadata reads).
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -22,12 +25,13 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.4.0
+  version: 2.5.0
   summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI + PDF)
   description: |
-    Contract v2.4 (CCR-009 cleanup) — list evidence carries aggregate `scan_status`;
-    assignment detail carries `framework_version_id`. v2.3 (CCR-008) session
-    lifecycle; v2.2 PDF; core remains evidence, PA evaluation, reports, AI suggest.
+    Contract v2.5 (CCR-010 cleanup H2) — evidence file download is lazy via
+    GET …/files/{fileId}/download-url; getEvidence does not call object storage.
+    v2.4 (CCR-009) list scan_status + assignment framework; v2.3 session; v2.2 PDF;
+    core remains evidence, PA evaluation, reports, AI suggest.
 
     **Business rules that bind every implementation**
     - Tenancy: every resource is school-scoped; cross-school access returns RES-001 (indistinguishable from not-found).
@@ -494,6 +498,37 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /evidence/{evidenceId}/files/{fileId}/download-url:
+    get:
+      operationId: getEvidenceFileDownloadUrl
+      summary: Issue a short-lived download URL for one clean evidence file
+      description: |
+        Lazy download (CCR-010 / cleanup H2). Call only when the user intends to
+        download — `getEvidence` and `completeFileUpload` never presign object
+        storage. Requires `scan_status=clean` (UPL-006); pending/blocked return
+        UPL-006. Same tenancy grants as `getEvidence`. Never returns `storage_uri`.
+      tags: [evidence]
+      parameters:
+        - $ref: '#/components/parameters/EvidenceId'
+        - name: fileId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Short-lived presigned GET URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileDownloadUrl' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '423':
+          description: File not servable (scan pending or blocked — UPL-006)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /evidence/{evidenceId}/mappings:
     get:
@@ -1236,8 +1271,23 @@ components:
         scan_status: { $ref: '#/components/schemas/ScanStatus' }
         download_url:
           type: [string, 'null']
-          description: Short-lived read URL; null until scan_status=clean
+          description: |
+            Always null on EvidenceFile payloads (CCR-010). Clients obtain a
+            short-lived URL via getEvidenceFileDownloadUrl when scan_status=clean
+            (UPL-006). Field retained for schema stability.
         uploaded_at: { type: string, format: date-time }
+
+    FileDownloadUrl:
+      type: object
+      required: [download_url, expires_at]
+      properties:
+        download_url:
+          type: string
+          format: uri
+          description: Short-lived presigned GET; never reuse after expires_at
+        expires_at:
+          type: string
+          format: date-time
 
     FileUploadInitiate:
       type: object

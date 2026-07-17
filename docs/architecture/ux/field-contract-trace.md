@@ -47,7 +47,7 @@
 | PUT ไฟล์ | `FileUploadTarget.{upload_url, method, headers, expires_at}` + progress จาก XHR |
 | duration วิดีโออ่านไม่ได้ | ส่ง `duration_seconds: null` ได้ — server probe ตัดสิน ⚠ *GAP-3 (แก้แล้ว)* |
 | ยืนยันเสร็จ | → `FileUploadComplete.checksum_sha256` → `EvidenceFile` |
-| สถานะสแกน + ลิงก์ดูไฟล์ | `EvidenceFile.{scan_status, download_url}` (null จน clean) |
+| สถานะสแกน + ลิงก์ดูไฟล์ | `EvidenceFile.scan_status`; URL ผ่าน `getEvidenceFileDownloadUrl` เมื่อ clean (CCR-010) |
 | Error ทุกจุด | `Error.{code,message,details[],request_id}` map เป็นข้อความไทยตาม error-codes.yaml |
 
 ## Auth (ทุกหน้า)

@@ -114,7 +114,7 @@ test('full evidence submission flow: create -> upload -> map -> confirm', async 
   assert.equal(mapping.json().status, 'suggested');
 });
 
-test('download_url issued only when scan_status=clean (UPL-006); never for blocked', async () => {
+test('lazy download-url only when scan_status=clean (UPL-006); getEvidence never presigns (CCR-010)', async () => {
   const create = await app.inject({
     method: 'POST', url: '/api/v1/evidence', headers: auth(teacherToken),
     payload: { category_id: categoryId, title: 'download url test' },
@@ -150,6 +150,14 @@ test('download_url issued only when scan_status=clean (UPL-006); never for block
   assert.equal(complete.json().scan_status, 'pending');
   assert.equal(complete.json().download_url, null);
 
+  const pendingDl = await app.inject({
+    method: 'GET',
+    url: `/api/v1/evidence/${evidence.id}/files/${target.file_id}/download-url`,
+    headers: auth(teacherToken),
+  });
+  assert.equal(pendingDl.statusCode, 423);
+  assert.equal(pendingDl.json().code, 'UPL-006');
+
   // Simulate worker marking clean
   await prisma.evidenceFile.update({
     where: { id: target.file_id },
@@ -162,12 +170,23 @@ test('download_url issued only when scan_status=clean (UPL-006); never for block
   assert.equal(cleanDetail.statusCode, 200);
   const cleanFile = cleanDetail.json().files[0];
   assert.equal(cleanFile.scan_status, 'clean');
-  assert.ok(typeof cleanFile.download_url === 'string' && cleanFile.download_url.startsWith('http'),
-    'clean files must get a presigned GET URL');
+  assert.equal(cleanFile.download_url, null, 'getEvidence never embeds presigned URLs (CCR-010)');
   assert.ok(!JSON.stringify(cleanDetail.json()).includes('storage_uri'),
     'storage_uri must never appear in API responses');
 
-  // Blocked → still null
+  const cleanDl = await app.inject({
+    method: 'GET',
+    url: `/api/v1/evidence/${evidence.id}/files/${target.file_id}/download-url`,
+    headers: auth(teacherToken),
+  });
+  assert.equal(cleanDl.statusCode, 200);
+  const body = cleanDl.json();
+  assert.ok(typeof body.download_url === 'string' && body.download_url.startsWith('http'),
+    'clean files get a presigned GET URL from the lazy endpoint');
+  assert.ok(typeof body.expires_at === 'string' && body.expires_at.length > 0);
+  assert.ok(!JSON.stringify(body).includes('storage_uri'));
+
+  // Blocked → UPL-006 on lazy endpoint; detail still null
   await prisma.evidenceFile.update({
     where: { id: target.file_id },
     data: { scanStatus: 'blocked' },
@@ -176,6 +195,14 @@ test('download_url issued only when scan_status=clean (UPL-006); never for block
     method: 'GET', url: `/api/v1/evidence/${evidence.id}`, headers: auth(teacherToken),
   });
   assert.equal(blockedDetail.json().files[0].download_url, null);
+
+  const blockedDl = await app.inject({
+    method: 'GET',
+    url: `/api/v1/evidence/${evidence.id}/files/${target.file_id}/download-url`,
+    headers: auth(teacherToken),
+  });
+  assert.equal(blockedDl.statusCode, 423);
+  assert.equal(blockedDl.json().code, 'UPL-006');
 });
 
 test('cross-school access returns RES-001, never leaks existence', async () => {

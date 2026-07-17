@@ -27,6 +27,8 @@ export function EvidenceDetailPage() {
   const [suggestMsg, setSuggestMsg] = useState<string | null>(null);
   const [suggestErr, setSuggestErr] = useState<string | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [downloadBusyId, setDownloadBusyId] = useState<string | null>(null);
+  const [downloadErr, setDownloadErr] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     if (!evidenceId) return Promise.resolve();
@@ -100,6 +102,29 @@ export function EvidenceDetailPage() {
     }
   }
 
+  // CCR-010: presign only on user click — getEvidence never embeds download_url.
+  async function downloadFile(fileId: string, filename: string) {
+    if (!evidenceId) return;
+    setDownloadBusyId(fileId);
+    setDownloadErr(null);
+    try {
+      const { download_url } = unwrap(await api.GET(
+        '/evidence/{evidenceId}/files/{fileId}/download-url',
+        { params: { path: { evidenceId, fileId } } },
+      ));
+      const a = document.createElement('a');
+      a.href = download_url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.download = filename;
+      a.click();
+    } catch (err) {
+      setDownloadErr(err instanceof ApiError ? thaiMessageFor(err) : 'ดาวน์โหลดไม่สำเร็จ');
+    } finally {
+      setDownloadBusyId(null);
+    }
+  }
+
   if (error) {
     return (
       <main className="page">
@@ -138,25 +163,24 @@ export function EvidenceDetailPage() {
             {f.scan_status === 'blocked' && (
               <p className="field-hint" role="alert">ไฟล์ถูกกักไว้ — ดาวน์โหลดไม่ได้ (UPL-006)</p>
             )}
-            {f.scan_status === 'clean' && f.download_url && (
+            {f.scan_status === 'clean' && (
               <p style={{ marginTop: 8 }}>
-                <a
+                <button
+                  type="button"
                   className="btn btn-primary"
-                  href={f.download_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download={f.original_filename}
+                  disabled={downloadBusyId === f.id}
+                  onClick={() => void downloadFile(f.id, f.original_filename ?? 'download')}
                 >
-                  ดาวน์โหลด
-                </a>
+                  {downloadBusyId === f.id ? 'กำลังเตรียมลิงก์…' : 'ดาวน์โหลด'}
+                </button>
               </p>
-            )}
-            {f.scan_status === 'clean' && !f.download_url && (
-              <p className="field-hint">ปลอดภัยแล้ว แต่ยังไม่มีลิงก์ดาวน์โหลด — ลองรีเฟรช</p>
             )}
           </li>
         ))}
       </ul>
+      {downloadErr && (
+        <div className="alert alert-error" role="alert">{downloadErr}</div>
+      )}
 
       <h2>ตัวชี้วัดที่ผูก</h2>
       {evidence.mappings.length === 0 && <p className="field-hint">ยังไม่ได้ผูกตัวชี้วัด</p>}

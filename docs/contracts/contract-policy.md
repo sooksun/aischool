@@ -6,9 +6,9 @@ Updated 2026-07-17 (SEIP-ARCH-002) — approval flow rewritten for single-agent 
 
 | File | Version | Surface |
 |---|---|---|
-| `openapi.yaml` | **2.4.0** (CCR-009 cleanup B1–B2; CCR-008 session; CCR-007 PDF; …) | HTTP API — the only web↔api interface |
+| `openapi.yaml` | **2.5.0** (CCR-010 lazy download; CCR-009 B1–B2; CCR-008 session; …) | HTTP API — the only web↔api interface |
 | `events.yaml` | 1.1.0 | Domain events (outbox-delivered) |
-| `permissions.yaml` | 1.2.0 | Roles, tenancy rule, per-operation matrix |
+| `permissions.yaml` | 1.4.0 | Roles, tenancy rule, per-operation matrix |
 | `error-codes.yaml` | 1.3.0 | Stable error codes + response shape |
 
 Reports ship as **structured JSON + section refs** (CCR-005) and **on-demand PA form PDF** (CCR-007). Pixel-perfect ก.ค.ศ. plates remain deferred (`x-deferred.official-paper-signature-fidelity`).
@@ -38,3 +38,5 @@ No implementation may invent fields outside an approved contract. Types are gene
 | CCR-002 | `CurrentUser.personnel` object; evidence draft→active lifecycle; `duration_seconds` nullable | APPLIED 2026-07-17 (pre-lock) |
 | CCR-003 | Current-school resolution for multi-membership users (`X-School-Id` header) — clarification, no schema change | APPLIED 2026-07-17 |
 | CCR-004 | `FileUploadComplete` gains required `content_type`/`byte_size`/`original_filename` | **BREAKING**, v1.0.0→2.0.0, APPLIED 2026-07-17 — see CCR doc for the self-correction (first shipped as an uncommitted code comment claiming "additive", caught by actually running `oasdiff`, not by inspection |
+| CCR-009 | List `scan_status` + `AssignmentDetail.framework_version_id` | APPLIED 2026-07-18 (v2.4.0) |
+| CCR-010 | Lazy `getEvidenceFileDownloadUrl`; no presign on getEvidence | APPLIED 2026-07-18 (v2.5.0) |

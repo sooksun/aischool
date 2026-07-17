@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-18T20:00:00+07:00
+updated_at: 2026-07-18T22:00:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -660,3 +660,24 @@ tasks:
       - Committee school+role eligibility + self-scoring block              # DONE — integration test
       - Lint gate runs real ESLint with 0 findings                          # DONE — 3 real a11y/correctness bugs fixed
       - Full suite green + recorded                                         # DONE — QUALITY-GATES.md 2026-07-18 table
+
+  - id: SEIP-CLEANUP-H2
+    title: Lazy evidence file download URL (no presign on getEvidence)
+    status: done
+    sprint: 2
+    branch: feat/cleanup-H2-lazy-download
+    dependencies: [SEIP-API-003a, SEIP-UI-003b]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - apps/api/src/routes/evidence.ts
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+      - apps/api/test/evidence-flow.test.mjs
+    notes: >
+      CCR-010 / openapi 2.5.0: getEvidenceFileDownloadUrl; serializeFile never
+      calls MinIO. UPL-006 enforced at issue time. Handoff .ai-team/handoffs/SEIP-CLEANUP-H2.md
+    acceptance_criteria:
+      - getEvidence / completeFileUpload download_url always null
+      - GET .../files/{fileId}/download-url issues URL only when clean
+      - pending/blocked → UPL-006 (423)
+      - UI downloads via lazy endpoint on click

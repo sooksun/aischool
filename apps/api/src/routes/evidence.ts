@@ -14,7 +14,6 @@ import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import { Prisma } from '@prisma/client';
 import { requireCurrentSchool } from '../plugins/auth.js';
 import { resolveGrant, requireOwnership, requireCommitteeAccessToPersonnel } from '../lib/permission-guard.js';
-import type { S3Client } from '@aws-sdk/client-s3';
 import { createS3Client, evidenceObjectKey, presignUpload, presignDownload } from '../lib/s3.js';
 import type { Env } from '../env.js';
 
@@ -33,28 +32,22 @@ function serializeEvidence(e: {
   };
 }
 
-/** UPL-006: download_url only when scan_status=clean; never expose storageUri. */
-async function serializeFile(
-  f: {
-    id: string;
-    evidenceId: string;
-    contentType: string;
-    byteSize: bigint;
-    checksumSha256: string;
-    durationSeconds: number | null;
-    originalFilename: string;
-    scanStatus: string;
-    uploadedAt: Date;
-    storageUri: string;
-  },
-  s3: S3Client,
-  bucket: string,
-) {
-  let download_url: string | null = null;
-  if (f.scanStatus === 'clean') {
-    const { downloadUrl } = await presignDownload(s3, bucket, f.storageUri, f.originalFilename);
-    download_url = downloadUrl;
-  }
+/**
+ * Metadata only — never calls object storage (CCR-010 / H2).
+ * download_url is always null; clients use getEvidenceFileDownloadUrl when clean (UPL-006).
+ * storageUri never leaves the server.
+ */
+function serializeFile(f: {
+  id: string;
+  evidenceId: string;
+  contentType: string;
+  byteSize: bigint;
+  checksumSha256: string;
+  durationSeconds: number | null;
+  originalFilename: string;
+  scanStatus: string;
+  uploadedAt: Date;
+}) {
   return {
     id: f.id,
     evidence_id: f.evidenceId,
@@ -64,7 +57,7 @@ async function serializeFile(
     duration_seconds: f.durationSeconds,
     original_filename: f.originalFilename,
     scan_status: f.scanStatus,
-    download_url,
+    download_url: null as string | null,
     uploaded_at: f.uploadedAt.toISOString(),
   };
 }
@@ -170,7 +163,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
 
     return {
       ...serializeEvidence(detail),
-      files: await Promise.all(detail.files.map((f) => serializeFile(f, s3, env.S3_BUCKET))),
+      files: detail.files.map((f) => serializeFile(f)),
       mappings: detail.mappings.map((m) => ({
         id: m.id, evidence_id: m.evidenceId, indicator_id: m.indicatorId, cycle_id: m.cycleId,
         mapping_source: m.mappingSource, status: m.status, rationale: m.rationale,
@@ -322,13 +315,42 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
         entityId: file.id, after: file, requestId: request.id,
       });
 
-      // Just registered → scan_status is still pending → download_url null (UPL-006).
-      return serializeFile(file, s3, env.S3_BUCKET);
+      // Just registered → scan_status is still pending; download_url always null (CCR-010).
+      return serializeFile(file);
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         throw new ApiError('UPL-004', 'Upload already completed for this file id');
       }
       throw e;
     }
+  });
+
+  // CCR-010 / H2: only endpoint that may call presignDownload for evidence files.
+  app.get('/evidence/:evidenceId/files/:fileId/download-url', {
+    config: { operationId: 'getEvidenceFileDownloadUrl' },
+  }, async (request) => {
+    const auth = request.auth!;
+    const schoolId = requireCurrentSchool(auth);
+    const { evidenceId, fileId } = z.object({
+      evidenceId: z.string().uuid(), fileId: z.string().uuid(),
+    }).parse(request.params);
+
+    const grant = await resolveGrant('getEvidenceFileDownloadUrl', auth, schoolId);
+
+    const detail = await getEvidenceDetail(schoolId, evidenceId);
+    if (!detail) throw new ApiError('RES-001', 'Evidence not found');
+    if (grant === 'own') requireOwnership(auth, detail.ownerPersonnelId);
+    if (grant === 'committee') await requireCommitteeAccessToPersonnel(schoolId, auth.userId, detail.ownerPersonnelId);
+
+    const file = detail.files.find((f) => f.id === fileId);
+    if (!file) throw new ApiError('RES-001', 'Evidence file not found');
+    if (file.scanStatus !== 'clean') {
+      throw new ApiError('UPL-006', 'File is not available for download until scan_status=clean');
+    }
+
+    const { downloadUrl, expiresAt } = await presignDownload(
+      s3, env.S3_BUCKET, file.storageUri, file.originalFilename,
+    );
+    return { download_url: downloadUrl, expires_at: expiresAt.toISOString() };
   });
 };
