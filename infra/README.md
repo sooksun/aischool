@@ -4,11 +4,12 @@ On-prem / staging layout for SEIP. Architecture decisions: **ADR-0005** (MinIO +
 
 | Path | Purpose |
 |---|---|
-| `docker/Dockerfile.api` | Multi-stage image for `apps/api` |
+| `docker/Dockerfile.api` | Multi-stage image for `apps/api` (+ migrate on start) |
+| `docker/Dockerfile.worker` | Multi-stage image for `apps/worker` (async jobs) |
 | `docker/Dockerfile.web` | Static SPA image for `apps/web` |
 | `docker/nginx-web.conf` | Static file server inside the web image |
 | `nginx/seip-staging.conf.example` | **Edge** TLS reverse proxy example (host or separate container) |
-| `../docker-compose.staging.yml` | Staging stack (secrets via env, not git) |
+| `../docker-compose.staging.yml` | Staging stack: postgres, minio, api, worker, web |
 | `../docs/project/ops-runbook.md` | Backup/restore, TLS, secrets, bring-up checklist |
 
 ## Quick start (staging-shaped)
@@ -24,7 +25,17 @@ Then point a host nginx at `infra/nginx/seip-staging.conf.example` (or terminate
 
 **Dev** continues to use root `docker-compose.yml` (throwaway credentials, published ports for local tools). Do not reuse staging secrets in dev.
 
-## Collision note (task board)
+## Services
+
+| Service | Public? | Role |
+|---|---|---|
+| postgres | no (internal) | Primary data store |
+| minio | no (internal) | S3-compatible evidence storage |
+| api | localhost:3001 | HTTP API (`/api/v1`) |
+| worker | no | Scan, duration, outbox, GC |
+| web | localhost:8080 | SPA; edge nginx proxies `/api` → api |
+
+## Ownership
 
 - **SEIP-OPS-003** owns this tree + staging compose + ops-runbook.
-- **SEIP-WORKER-001** may add a `worker` service after this lands — extend staging compose in that task, do not fork a second stack.
+- Product code changes (`apps/*/src`) stay on feature branches, not here.

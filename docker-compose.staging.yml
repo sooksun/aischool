@@ -4,14 +4,12 @@
 #
 # Usage:
 #   1. Copy .env.staging.example → .env.staging and fill real values.
-#   2. docker compose -f docker-compose.staging.yml --env-file .env.staging up -d
+#   2. docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --build
 #   3. Put nginx (infra/nginx/seip-staging.conf.example) in front for TLS.
 #
-# Worker is intentionally NOT defined here yet — SEIP-WORKER-001 adds that
-# service once this layout is stable (path-collision rule on the task board).
-#
-# Dev stack remains docker-compose.yml (throwaway credentials, host ports for
-# local tooling). Do not copy staging secrets into the dev compose.
+# Services: postgres + minio + api + worker + web.
+# Dev stack remains docker-compose.yml (throwaway credentials, host ports).
+# Do not copy staging secrets into the dev compose.
 
 name: seip-staging
 
@@ -114,6 +112,36 @@ services:
       timeout: 5s
       retries: 8
       start_period: 40s
+    networks: [seip_internal]
+
+  # Async jobs: virus-scan stub, duration probe, outbox dispatch, storage GC,
+  # and future report.generate / AI jobs (single worker process — WORKER-001).
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      api:
+        # Prefer migrations to finish in api container before worker hammers schema
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}?schema=public
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-seip-evidence}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      WORKER_POLL_MS: ${WORKER_POLL_MS:-2000}
+      WORKER_GC_AFTER_DAYS: ${WORKER_GC_AFTER_DAYS:-7}
+    # No host ports — worker is internal only
     networks: [seip_internal]
 
   web:

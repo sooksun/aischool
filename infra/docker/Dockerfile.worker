@@ -1,6 +1,5 @@
-# SEIP API image (SEIP-OPS-003) — multi-stage Node build for staging/on-prem.
-# Architecture matches ADR-0005: app talks to Postgres + S3-compatible storage
-# over the compose network; no evidence bytes land in the image.
+# SEIP worker image (SEIP-OPS-003) — async jobs against same Postgres + MinIO as API.
+# Single process, multiple job types (scan, duration, outbox, GC, future reports/AI).
 
 FROM node:24-bookworm-slim AS deps
 WORKDIR /app
@@ -18,7 +17,7 @@ WORKDIR /app
 COPY . .
 RUN npx prisma generate
 RUN npm run build:libs \
- && npm run build --workspace apps/api
+ && npm run build --workspace apps/worker
 
 FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
@@ -36,12 +35,9 @@ COPY --from=build /app/node_modules/@prisma /app/node_modules/@prisma
 COPY --from=build /app/packages/backend-shared/dist packages/backend-shared/dist
 COPY --from=build /app/packages/auth/dist packages/auth/dist
 COPY --from=build /app/packages/database/dist packages/database/dist
-COPY --from=build /app/apps/api/dist apps/api/dist
-COPY --from=build /app/prisma prisma
+COPY --from=build /app/apps/worker/dist apps/worker/dist
 COPY packages/backend-shared/package.json packages/backend-shared/
 COPY packages/auth/package.json packages/auth/
 COPY packages/database/package.json packages/database/
-COPY apps/api/package.json apps/api/
-EXPOSE 3001
-# Migrate then start — staging/on-prem bring-up path (ops-runbook.md)
-CMD ["sh", "-c", "npx prisma migrate deploy && node apps/api/dist/index.js"]
+COPY apps/worker/package.json apps/worker/
+CMD ["node", "apps/worker/dist/index.js"]

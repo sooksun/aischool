@@ -23,15 +23,17 @@ Same architecture everywhere: **Node API + SPA + PostgreSQL + MinIO (S3 API)**. 
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | postgres, api `DATABASE_URL` | Strong password; rotate with re-encrypt plan |
-| `DATABASE_URL` | api (dev / process) | Staging compose builds this from POSTGRES_* |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | postgres, api/worker `DATABASE_URL` | Strong password; rotate with re-encrypt plan |
+| `DATABASE_URL` | api, worker (dev / process) | Staging compose builds this from POSTGRES_* |
 | `JWT_SECRET` | api | ≥ 32 characters; rotating invalidates sessions |
-| `S3_ENDPOINT` | api | Staging internal: `http://minio:9000` |
-| `S3_BUCKET` | api, minio-init | Private bucket; no anonymous read |
-| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | api, minio root (staging) | Treat as root secrets; separate app keys later if needed |
-| `S3_REGION` | api | Dummy for S3 SDK; MinIO accepts any |
+| `S3_ENDPOINT` | api, worker | Staging internal: `http://minio:9000` |
+| `S3_BUCKET` | api, worker, minio-init | Private bucket; no anonymous read |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | api, worker, minio root (staging) | Treat as root secrets; separate app keys later if needed |
+| `S3_REGION` | api, worker | Dummy for S3 SDK; MinIO accepts any |
 | `PORT` | api | Default `3001` |
-| `NODE_ENV` | api | `production` in staging compose |
+| `NODE_ENV` | api, worker | `production` in staging compose |
+| `WORKER_POLL_MS` | worker | Job poll interval (default 2000) |
+| `WORKER_GC_AFTER_DAYS` | worker | Soft-deleted evidence GC age (default 7) |
 | `VITE_API_BASE` | web build arg | Empty = same-origin `/api` behind nginx (recommended) |
 
 Templates:
@@ -52,11 +54,14 @@ Templates:
 4. Confirm health:
    ```bash
    docker compose -f docker-compose.staging.yml --env-file .env.staging ps
+   # Expect: postgres, minio, api, worker, web (minio-init exited 0)
    # API container healthcheck is TCP :3001; process probe:
    curl -sS -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:3001/api/v1/auth/login \
      -H 'content-type: application/json' -d '{}'
    # expect 4xx with JSON error body (process up), not connection refused
    curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/
+   # Worker has no HTTP port — check logs for the poll loop:
+   docker compose -f docker-compose.staging.yml --env-file .env.staging logs --tail=20 worker
    ```
 5. Install edge TLS (section 4).
 6. Run seed **once** if empty taxonomy (operator decision):
@@ -143,29 +148,38 @@ Before first production go-live, and before each release that touches storage or
 
 - Teaching videos dominate growth (ADR-0005 risk).
 - Monitor volume size for `seip_staging_pgdata` and `seip_staging_minio`.
-- Retention enforcement (`evidence+N`) is application + GC job (**SEIP-WORKER-001**); until then, operators purge only with written school approval.
+- Soft-deleted evidence GC is handled by the **worker** service (`WORKER_GC_AFTER_DAYS`).
+- Longer school retention (`evidence+N`) still needs a written purge policy; do not delete volumes without approval.
 
 ---
 
-## 7. What this task does *not* cover
+## 7. Worker process (SEIP-WORKER-001)
+
+Staging runs `worker` as a first-class compose service (`infra/docker/Dockerfile.worker`).
+
+| Job type | Role |
+|---|---|
+| `file.process` | Virus-scan stub + optional video duration probe; updates `scan_status` |
+| `storage.gc` | Removes orphaned/soft-deleted objects after `WORKER_GC_AFTER_DAYS` |
+| outbox dispatch | Publishes transactional outbox rows (domain events) |
+| future | `report.generate`, AI mapping — same process, new job types |
+
+API never runs heavy async work inline — it enqueues / writes outbox only.
+
+---
+
+## 8. What this task does *not* cover
 
 | Deferred | Owner task |
 |---|---|
-| Virus scan / duration probe / outbox worker process | SEIP-WORKER-001 |
 | Login rate limiting (refined) | SEIP-OPS-004 |
 | Branch protection GitHub settings | ops (manual / `gh`) |
 | Full production systemd units | may replace compose later without changing app architecture |
+| Official PA PDF layout / cloud AI | product ADRs — not ops |
 
 ---
 
-## 8. Collision rules (for concurrent development)
+## 9. Path notes
 
-While Claude Code works on **UI cycles/scoring** (`apps/web/**`):
-
-| Task | Paths OK |
-|---|---|
-| **SEIP-OPS-003** (this) | `infra/**`, `docker-compose.staging.yml`, ops-runbook, env examples |
-| **SEIP-DB-003** | `prisma/seed*`, `prisma/data/**` only |
-| **SEIP-WORKER-001** | after OPS-003 merges; may add worker service to staging compose |
-
-Do not edit `apps/web/**` or large `apps/api/src/routes/**` from ops tasks.
+Ops work stays in `infra/**`, `docker-compose*.yml`, env examples, and this runbook.
+Do not edit product feature paths (`apps/web/src/**`, `apps/api/src/routes/**`) from ops tasks.
