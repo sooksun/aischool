@@ -370,7 +370,7 @@ tasks:
 
   - id: SEIP-UI-002
     title: Director/admin UI — cycles, rounds, committee assignment
-    status: in_progress          # 2026-07-18 — claude, branch feat/SEIP-UI-002-director-cycles
+    status: done                # 2026-07-18 — handoff SEIP-UI-002.md; branch feat/SEIP-UI-002-director-cycles (pushed to origin)
     wave: C
     sprint: 2
     branch: feat/SEIP-UI-002-director-cycles
@@ -386,13 +386,21 @@ tasks:
       - prisma/**
     notes: >
       Consumes existing cycles + createAssignment APIs only (no new contract unless CCR).
-      Role-gated nav from getCurrentUser. Do NOT start UI-003 until this merges —
-      both touch App.tsx routing.
+      Role-gated nav from getCurrentUser (RequireRole + hasRole(), the app's first
+      role gate). Rounds have no route of their own (no GET /rounds/{roundId} in the
+      contract) — shown inline on CycleDetailPage instead; only assignment management
+      (real GET /rounds/{roundId}/assignments) gets its own route. Known gap: no
+      personnel-listing endpoint exists, so evaluatee/committee fields are raw-uuid
+      inputs (flagged in-form + in the handoff, not silently worked around). Hit and
+      recovered from a real shared-working-directory collision with a concurrent
+      session mid-task — see handoff's infra-hazard section; moved to an isolated
+      git worktree for the remainder of the work. Do NOT start UI-003 until this
+      merges — both touch App.tsx routing.
     acceptance_criteria:
-      - Director/school_admin can create/open cycle and rounds
-      - Create 3-member assignment (1 chair + 2 members) with validation errors shown
-      - Unauthorized roles cannot open these routes (UI hide + API still enforces)
-      - Uses generated OpenAPI types only
+      - Director/school_admin can create/open cycle and rounds                        # DONE — verified live in browser
+      - Create 3-member assignment (1 chair + 2 members) with validation errors shown  # DONE — 4 component tests + live verification
+      - Unauthorized roles cannot open these routes (UI hide + API still enforces)     # DONE — teacher redirected away, verified live
+      - Uses generated OpenAPI types only                                              # DONE
 
   - id: SEIP-UI-003
     title: Evaluator UI — submit scores + view assignment results

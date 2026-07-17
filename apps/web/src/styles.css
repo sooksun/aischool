@@ -189,3 +189,16 @@ h2 { font-size: 1.125rem; margin: 0 0 var(--space-2); }
   .page { padding: var(--space-4); }
   .action-bar { max-width: 640px; margin: 0 auto; border: 1px solid var(--color-border); border-radius: 12px 12px 0 0; }
 }
+
+/* SEIP-UI-002: role-aware top nav, shown only when it has links to offer
+   (director/school_admin) — teacher-only accounts never see it. */
+.app-nav {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  max-width: 640px;
+  margin: 0 auto;
+}
+.app-nav a { color: var(--color-muted); text-decoration: none; font-weight: 600; padding: var(--space-1) 0; }
+.app-nav a.active { color: var(--color-primary); border-bottom: 2px solid var(--color-primary); }
