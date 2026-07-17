@@ -17,6 +17,8 @@ openapi: 3.1.0
 # version 2.5.0 — CCR-010 (additive + semantic, cleanup H2): lazy
 #   getEvidenceFileDownloadUrl; EvidenceFile.download_url always null on
 #   detail/complete (no MinIO presign on metadata reads).
+# version 2.6.0 — CCR-011 (additive, cleanup M2): ReportDetail.payload is
+#   ReportPayload (schema_version=1) instead of free-form object.
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -25,13 +27,12 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.5.0
+  version: 2.6.0
   summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI + PDF)
   description: |
-    Contract v2.5 (CCR-010 cleanup H2) — evidence file download is lazy via
-    GET …/files/{fileId}/download-url; getEvidence does not call object storage.
-    v2.4 (CCR-009) list scan_status + assignment framework; v2.3 session; v2.2 PDF;
-    core remains evidence, PA evaluation, reports, AI suggest.
+    Contract v2.6 (CCR-011 cleanup M2) — Report.payload is typed ReportPayload
+    (schema_version=1). v2.5 lazy file download; v2.4 list scan_status; core remains
+    evidence, PA evaluation, reports, AI suggest.
 
     **Business rules that bind every implementation**
     - Tenancy: every resource is school-scoped; cross-school access returns RES-001 (indistinguishable from not-found).
@@ -1586,12 +1587,91 @@ components:
           required: [payload, section_refs]
           properties:
             payload:
-              type: object
-              additionalProperties: true
-              description: Structured form data (schema_version inside); not official PDF
+              $ref: '#/components/schemas/ReportPayload'
             section_refs:
               type: array
               items: { $ref: '#/components/schemas/ReportSectionRef' }
+
+    # Mirrors packages/backend-shared ReportPayloadV1 (cleanup M2 / CCR-011).
+    # generation_status=pending: only base fields; ready: full nested structure.
+    ReportPayload:
+      type: object
+      required: [schema_version, generation_status, template_code]
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+          description: Payload schema major version (ReportPayloadV1)
+        generation_status:
+          type: string
+          enum: [pending, ready]
+        template_code: { $ref: '#/components/schemas/ReportTemplateCode' }
+        subject:
+          type: object
+          required: [personnel_id, full_name, position_role, rank_level_code]
+          properties:
+            personnel_id: { type: string, format: uuid }
+            full_name: { type: string }
+            position_role: { type: string }
+            rank_level_code: { type: string }
+        cycle:
+          type: object
+          required: [id, title, fiscal_year, evaluation_kind, framework_code, framework_legal_ref]
+          properties:
+            id: { type: string, format: uuid }
+            title: { type: string }
+            fiscal_year: { type: integer }
+            evaluation_kind: { type: string }
+            framework_code: { type: string }
+            framework_legal_ref: { type: string }
+        round:
+          type: [object, 'null']
+          required: [id, round_number, purpose, status]
+          properties:
+            id: { type: string, format: uuid }
+            round_number: { type: integer }
+            purpose: { type: string }
+            status: { type: string }
+        confirmed_mappings:
+          type: array
+          items:
+            type: object
+            required: [mapping_id, evidence_id, evidence_title, indicator_id, indicator_code, indicator_name_th, confirmed_at]
+            properties:
+              mapping_id: { type: string, format: uuid }
+              evidence_id: { type: string, format: uuid }
+              evidence_title: { type: string }
+              indicator_id: { type: string, format: uuid }
+              indicator_code: { type: string }
+              indicator_name_th: { type: string }
+              confirmed_at: { type: [string, 'null'], format: date-time }
+        assignments:
+          type: array
+          items:
+            type: object
+            required: [assignment_id, round_id, round_number, status, committee_size, evaluator_results]
+            properties:
+              assignment_id: { type: string, format: uuid }
+              round_id: { type: string, format: uuid }
+              round_number: { type: integer }
+              status: { type: string }
+              committee_size: { type: integer }
+              evaluator_results:
+                type: array
+                items:
+                  type: object
+                  required: [evaluator_user_id, part1_percent, part2_percent, total_percent, passed_individual_threshold, computed_at]
+                  properties:
+                    evaluator_user_id: { type: string, format: uuid }
+                    part1_percent: { type: number }
+                    part2_percent: { type: number }
+                    total_percent: { type: number }
+                    passed_individual_threshold: { type: boolean }
+                    computed_at: { type: string, format: date-time }
+        generated_at:
+          type: string
+          format: date-time
+          description: Present when generation_status=ready
 
     ReportPage:
       type: object

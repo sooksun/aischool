@@ -32,14 +32,19 @@ test('buildPaReportPdf returns a valid PDF for ready PA2_s payload', async () =>
       round: { id: '44444444-4444-4444-4444-444444444444', round_number: 1, purpose: 'salary', status: 'closed' },
       confirmed_mappings: [
         {
+          mapping_id: '88888888-8888-8888-8888-888888888888',
+          evidence_id: '77777777-7777-7777-7777-777777777777',
+          evidence_title: 'แผนการสอน',
+          indicator_id: '99999999-9999-9999-9999-999999999999',
           indicator_code: 'T-1.1',
           indicator_name_th: 'การจัดการเรียนรู้',
-          evidence_title: 'แผนการสอน',
+          confirmed_at: new Date().toISOString(),
         },
       ],
       assignments: [
         {
           assignment_id: '55555555-5555-5555-5555-555555555555',
+          round_id: '44444444-4444-4444-4444-444444444444',
           round_number: 1,
           status: 'completed',
           committee_size: 3,
@@ -50,6 +55,7 @@ test('buildPaReportPdf returns a valid PDF for ready PA2_s payload', async () =>
               part2_percent: 75,
               total_percent: 78,
               passed_individual_threshold: true,
+              computed_at: new Date().toISOString(),
             },
           ],
         },

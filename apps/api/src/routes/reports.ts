@@ -14,7 +14,7 @@ import {
   writeAuditEvent,
   listEvaluateePersonnelIdsForCommitteeMember,
 } from '@seip/database';
-import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
+import { ApiError, coerceReportPayloadV1, forbiddenAreaWrite } from '@seip/backend-shared';
 import { requireCurrentSchool } from '../plugins/auth.js';
 import { resolveGrant, requireOwnership, requireCommitteeAccessToPersonnel } from '../lib/permission-guard.js';
 import { buildPaReportPdf } from '../lib/pa-report-pdf.js';
@@ -172,9 +172,11 @@ export const reportRoutes: FastifyPluginAsync = async (app) => {
       await requireCommitteeAccessToPersonnel(schoolId, auth.userId, report.subjectPersonnelId);
     }
 
+    // ReportPayloadV1 — single typed shape for worker → DB → API → PDF/UI (cleanup M2).
+    const payload = coerceReportPayloadV1(report.payload);
     return {
       ...serializeReport(report),
-      payload: report.payload as Record<string, unknown>,
+      payload,
       section_refs: report.sectionRefs.map(serializeSectionRef),
     };
   });
@@ -202,7 +204,7 @@ export const reportRoutes: FastifyPluginAsync = async (app) => {
         templateCode: report.templateCode,
         status: report.status,
         generatedAt: report.generatedAt,
-        payload: report.payload as Record<string, unknown>,
+        payload: coerceReportPayloadV1(report.payload),
         sectionRefs: report.sectionRefs.map((s) => ({
           sectionKey: s.sectionKey,
           evidenceId: s.evidenceId,
