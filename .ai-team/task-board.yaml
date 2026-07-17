@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-17T18:30:00+07:00
+updated_at: 2026-07-17T21:00:00+07:00
 # Single-agent mode per ADR-0004 (2026-07-17): Claude Code is the sole developer.
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
@@ -98,7 +98,7 @@ tasks:
 # --- Sprint 1: first production features. DO NOT START until ARCH-002 done. ---
   - id: SEIP-DB-001
     title: Core database implementation (schema + migrations + tests)
-    status: review              # close-out .ai-team/handoffs/SEIP-DB-001.md — awaiting user merge
+    status: done                # 2026-07-17 — merged develop be36eff; handoff SEIP-DB-001.md
     branch: feat/SEIP-DB-001-core-database
     dependencies: [SEIP-ARCH-002]
     notes: >
