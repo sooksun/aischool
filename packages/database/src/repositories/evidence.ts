@@ -9,6 +9,10 @@ import type { EvidenceStatus, Prisma } from '@prisma/client';
 
 export interface ListEvidenceFilter {
   ownerPersonnelId?: string; // undefined = no owner filter (school-wide grant); set = 'own' grant
+  /** 'committee' grant: evidence owned by any evaluatee the caller currently sits
+   * on a committee for. Mutually exclusive with ownerPersonnelId in practice (the
+   * route layer sets exactly one), but both are honored if ever combined. */
+  ownerPersonnelIdIn?: string[];
   categoryId?: string;
   status?: EvidenceStatus;
   mappedToIndicatorId?: string;
@@ -22,7 +26,7 @@ export async function listEvidence(schoolId: string, f: ListEvidenceFilter) {
   const where: Prisma.EvidenceWhereInput = {
     schoolId,
     deletedAt: null,
-    ownerPersonnelId: f.ownerPersonnelId,
+    ownerPersonnelId: f.ownerPersonnelId ?? (f.ownerPersonnelIdIn ? { in: f.ownerPersonnelIdIn } : undefined),
     categoryId: f.categoryId,
     status: f.status,
     ...(f.mappedToIndicatorId

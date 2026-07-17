@@ -7,6 +7,8 @@ import { authRoutes } from './routes/auth.js';
 import { taxonomyRoutes } from './routes/taxonomy.js';
 import { evidenceRoutes } from './routes/evidence.js';
 import { mappingRoutes } from './routes/mappings.js';
+import { cycleRoutes } from './routes/cycles.js';
+import { scoringRoutes } from './routes/scoring.js';
 import { createS3Client, ensureBucket } from './lib/s3.js';
 
 export async function buildServer() {
@@ -29,6 +31,8 @@ export async function buildServer() {
     await v1.register(taxonomyRoutes);
     await v1.register(evidenceRoutes, { env });
     await v1.register(mappingRoutes);
+    await v1.register(cycleRoutes);
+    await v1.register(scoringRoutes);
   }, { prefix: '/api/v1' });
 
   if (env.NODE_ENV !== 'test') {

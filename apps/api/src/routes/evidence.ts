@@ -8,11 +8,12 @@ import { z } from 'zod';
 import {
   listEvidence, createEvidence, getEvidenceDetail, updateEvidence, softDeleteEvidence,
   createEvidenceFile, markEvidenceActiveIfDraft, getEvidenceCategoryById, writeAuditEvent,
+  listEvaluateePersonnelIdsForCommitteeMember,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import { Prisma } from '@prisma/client';
 import { requireCurrentSchool } from '../plugins/auth.js';
-import { resolveGrant, requireOwnership } from '../lib/permission-guard.js';
+import { resolveGrant, requireOwnership, requireCommitteeAccessToPersonnel } from '../lib/permission-guard.js';
 import { createS3Client, evidenceObjectKey, presignUpload } from '../lib/s3.js';
 import type { Env } from '../env.js';
 
@@ -41,7 +42,6 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     const auth = request.auth!;
     const schoolId = requireCurrentSchool(auth);
     const grant = await resolveGrant('listEvidence', auth, schoolId);
-    if (grant === 'committee') throw new ApiError('PERM-003', 'Committee-scoped listing not yet available (scoring deferred)');
 
     const q = z.object({
       owner_personnel_id: z.string().uuid().optional(),
@@ -55,13 +55,27 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     // 'own' forces the filter to the caller regardless of what the client asked for
     // — this is the enforcement point, not a UI nicety (SEC-TEN-1 applied to roles,
     // not just schools).
-    const ownerFilter = grant === 'own' ? auth.personnel?.id : q.owner_personnel_id;
+    let ownerFilter = grant === 'own' ? auth.personnel?.id : q.owner_personnel_id;
     if (grant === 'own' && q.owner_personnel_id && q.owner_personnel_id !== auth.personnel?.id) {
       throw new ApiError('PERM-001', "own-scoped role may not list another owner's evidence");
     }
 
+    let ownerFilterIn: string[] | undefined;
+    if (grant === 'committee') {
+      const evaluateeIds = await listEvaluateePersonnelIdsForCommitteeMember(schoolId, auth.userId);
+      if (q.owner_personnel_id) {
+        if (!evaluateeIds.includes(q.owner_personnel_id)) {
+          throw new ApiError('PERM-001', 'Not a committee member for this owner');
+        }
+        ownerFilter = q.owner_personnel_id;
+      } else {
+        ownerFilterIn = evaluateeIds;
+      }
+    }
+
     const { items, total } = await listEvidence(schoolId, {
       ownerPersonnelId: ownerFilter,
+      ownerPersonnelIdIn: ownerFilterIn,
       categoryId: q.category_id,
       status: q.status,
       mappedToIndicatorId: q.mapped_to_indicator_id,
@@ -114,11 +128,11 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);
 
     const grant = await resolveGrant('getEvidence', auth, schoolId);
-    if (grant === 'committee') throw new ApiError('PERM-003', 'Committee-scoped access not yet available (scoring deferred)');
 
     const detail = await getEvidenceDetail(schoolId, evidenceId);
     if (!detail) throw new ApiError('RES-001', 'Evidence not found');
     if (grant === 'own') requireOwnership(auth, detail.ownerPersonnelId);
+    if (grant === 'committee') await requireCommitteeAccessToPersonnel(schoolId, auth.userId, detail.ownerPersonnelId);
 
     return {
       ...serializeEvidence(detail),

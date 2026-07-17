@@ -7,11 +7,12 @@ import { z } from 'zod';
 import {
   listMappingsForEvidence, createMapping, listMappings, getMappingForAction, getMappingById,
   confirmMapping, rejectMapping, revokeMapping, getEvidenceDetail, getIndicatorById, writeAuditEvent,
+  listEvaluateePersonnelIdsForCommitteeMember,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { Prisma } from '@prisma/client';
 import { requireCurrentSchool } from '../plugins/auth.js';
-import { resolveGrant, requireOwnership } from '../lib/permission-guard.js';
+import { resolveGrant, requireOwnership, requireCommitteeAccessToPersonnel } from '../lib/permission-guard.js';
 
 function serializeMapping(m: { id: string; evidenceId: string; indicatorId: string; cycleId: string | null; mappingSource: string; status: string; rationale: string | null; mappedByUserId: string; confirmedByUserId: string | null; mappedAt: Date; confirmedAt: Date | null }) {
   return {
@@ -28,11 +29,11 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
     const schoolId = requireCurrentSchool(auth);
     const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);
     const grant = await resolveGrant('listEvidenceMappings', auth, schoolId);
-    if (grant === 'committee') throw new ApiError('PERM-003', 'Committee-scoped access not yet available (scoring deferred)');
 
     const evidence = await getEvidenceDetail(schoolId, evidenceId);
     if (!evidence) throw new ApiError('RES-001', 'Evidence not found');
     if (grant === 'own') requireOwnership(auth, evidence.ownerPersonnelId);
+    if (grant === 'committee') await requireCommitteeAccessToPersonnel(schoolId, auth.userId, evidence.ownerPersonnelId);
 
     const rows = await listMappingsForEvidence(schoolId, evidenceId);
     return rows.map(serializeMapping);
@@ -83,7 +84,6 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
     const auth = request.auth!;
     const schoolId = requireCurrentSchool(auth);
     const grant = await resolveGrant('listMappings', auth, schoolId);
-    if (grant === 'committee') throw new ApiError('PERM-003', 'Committee-scoped access not yet available (scoring deferred)');
     // 'own'/'own-revoke' never appear in listMappings' grant set (teacher/deputy
     // hold no rule for this operationId at all — resolveGrant already threw
     // PERM-001 for them before reaching here).
@@ -96,8 +96,13 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
       page_size: z.coerce.number().int().min(1).max(100).default(20),
     }).parse(request.query);
 
+    const ownerPersonnelIdIn = grant === 'committee'
+      ? await listEvaluateePersonnelIdsForCommitteeMember(schoolId, auth.userId)
+      : undefined;
+
     const { items, total } = await listMappings(schoolId, {
-      indicatorId: q.indicator_id, cycleId: q.cycle_id, status: q.status, page: q.page, pageSize: q.page_size,
+      indicatorId: q.indicator_id, cycleId: q.cycle_id, status: q.status,
+      ownerPersonnelIdIn, page: q.page, pageSize: q.page_size,
     });
     return { items: items.map(serializeMapping), meta: { page: q.page, page_size: q.page_size, total } };
   });

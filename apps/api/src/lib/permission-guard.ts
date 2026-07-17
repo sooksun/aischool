@@ -5,7 +5,7 @@
 import { grantFor, type Role } from '@seip/backend-shared';
 import { ApiError, forbiddenRole } from '@seip/backend-shared';
 import type { AuthedRequest } from '../plugins/auth.js';
-import { getSchoolAreaId } from '@seip/database';
+import { getSchoolAreaId, listEvaluateePersonnelIdsForCommitteeMember } from '@seip/database';
 
 export type Grant = 'own' | 'own-revoke' | 'school' | 'area-r' | 'committee';
 
@@ -49,4 +49,15 @@ export function requireOwnership(auth: AuthedRequest, ownerPersonnelId: string):
   if (!auth.personnel || auth.personnel.id !== ownerPersonnelId) {
     throw forbiddenRole();
   }
+}
+
+/** For operations with a 'committee' grant on a personnel-owned resource
+ * (evidence, mappings): verify the resource's owner is someone the caller
+ * currently sits on a committee for. Mirrors requireOwnership's shape for the
+ * 'own' grant — holding the evaluator/director role is not enough by itself. */
+export async function requireCommitteeAccessToPersonnel(
+  schoolId: string, evaluatorUserId: string, ownerPersonnelId: string,
+): Promise<void> {
+  const evaluateeIds = await listEvaluateePersonnelIdsForCommitteeMember(schoolId, evaluatorUserId);
+  if (!evaluateeIds.includes(ownerPersonnelId)) throw forbiddenRole();
 }

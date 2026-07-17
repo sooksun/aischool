@@ -51,6 +51,20 @@ export async function getSchoolAreaId(schoolId: string): Promise<string | null> 
   return school?.areaId ?? null;
 }
 
+export async function getPersonnelById(personnelId: string) {
+  return prisma.personnelProfile.findUnique({
+    where: { id: personnelId },
+    select: { id: true, schoolId: true, positionRole: true, fullName: true },
+  });
+}
+
+/** Existence check for a batch of user ids — used before creating rows with a
+ * user FK (e.g. committee members) so a bad id surfaces as VAL-002, not a P2003
+ * foreign-key crash mapped to a generic 500. */
+export async function countExistingUserIds(userIds: string[]): Promise<number> {
+  return prisma.userAccount.count({ where: { id: { in: userIds } } });
+}
+
 // ── refresh tokens (SEC-AUTH-2: rotation with reuse detection) ──
 
 export async function createRefreshToken(userId: string, tokenHash: string, expiresAt: Date) {
