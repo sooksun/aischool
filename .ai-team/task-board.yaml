@@ -126,10 +126,33 @@ tasks:
       - Idempotent seed script; re-runnable                                        # DONE
       - Full IndicatorLevelDescription per rank level from PDFs                   # RESIDUAL
 
+  - id: SEIP-API-001
+    title: Backend evidence-workflow API (15 of 27 contract operations)
+    status: review              # close-out .ai-team/handoffs/SEIP-API-001.md — awaiting user merge
+    branch: feat/SEIP-API-001-evidence-workflow
+    dependencies: [SEIP-ARCH-002, SEIP-DB-001]
+    notes: >
+      Not originally on the board — created mid-session after auditing the plan
+      against actual repo state and finding apps/api completely unwritten despite
+      locked contracts + built schema. packages/backend-shared, packages/auth,
+      packages/database, apps/api (auth, taxonomy, evidence, mappings routes).
+      CCR-003 (current-school resolution) and CCR-004 (upload-complete metadata)
+      raised and applied. 12 of 27 operations (cycles/rounds/scoring) explicitly
+      deferred to a future SEIP-API-002. Verified end-to-end against real
+      Postgres + MinIO: 6 apps/api integration tests, 6 packages/database
+      integration tests, 13 packages/auth unit tests, all passing.
+    acceptance_criteria:
+      - Auth (login, me) with real password hashing + JWT           # DONE
+      - Taxonomy read endpoints (frameworks, categories)             # DONE
+      - Evidence CRUD + two-phase MinIO upload                       # DONE
+      - Governed mapping create/confirm/reject/revoke                # DONE
+      - Tenancy isolation proven, not just asserted                  # DONE — cross-school RES-001 test
+      - Permission matrix enforced from permissions.yaml at runtime  # DONE — SEC-TEN-5
+
   - id: SEIP-UI-001
     title: Evidence submission flow implementation
     status: backlog
-    dependencies: [SEIP-ARCH-002, SEIP-DB-001]
+    dependencies: [SEIP-ARCH-002, SEIP-DB-001, SEIP-API-001]
     acceptance_criteria:
       - Teacher submits evidence with minimal fields
       - Responsive mobile support

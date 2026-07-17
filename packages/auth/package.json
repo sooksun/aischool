@@ -1,0 +1,23 @@
+{
+  "name": "@seip/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Password hashing, access/refresh tokens, role resolution from SchoolMembership (module-boundaries.md). No datasource of its own — persistence lives in packages/database.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:unit": "node --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
+    "@seip/backend-shared": "*",
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}

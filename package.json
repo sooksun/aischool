@@ -5,11 +5,16 @@
   "description": "School Evidence Intelligence Platform. Root gate-runner + backend workspace (Sprint 1). Adding scripts arms the matching CI gate (see docs/qa/QUALITY-GATES.md).",
   "license": "UNLICENSED",
   "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "gate:ownership": "node scripts/orchestration/validate-ownership.mjs",
     "gate:contracts": "node scripts/security/validate-contracts.mjs",
     "gate:secret-scan": "node scripts/security/run-gitleaks.mjs",
     "gate:dep-audit": "npm audit --audit-level=high",
+    "codegen:contracts": "node scripts/codegen/generate-contract-constants.mjs",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
@@ -18,7 +23,15 @@
     "db:reset": "prisma migrate reset --force",
     "test:backend": "node --test \"tests/backend/*.test.mjs\"",
     "test:integration": "node --test \"tests/backend/*.test.mjs\"",
-    "test:security": "node --test \"tests/security/*.test.mjs\""
+    "test:security": "node --test \"tests/security/*.test.mjs\"",
+    "build:libs": "npm run build --workspace=packages/backend-shared && npm run build --workspace=packages/auth && npm run build --workspace=packages/database",
+    "build": "npm run build:libs && npm run build --workspaces --if-present",
+    "typecheck": "npm run build:libs && npm run typecheck --workspaces --if-present",
+    "lint": "npm run build:libs && npm run lint --workspaces --if-present",
+    "format:check": "npm run format:check --workspaces --if-present",
+    "test:unit": "npm run build:libs && npm run test:unit --workspaces --if-present",
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"
@@ -27,6 +40,7 @@
     "@prisma/client": "^6.19.3"
   },
   "devDependencies": {
+    "js-yaml": "^4.3.0",
     "pg": "^8.13.1",
     "prisma": "^6.19.3"
   }

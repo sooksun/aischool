@@ -1,0 +1,29 @@
+{
+  "name": "@seip/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SEIP HTTP API — evidence-workflow slice of openapi.yaml (module-boundaries.md).",
+  "scripts": {
+    "dev": "node --env-file=../../.env --watch dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "test:integration": "npm run build && node --env-file-if-exists=../../.env --test \"test/evidence-flow.test.mjs\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.712.0",
+    "@aws-sdk/s3-request-presigner": "^3.712.0",
+    "@prisma/client": "^6.19.3",
+    "@seip/auth": "*",
+    "@seip/backend-shared": "*",
+    "@seip/database": "*",
+    "fastify": "^5.2.0",
+    "fastify-plugin": "^5.0.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}
