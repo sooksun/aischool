@@ -15,6 +15,7 @@ import { api, unwrap, setAccessToken, setCurrentSchoolId } from '../api/client';
 import type { components } from '../api/schema.generated';
 
 type CurrentUser = components['schemas']['CurrentUser'];
+type Role = components['schemas']['Role'];
 
 interface AuthState {
   user: CurrentUser | null;
@@ -82,4 +83,12 @@ export function useAuth(): AuthState {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
+}
+
+/** UI-side role check for hiding affordances — never a substitute for server
+ * enforcement (permissions.yaml is the only real gate; module-boundaries.md).
+ * A user can hold the same role at multiple schools/areas, or different roles
+ * at different ones — this checks role membership only, not which school. */
+export function hasRole(user: CurrentUser | null, roles: Role[]): boolean {
+  return Boolean(user?.memberships.some((m) => roles.includes(m.role)));
 }
