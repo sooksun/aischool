@@ -1,10 +1,17 @@
 // Report detail — structured ReportPayload + section refs (SEIP-UI-004) + PDF download.
-// Cleanup M2: payload typed via OpenAPI ReportPayload (schema_version=1) — no ad-hoc casts.
+// Cleanup M2: payload typed via OpenAPI ReportPayload (schema_version=1).
+// Cleanup L1: PDF UX = draft/review fidelity, not official ก.ค.ศ. plate.
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, unwrap, downloadAuthorized } from '../../api/client';
 import { ApiError, thaiMessageFor } from '../../api/errors';
 import type { components } from '../../api/schema.generated';
+import {
+  REPORT_PDF_DOWNLOAD_BUSY,
+  REPORT_PDF_DOWNLOAD_LABEL,
+  REPORT_PDF_FIDELITY_NOTE,
+  REPORT_PDF_NOT_READY_HINT,
+} from '../../lib/reportPdfCopy';
 
 type ReportDetail = components['schemas']['ReportDetail'];
 type ReportPayload = components['schemas']['ReportPayload'];
@@ -107,10 +114,12 @@ export function ReportDetailPage() {
           disabled={!pdfReady || pdfBusy}
           onClick={() => void downloadPdf()}
         >
-          {pdfBusy ? 'กำลังสร้าง PDF…' : 'ดาวน์โหลด PDF แบบฟอร์ม PA'}
+          {pdfBusy ? REPORT_PDF_DOWNLOAD_BUSY : REPORT_PDF_DOWNLOAD_LABEL}
         </button>
-        {!pdfReady && (
-          <p className="field-hint">PDF พร้อมเมื่อจัดทำ payload เสร็จ (ไม่ใช่สถานะ draft)</p>
+        {pdfReady ? (
+          <p className="field-hint" role="note">{REPORT_PDF_FIDELITY_NOTE}</p>
+        ) : (
+          <p className="field-hint">{REPORT_PDF_NOT_READY_HINT}</p>
         )}
         {pdfError && (
           <div className="alert alert-error" role="alert">{pdfError}</div>

@@ -89,9 +89,10 @@ export async function buildPaReportPdf(input: PaReportPdfInput): Promise<Buffer>
   const title = TEMPLATE_TITLES[input.templateCode] ?? input.templateCode;
   doc.fontSize(14).text(title, { align: 'center' });
   doc.moveDown(0.4);
+  // Product fidelity (cleanup L1): draft/review document — not the Protected Artifact plate.
   doc.fontSize(9).fillColor('#444').text(
-    'เอกสารสร้างโดย SEIP จากข้อมูลโครงสร้าง (Report.payload) — รูปแบบอ้างอิงแบบ PA ก.ค.ศ. '
-    + 'ยังไม่ใช่ต้นฉบับลายเซ็นกระดาษอย่างเป็นทางการ ใช้สำหรับร่าง/ตรวจสอบก่อนพิมพ์',
+    'เอกสารร่างจาก SEIP (ข้อมูลโครงสร้าง Report.payload) — ใช้ตรวจความครบถ้วนก่อนพิมพ์ '
+    + 'ไม่ใช่แบบฟอร์มกระดาษ/ต้นฉบับลายเซ็น ก.ค.ศ. อย่างเป็นทางการ',
     { align: 'center' },
   );
   doc.fillColor('#000');

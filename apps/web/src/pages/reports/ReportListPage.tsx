@@ -1,10 +1,11 @@
-// Reports list + create (SEIP-UI-004). Structured JSON only — official PDF layout deferred.
+// Reports list + create (SEIP-UI-004). PDF is draft/review layout — not official plate (L1).
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, unwrap } from '../../api/client';
 import { ApiError, thaiMessageFor } from '../../api/errors';
 import type { components } from '../../api/schema.generated';
 import { useAuth } from '../../hooks/useAuth';
+import { REPORT_LIST_FIDELITY_HINT } from '../../lib/reportPdfCopy';
 
 type Report = components['schemas']['Report'];
 type Cycle = components['schemas']['Cycle'];
@@ -49,8 +50,8 @@ export function ReportListPage() {
         )}
       </div>
 
-      <p className="field-hint">
-        รายงานเป็นข้อมูลโครงสร้าง (JSON) สำหรับแบบ PA1/PA2/PA3 — ยังไม่ใช่ไฟล์ PDF อย่างเป็นทางการ
+      <p className="field-hint" role="note">
+        {REPORT_LIST_FIDELITY_HINT}
       </p>
 
       {showCreate && canCreate && (
