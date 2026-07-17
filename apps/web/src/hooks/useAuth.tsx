@@ -9,9 +9,12 @@
 // locked v1.0.0 TokenPair schema. Mitigation within that constraint:
 // sessionStorage (not localStorage) — cleared when the tab closes, narrowing the
 // window an XSS-stolen token stays valid, and the access token itself is short-
-// lived (15 min, ACCESS_TOKEN_TTL_SECONDS in packages/auth).
+// lived (15 min, ACCESS_TOKEN_TTL_SECONDS in packages/auth). Since CCR-008 the
+// 15-minute expiry no longer logs the user out: client.ts transparently rotates
+// the pair via /auth/refresh on the first 401 and replays the request, and
+// logout() revokes server-side, so a stolen refresh token dies with the session.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, unwrap, setAccessToken, setCurrentSchoolId } from '../api/client';
+import { api, unwrap, setAccessToken, setRefreshToken, setCurrentSchoolId, registerSessionHooks } from '../api/client';
 import type { components } from '../api/schema.generated';
 
 type CurrentUser = components['schemas']['CurrentUser'];
@@ -29,6 +32,14 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 const STORAGE_KEY = 'seip.access_token';
+const REFRESH_STORAGE_KEY = 'seip.refresh_token';
+
+function clearStoredSession() {
+  sessionStorage.removeItem(STORAGE_KEY);
+  sessionStorage.removeItem(REFRESH_STORAGE_KEY);
+  setAccessToken(null);
+  setRefreshToken(null);
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -52,24 +63,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySchoolContext]);
 
   useEffect(() => {
+    // Persist rotated pairs / drop the session when a refresh fails (CCR-008).
+    registerSessionHooks({
+      onRefreshed: (pair) => {
+        sessionStorage.setItem(STORAGE_KEY, pair.access_token);
+        sessionStorage.setItem(REFRESH_STORAGE_KEY, pair.refresh_token);
+      },
+      onExpired: () => {
+        clearStoredSession();
+        setCurrentSchoolId(null);
+        setUser(null);
+        setSchoolId(null);
+      },
+    });
+    return () => registerSessionHooks({});
+  }, []);
+
+  useEffect(() => {
     const stored = sessionStorage.getItem(STORAGE_KEY);
     if (!stored) { setLoading(false); return; }
     setAccessToken(stored);
+    setRefreshToken(sessionStorage.getItem(REFRESH_STORAGE_KEY));
     refreshCurrentUser()
-      .catch(() => { sessionStorage.removeItem(STORAGE_KEY); setAccessToken(null); })
+      .catch(() => clearStoredSession())
       .finally(() => setLoading(false));
   }, [refreshCurrentUser]);
 
   const login = useCallback(async (email: string, password: string) => {
     const tokens = unwrap(await api.POST('/auth/login', { body: { email, password } }));
     sessionStorage.setItem(STORAGE_KEY, tokens.access_token);
+    sessionStorage.setItem(REFRESH_STORAGE_KEY, tokens.refresh_token);
     setAccessToken(tokens.access_token);
+    setRefreshToken(tokens.refresh_token);
     await refreshCurrentUser();
   }, [refreshCurrentUser]);
 
   const logout = useCallback(() => {
-    sessionStorage.removeItem(STORAGE_KEY);
-    setAccessToken(null);
+    // Server-side revocation first (CCR-008) — best-effort: local state clears
+    // regardless, and an unreachable server just leaves a token that ages out.
+    const refresh = sessionStorage.getItem(REFRESH_STORAGE_KEY);
+    void api.POST('/auth/logout', { body: refresh ? { refresh_token: refresh } : undefined }).catch(() => {});
+    clearStoredSession();
     setCurrentSchoolId(null);
     setUser(null);
     setSchoolId(null);

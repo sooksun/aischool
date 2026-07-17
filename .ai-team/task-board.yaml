@@ -224,7 +224,7 @@ tasks:
     acceptance_criteria:
       - All 27 openapi.yaml operations implemented                              # DONE
       - Per-evaluator scoring, 3-member committee, workload gate enforced       # DONE
-      - "≥70% from EVERY evaluator individually" proven, not just averaged      # DONE — scoring-flow.test.mjs
+      - ≥70% from EVERY evaluator individually — proven, not just averaged      # DONE — scoring-flow.test.mjs
       - Round state machine (planned->open->scoring->closed) enforced           # DONE — CYCLE-001
       - evaluator:committee grant wired up on evidence/mappings                 # DONE
       - Verified end-to-end against disposable Postgres+MinIO                  # DONE — 12 apps/api + 6 database + 3 security tests
@@ -631,3 +631,32 @@ tasks:
     acceptance_criteria:
       - Login brute-force limited
       - Safe serving headers documented/enforced where applicable
+
+  - id: SEIP-SEC-002
+    title: Audit critical fixes — session lifecycle (CCR-008), committee integrity, real lint gate
+    status: done                # 2026-07-18 — claude; branch feat/SEIP-SEC-002-audit-critical-fixes
+    sprint: 2
+    branch: feat/SEIP-SEC-002-audit-critical-fixes
+    dependencies: [SEIP-OPS-004]
+    primary_paths:
+      - apps/api/src/routes/auth.ts
+      - apps/api/src/routes/scoring.ts
+      - apps/web/src/api/client.ts
+      - apps/web/src/hooks/useAuth.tsx
+      - apps/web/eslint.config.js
+      - docs/contracts/**
+    notes: >
+      Closes the 2026-07-18 code-status audit's critical items: (1) CCR-008
+      /auth/refresh (rotation + reuse detection) + /auth/logout (server-side
+      revocation) wiring the already-built RefreshToken layer, with transparent
+      refresh-on-401 in the web client; (2) committee seats now require an active
+      evaluator/director membership at the school and the evaluatee can never sit
+      on their own committee; (3) apps/web gets real ESLint (ts-eslint +
+      react-hooks + jsx-a11y) so the CI lint gate stops no-opping; (4) full-suite
+      verified run recorded in QUALITY-GATES.md. Branch protection required-check
+      additions still need the user's GitHub access.
+    acceptance_criteria:
+      - Refresh rotates + replay kills family; logout revokes server-side   # DONE — 4 integration tests
+      - Committee school+role eligibility + self-scoring block              # DONE — integration test
+      - Lint gate runs real ESLint with 0 findings                          # DONE — 3 real a11y/correctness bugs fixed
+      - Full suite green + recorded                                         # DONE — QUALITY-GATES.md 2026-07-18 table

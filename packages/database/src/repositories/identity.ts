@@ -54,7 +54,7 @@ export async function getSchoolAreaId(schoolId: string): Promise<string | null> 
 export async function getPersonnelById(personnelId: string) {
   return prisma.personnelProfile.findUnique({
     where: { id: personnelId },
-    select: { id: true, schoolId: true, positionRole: true, fullName: true },
+    select: { id: true, schoolId: true, positionRole: true, fullName: true, userId: true },
   });
 }
 
@@ -63,6 +63,26 @@ export async function getPersonnelById(personnelId: string) {
  * foreign-key crash mapped to a generic 500. */
 export async function countExistingUserIds(userIds: string[]): Promise<number> {
   return prisma.userAccount.count({ where: { id: { in: userIds } } });
+}
+
+/** Committee eligibility (2026-07-18 audit fix): a committee seat requires an
+ * ACTIVE evaluator or director membership at the assignment's school — the only
+ * two roles permissions.yaml grants `submitMyScores` to, so any other seat could
+ * never actually score and the ≥70%-per-evaluator rule could never be met.
+ * Returns how many of the given userIds qualify; the caller compares to the
+ * committee size. Distinct so a user with duplicate memberships can't inflate. */
+export async function countCommitteeEligibleUserIds(schoolId: string, userIds: string[]): Promise<number> {
+  const rows = await prisma.schoolMembership.findMany({
+    where: {
+      schoolId,
+      userId: { in: userIds },
+      status: 'active',
+      role: { in: ['evaluator', 'director'] },
+    },
+    select: { userId: true },
+    distinct: ['userId'],
+  });
+  return rows.length;
 }
 
 // ── refresh tokens (SEC-AUTH-2: rotation with reuse detection) ──

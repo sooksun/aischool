@@ -9,7 +9,7 @@ import {
   getCommitteeMembership, countCommitteeMembers,
   getWorkloadDeclaration, upsertWorkloadDeclaration,
   replaceIndicatorScores, getIndicatorScores, upsertRoundResult, getRoundResultsForAssignment,
-  getPersonnelById, countExistingUserIds, getFrameworkById, getFrameworkDetail, writeAuditEvent,
+  getPersonnelById, countExistingUserIds, countCommitteeEligibleUserIds, getFrameworkById, getFrameworkDetail, writeAuditEvent,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { resolveGrant, requireOwnership } from '../lib/permission-guard.js';
@@ -106,9 +106,20 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
     const existingUserCount = await countExistingUserIds([...evaluatorIds]);
     if (existingUserCount !== 3) throw new ApiError('VAL-002', 'One or more committee evaluator_user_id values do not exist');
 
+    // 2026-07-18 audit fix: existence alone let ANY account system-wide (any
+    // school, any role — even the evaluatee) be seated. A seat needs an active
+    // evaluator/director membership at THIS school, and nobody scores themselves.
+    const eligibleCount = await countCommitteeEligibleUserIds(round.cycle.schoolId, [...evaluatorIds]);
+    if (eligibleCount !== 3) {
+      throw new ApiError('VAL-002', 'Every committee member must hold an active evaluator or director membership at this school');
+    }
+
     const evaluatee = await getPersonnelById(body.evaluatee_personnel_id);
     if (!evaluatee || evaluatee.schoolId !== round.cycle.schoolId) {
       throw new ApiError('VAL-002', 'Unknown evaluatee_personnel_id');
+    }
+    if (evaluatee.userId && evaluatorIds.has(evaluatee.userId)) {
+      throw new ApiError('VAL-002', 'The evaluatee cannot sit on their own committee');
     }
     const framework = await getFrameworkById(round.cycle.frameworkVersionId);
     if (!framework) throw new ApiError('SYS-001', "round's framework vanished");

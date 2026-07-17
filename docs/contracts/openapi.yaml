@@ -19,12 +19,14 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.2.0
+  version: 2.3.0
   summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI + PDF)
   description: |
-    Contract v2.2 (CCR-007) — evidence workflow, PA evaluation, structured reports
-    (PA1/PA2/PA3 payload + section refs), on-demand **PA form PDF** (`getReportPdf`),
-    and AI mapping suggest via on-prem `local_heuristic` (ADR-0007).
+    Contract v2.3 (CCR-008) — adds the session lifecycle SEC-AUTH-2 requires:
+    `refreshToken` (rotation with reuse detection) and `logout` (server-side
+    revocation). v2.2 (CCR-007) added the PA form PDF (`getReportPdf`); the core
+    remains evidence workflow, PA evaluation, structured reports, and AI mapping
+    suggest via on-prem `local_heuristic` (ADR-0007).
 
     **Business rules that bind every implementation**
     - Tenancy: every resource is school-scoped; cross-school access returns RES-001 (indistinguishable from not-found).
@@ -94,6 +96,52 @@ paths:
               schema: { $ref: '#/components/schemas/TokenPair' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '400': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/refresh:
+    post:
+      operationId: refreshToken
+      summary: Rotate a refresh token into a new token pair (CCR-008, SEC-AUTH-2)
+      description: |
+        The presented refresh token is the credential (no bearer header). On
+        success the old token is revoked and a NEW pair is returned — the client
+        must replace both stored tokens. Presenting an already-rotated (revoked)
+        token is treated as a theft signal: every live token for that account is
+        revoked and the request fails AUTH-001.
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: Rotated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Revoke refresh token(s) server-side (CCR-008, SEC-AUTH-2)
+      description: |
+        With a `refresh_token` in the body, revokes that token (this session).
+        Without one, revokes every live refresh token for the caller (logout
+        everywhere). The short-lived access token is not blacklisted — it ages
+        out within ACCESS_TOKEN_TTL_SECONDS.
+      tags: [auth]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LogoutRequest' }
+      responses:
+        '204':
+          description: Revoked (idempotent — also 204 if the token was already revoked)
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /auth/me:
     get:
@@ -908,6 +956,20 @@ components:
         access_token: { type: string }
         refresh_token: { type: string }
         expires_in: { type: integer, description: Access token TTL seconds }
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string, minLength: 1 }
+
+    LogoutRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+          minLength: 1
+          description: Revoke only this token (this session). Omit to revoke all the caller's tokens.
 
     CurrentUser:
       type: object
