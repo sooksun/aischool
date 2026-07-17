@@ -7,7 +7,7 @@ import { z } from 'zod';
 import {
   listMappingsForEvidence, createMapping, listMappings, getMappingForAction, getMappingById,
   confirmMapping, rejectMapping, revokeMapping, getEvidenceDetail, getIndicatorById, writeAuditEvent,
-  listEvaluateePersonnelIdsForCommitteeMember,
+  listEvaluateePersonnelIdsForCommitteeMember, suggestMappingsLocalHeuristic, getCycleForRound,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { Prisma } from '@prisma/client';
@@ -78,6 +78,64 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
       }
       throw e;
     }
+  });
+
+  app.post('/evidence/:evidenceId/mappings/suggest', { config: { operationId: 'suggestMappings' } }, async (request) => {
+    const auth = request.auth!;
+    const schoolId = requireCurrentSchool(auth);
+    const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);
+    const grant = await resolveGrant('suggestMappings', auth, schoolId);
+    if (grant === 'area-r') throw forbiddenAreaWrite();
+
+    const evidence = await getEvidenceDetail(schoolId, evidenceId);
+    if (!evidence) throw new ApiError('RES-001', 'Evidence not found');
+    if (grant === 'own') requireOwnership(auth, evidence.ownerPersonnelId);
+
+    if (evidence.status !== 'active' && evidence.status !== 'draft') {
+      throw new ApiError('AI-001', 'Evidence is not eligible for mapping suggestions');
+    }
+
+    const body = z.object({
+      cycle_id: z.string().uuid().nullable().optional(),
+      framework_version_id: z.string().uuid().nullable().optional(),
+      max_suggestions: z.number().int().min(1).max(20).optional(),
+    }).parse(request.body ?? {});
+
+    let frameworkVersionId = body.framework_version_id ?? null;
+    const cycleId = body.cycle_id ?? null;
+    if (cycleId) {
+      const cycle = await getCycleForRound(cycleId);
+      if (!cycle || cycle.schoolId !== schoolId) {
+        throw new ApiError('AI-001', 'cycle_id is not valid for this school');
+      }
+      if (!frameworkVersionId) frameworkVersionId = cycle.frameworkVersionId;
+    }
+    if (!frameworkVersionId) {
+      throw new ApiError('AI-001', 'framework_version_id or cycle_id is required to scope indicators');
+    }
+
+    const evidenceText = `${evidence.title} ${evidence.description ?? ''}`;
+    const { items, skippedActive } = await suggestMappingsLocalHeuristic({
+      schoolId,
+      evidenceId,
+      evidenceText,
+      frameworkVersionId,
+      cycleId,
+      mappedByUserId: auth.userId,
+      maxSuggestions: body.max_suggestions ?? 5,
+      requestId: request.id,
+    });
+
+    await writeAuditEvent({
+      schoolId, actorUserId: auth.userId, action: 'ai_suggested', entityType: 'EvidenceIndicatorMapping',
+      entityId: evidenceId, after: { count: items.length, provider: 'local_heuristic' }, requestId: request.id,
+    });
+
+    return {
+      provider: 'local_heuristic' as const,
+      items: items.map(serializeMapping),
+      skipped_active: skippedActive,
+    };
   });
 
   app.get('/mappings', { config: { operationId: 'listMappings' } }, async (request) => {

@@ -1,5 +1,6 @@
 # SEIP Domain Event Contract
 # version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
+# version: 1.1.0 — CCR-005 (additive): report.generated + ai.suggestion.created.
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 # Adding an event or an optional payload field is additive (1.x); removing or
 # retyping a field, or changing an event name, is breaking (2.0).
@@ -9,7 +10,7 @@
 # change; a dispatcher relays to consumers (notification, projections).
 # No dual-writes inside request handlers.
 
-version: 1.0.0
+version: 1.1.0
 status: locked
 locked_at: 2026-07-17
 
@@ -43,7 +44,7 @@ events:
   evidence.mapping.suggested:
     payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, mapping_source: 'enum[human, ai_suggested]' }
     consumers: [notification]
-    note: ai_suggested reserved for Sprint 2 (x-deferred in openapi.yaml).
+    note: Fired for both human createMapping and AI suggestMappings rows.
 
   evidence.mapping.confirmed:
     payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, confirmed_by_user_id: uuid }
@@ -77,6 +78,16 @@ events:
     consumers: [notification, audit-projection]
     note: After this, score writes are rejected (SCORE-002).
 
+  report.generated:
+    payload: { report_id: uuid, cycle_id: uuid, subject_personnel_id: uuid, template_code: string, status: 'enum[draft, pending_approval, approved, issued, superseded]' }
+    consumers: [notification, audit-projection]
+    note: Emitted by report.generate worker when payload + section_refs are written.
+
+  ai.suggestion.created:
+    payload: { evidence_id: uuid, mapping_ids: 'uuid[]', provider: 'enum[local_heuristic]', suggestion_count: integer }
+    consumers: [notification, audit-projection]
+    note: Batch summary after suggestMappings; individual rows also emit evidence.mapping.suggested.
+
 deferred:
-  report.*: contract v0.2 with report endpoints
-  ai.suggestion.*: Sprint 2 (OPEN-3)
+  report.approved: approval workflow UI not yet shipped
+  notification.delivered: channel choice pending

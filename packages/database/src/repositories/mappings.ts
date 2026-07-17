@@ -1,8 +1,10 @@
 // EvidenceIndicatorMapping — the governed M:N at the heart of "upload once, reuse
 // through governed mappings" (system-context.md core principle). Confirmation is
 // a distinct governance act from creation (contract-policy.md), never implicit.
+import type { MappingSource, MappingStatus, Prisma } from '@prisma/client';
 import { prisma } from '../client.js';
-import type { MappingStatus, Prisma } from '@prisma/client';
+import { enqueueOutboxEvent } from './outbox.js';
+import { rankIndicators } from '../lib/local-heuristic-mapping.js';
 
 export async function listMappingsForEvidence(schoolId: string, evidenceId: string) {
   // schoolId filtered via the evidence relation, not a denormalized column on this
@@ -24,6 +26,7 @@ export async function createMapping(schoolId: string, input: {
   cycleId: string | null;
   mappedByUserId: string;
   rationale: string | null;
+  mappingSource?: MappingSource;
 }) {
   return prisma.evidenceIndicatorMapping.create({
     data: {
@@ -31,12 +34,121 @@ export async function createMapping(schoolId: string, input: {
       evidenceId: input.evidenceId,
       indicatorId: input.indicatorId,
       cycleId: input.cycleId,
-      mappingSource: 'human', // ai_suggested reserved for Sprint 2 (x-deferred, OPEN-3)
+      mappingSource: input.mappingSource ?? 'human',
       status: 'suggested',
       mappedByUserId: input.mappedByUserId,
       rationale: input.rationale,
     },
   });
+}
+
+/** Active (suggested|confirmed) indicator ids already mapped for this evidence+cycle. */
+export async function listActiveMappedIndicatorIds(
+  schoolId: string,
+  evidenceId: string,
+  cycleId: string | null,
+): Promise<string[]> {
+  const rows = await prisma.evidenceIndicatorMapping.findMany({
+    where: {
+      schoolId,
+      evidenceId,
+      cycleId,
+      status: { in: ['suggested', 'confirmed'] },
+    },
+    select: { indicatorId: true },
+  });
+  return rows.map((r) => r.indicatorId);
+}
+
+/**
+ * ADR-0007 local_heuristic: score evidence text against indicators in a framework,
+ * create ai_suggested mappings for top matches that aren't already active.
+ */
+export async function suggestMappingsLocalHeuristic(input: {
+  schoolId: string;
+  evidenceId: string;
+  evidenceText: string;
+  frameworkVersionId: string;
+  cycleId: string | null;
+  mappedByUserId: string;
+  maxSuggestions: number;
+  requestId?: string | null;
+}): Promise<{ items: Awaited<ReturnType<typeof createMapping>>[]; skippedActive: number }> {
+  const indicators = await prisma.indicator.findMany({
+    where: {
+      frameworkVersionId: input.frameworkVersionId,
+      indicatorKind: { not: 'workload_gate' },
+    },
+    select: { id: true, code: true, nameTh: true, indicatorKind: true },
+  });
+
+  const activeIds = new Set(
+    await listActiveMappedIndicatorIds(input.schoolId, input.evidenceId, input.cycleId),
+  );
+
+  // Over-fetch then filter actives so we still return up to maxSuggestions
+  const ranked = rankIndicators(input.evidenceText, indicators, {
+    max: input.maxSuggestions + activeIds.size,
+    minScore: 0.05,
+  });
+
+  let skippedActive = 0;
+  const toCreate = [];
+  for (const m of ranked) {
+    if (activeIds.has(m.indicatorId)) {
+      skippedActive++;
+      continue;
+    }
+    toCreate.push(m);
+    if (toCreate.length >= input.maxSuggestions) break;
+  }
+
+  const items = [];
+  for (const m of toCreate) {
+    try {
+      const row = await createMapping(input.schoolId, {
+        evidenceId: input.evidenceId,
+        indicatorId: m.indicatorId,
+        cycleId: input.cycleId,
+        mappedByUserId: input.mappedByUserId,
+        rationale: m.rationale,
+        mappingSource: 'ai_suggested',
+      });
+      items.push(row);
+      await enqueueOutboxEvent({
+        eventType: 'evidence.mapping.suggested',
+        schoolId: input.schoolId,
+        actorUserId: input.mappedByUserId,
+        requestId: input.requestId ?? null,
+        payload: {
+          mapping_id: row.id,
+          evidence_id: input.evidenceId,
+          indicator_id: m.indicatorId,
+          mapping_source: 'ai_suggested',
+        },
+      });
+    } catch {
+      // Race on partial unique index — count as skipped
+      skippedActive++;
+    }
+  }
+
+  if (items.length > 0) {
+    await enqueueOutboxEvent({
+      eventType: 'ai.suggestion.created',
+      schoolId: input.schoolId,
+      actorUserId: input.mappedByUserId,
+      requestId: input.requestId ?? null,
+      payload: {
+        evidence_id: input.evidenceId,
+        mapping_ids: items.map((i) => i.id),
+        provider: 'local_heuristic',
+        suggestion_count: items.length,
+      },
+    });
+  }
+
+  return { items, skippedActive };
 }
 
 export interface ListMappingsFilter {

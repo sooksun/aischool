@@ -1,5 +1,6 @@
 # SEIP Error Code Contract
 # version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
+# version: 1.1.0 — CCR-005 (additive): RPT-001, AI-001.
 # Protected contract (contract-policy.md): changes require an approved CCR.
 # Codes are a stable API surface — clients map them to localized text. Adding a
 # code is additive (1.x); changing the meaning or HTTP status of an existing code,
@@ -14,7 +15,7 @@
 #   }
 # HTTP status is authoritative for transport semantics; `code` for business semantics.
 
-version: 1.0.0
+version: 1.1.0
 status: locked
 locked_at: 2026-07-17
 error_shape:
@@ -29,6 +30,8 @@ namespaces:
   MAP: evidence-indicator mapping rules
   SCORE: committee scoring rules
   CYCLE: cycle / round configuration and state
+  RPT: report generation and template rules
+  AI: AI mapping suggestion rules
   RES: resource existence / conflict
   SYS: infrastructure and unexpected
 
@@ -74,6 +77,12 @@ codes:
   CYCLE-001: { http: 422, meaning: Invalid round state transition (planned→open→scoring→closed only) }
   CYCLE-002: { http: 409, meaning: Overlapping active cycle for (school, fiscal_year, kind) }
   CYCLE-003: { http: 422, meaning: Round period outside cycle bounds }
+
+  # --- RPT (reports) ---
+  RPT-001: { http: 422, meaning: Invalid report request — unknown template, cycle/round/subject mismatch, or generation preconditions not met }
+
+  # --- AI (mapping suggest) ---
+  AI-001: { http: 422, meaning: Mapping suggest rejected — evidence not eligible, framework unknown, or provider unavailable }
 
   # --- RES ---
   RES-001: { http: 404, meaning: Resource not found (or hidden by tenancy — indistinguishable by design) }

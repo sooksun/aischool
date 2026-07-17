@@ -245,7 +245,7 @@ tasks:
 #   Lane C: SEIP-WORKER-001 (apps/worker/** + outbox migration if needed)
 #   Lane D: SEIP-UI-002   (apps/web director) — NOT parallel with UI-003
 # Serial after contracts: ARCH-003 → API-003 → WORKER-002 / UI-004
-# AI chain blocked on OPEN-3: ARCH-005 → API-004 → UI-005 (reuse worker jobs)
+# AI chain: OPEN-3 closed (ADR-0007 local_heuristic); ARCH-005 → API-004 → UI-005 done on REPORTS-AI
 # =============================================================================
 
   - id: SEIP-PLAN-001
@@ -290,7 +290,7 @@ tasks:
 
   - id: SEIP-DB-003
     title: Seed full IndicatorLevelDescription text from ว9/ว10 (residual DB-002)
-    status: done                # 2026-07-18 — 432+360 rows; handoff SEIP-DB-003.md
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: A
     sprint: 2
     branch: feat/SEIP-DB-003-level-descriptions
@@ -316,7 +316,7 @@ tasks:
 
   - id: SEIP-WORKER-001
     title: Async worker — outbox consumer, virus scan, duration probe, storage GC
-    status: done                # 2026-07-18 — handoff SEIP-WORKER-001.md; branch feat/SEIP-WORKER-001-async-pipeline
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: B
     sprint: 2
     branch: feat/SEIP-WORKER-001-async-pipeline
@@ -370,7 +370,7 @@ tasks:
 
   - id: SEIP-UI-002
     title: Director/admin UI — cycles, rounds, committee assignment
-    status: done                # 2026-07-18 — handoff SEIP-UI-002.md; branch feat/SEIP-UI-002-director-cycles (pushed to origin)
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: C
     sprint: 2
     branch: feat/SEIP-UI-002-director-cycles
@@ -449,7 +449,7 @@ tasks:
 
   - id: SEIP-ARCH-003
     title: Reports contract v0.2 (PA1/PA2/PA3 surface) + permissions
-    status: backlog
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: D
     sprint: 2
     branch: feat/SEIP-ARCH-003-reports-contract
@@ -473,7 +473,7 @@ tasks:
 
   - id: SEIP-API-003
     title: Reports API — create/get report + section refs (no binary layout engine)
-    status: backlog
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: D
     sprint: 2
     branch: feat/SEIP-API-003-reports-api
@@ -497,7 +497,7 @@ tasks:
 
   - id: SEIP-WORKER-002
     title: Report generation job type on existing worker
-    status: backlog
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: D
     sprint: 2
     branch: feat/SEIP-WORKER-002-report-jobs
@@ -517,7 +517,7 @@ tasks:
 
   - id: SEIP-UI-004
     title: Reports UI — request/download PA forms for allowed roles
-    status: backlog
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: D
     sprint: 2
     branch: feat/SEIP-UI-004-reports
@@ -534,11 +534,11 @@ tasks:
       - Role-appropriate report list/detail
       - Clear empty/error/generating states
 
-  # --- Wave E: AI mapping (blocked on OPEN-3 / ADR) ---
+  # --- Wave E: AI mapping (OPEN-3 closed by ADR-0007; implemented on REPORTS-AI) ---
 
   - id: SEIP-ARCH-005
     title: "ADR — AI provider + PDPA residency (closes OPEN-3)"
-    status: blocked
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: E
     sprint: 2
     branch: feat/SEIP-ARCH-005-ai-adr
@@ -556,7 +556,7 @@ tasks:
 
   - id: SEIP-API-004
     title: "AI mapping suggest endpoint (contract already reserved)"
-    status: backlog
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: E
     sprint: 2
     branch: feat/SEIP-API-004-ai-suggest
@@ -578,7 +578,7 @@ tasks:
 
   - id: SEIP-UI-005
     title: Teacher UI — show AI suggestions + confirm/reject
-    status: backlog
+    status: done                # 2026-07-18 - bundled on feat/SEIP-REPORTS-AI; handoff SEIP-REPORTS-AI.md
     wave: E
     sprint: 2
     branch: feat/SEIP-UI-005-ai-suggestions

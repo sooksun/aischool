@@ -8,3 +8,5 @@ export * from './repositories/cycles.js';
 export * from './repositories/scoring.js';
 export * from './repositories/outbox.js';
 export * from './repositories/jobs.js';
+export * from './repositories/reports.js';
+export * from './lib/local-heuristic-mapping.js';

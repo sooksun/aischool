@@ -9,6 +9,7 @@ import { evidenceRoutes } from './routes/evidence.js';
 import { mappingRoutes } from './routes/mappings.js';
 import { cycleRoutes } from './routes/cycles.js';
 import { scoringRoutes } from './routes/scoring.js';
+import { reportRoutes } from './routes/reports.js';
 import { createS3Client, ensureBucket } from './lib/s3.js';
 
 export async function buildServer() {
@@ -33,6 +34,7 @@ export async function buildServer() {
     await v1.register(mappingRoutes);
     await v1.register(cycleRoutes);
     await v1.register(scoringRoutes);
+    await v1.register(reportRoutes);
   }, { prefix: '/api/v1' });
 
   if (env.NODE_ENV !== 'test') {

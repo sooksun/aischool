@@ -72,8 +72,10 @@ function generateEvents() {
     else if (/^enum\[(.+)]$/.test(t)) {
       const opts = t.match(/^enum\[(.+)]$/)[1].split(',').map((s) => `'${s.trim()}'`);
       base = opts.join(' | ');
-    } else if (/^uuid\[(\d+)]$/.test(t)) {
+    } else if (/^uuid\[(\d+)\]$/.test(t)) {
       base = 'string[]'; // fixed-length noted only in the YAML comment, not the type system
+    } else if (t === 'uuid[]' || t === 'string[]') {
+      base = 'string[]';
     } else {
       base = 'unknown';
     }

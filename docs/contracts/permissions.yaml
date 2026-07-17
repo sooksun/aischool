@@ -1,5 +1,6 @@
 # SEIP Permission Contract
 # version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
+# version: 1.1.0 — CCR-005 (additive): reports + suggestMappings operationIds.
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 #
 # The api module is the sole enforcement point (module-boundaries.md).
@@ -8,7 +9,7 @@
 # This file is also a TEST FIXTURE (SECURITY-BASELINE SEC-TEN-5): permission tests
 # generate their cases from this matrix, so contract and enforcement cannot drift.
 
-version: 1.0.0
+version: 1.1.0
 status: locked
 locked_at: 2026-07-17
 
@@ -76,6 +77,7 @@ matrix:
   # mappings — evidence owner proposes; confirmation is a governance act
   listEvidenceMappings:    { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
   createMapping:           { teacher: own, deputy: own, director: own, school_admin: school }
+  suggestMappings:         { teacher: own, deputy: own, director: own, school_admin: school }
   listMappings:            { director: school, school_admin: school, evaluator: committee, area_admin: area-r }
   actOnMapping:            # confirm/reject/revoke
     teacher: own-revoke    # owner may revoke their own suggested mapping only
@@ -88,6 +90,11 @@ matrix:
   getAssignment:           { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
   submitMyScores:          { evaluator: committee, director: committee }   # director scores only as committee chair/member
   getAssignmentResults:    { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
+
+  # reports — structured PA payloads; subject sees own; director/admin school-wide
+  listReports:             { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
+  createReport:            { director: school, school_admin: school }
+  getReport:               { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
 
 notes:
   - teacher:own on listEvidence means the default filter is owner=self and other owners are rejected.
