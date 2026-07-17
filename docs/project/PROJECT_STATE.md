@@ -25,7 +25,7 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 6. ~~SEIP-OPS-002~~ **DONE** — develop CI fix (556958c)
 7. ~~SEIP-API-002~~ **DONE** — cycles + committee scoring (remaining 11 ops); all 27 contract operations implemented
 8. Contracts at **v2.0.0** (CCR-004)
-9. Future: SEIP-WORKER-001 (scan/duration/outbox), director/evaluator UI, PA reports
+9. **Sprint 2+ roadmap on board** (SEIP-PLAN-001) — waves A–F: OPS-003, DB-003, WORKER-001, UI-002/003, ARCH-003→reports, ARCH-005 AI (blocked OPEN-3), QA-004 e2e. See .ai-team/task-board.yaml for deps + primary_paths (anti-collision).
 
 **develop vertical slice + full API surface:** login → evidence → MinIO → mapping + cycles/rounds + 3-evaluator scoring with per-evaluator ≥70% pass rule.
 

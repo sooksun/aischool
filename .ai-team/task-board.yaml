@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-18T00:15:00+07:00
+updated_at: 2026-07-18T12:00:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -229,3 +229,397 @@ tasks:
       - evaluator:committee grant wired up on evidence/mappings                 # DONE
       - Verified end-to-end against disposable Postgres+MinIO                  # DONE — 12 apps/api + 6 database + 3 security tests
       - permission-matrix sweep extended to cover the new operations            # DONE — 13->23 ops
+
+# =============================================================================
+# Sprint 2+ roadmap (added 2026-07-18) — non-overlapping paths + dependency DAG
+# Coordination while Claude Code is sole implementer (ADR-0004):
+#   1. At most ONE task status=in_progress that lists a given primary_path prefix.
+#   2. Parallel only when primary_paths sets are disjoint (see Parallel lanes).
+#   3. Branch: feat/<task-id>-<slug> off latest develop; no force-push.
+#   4. Contract edits require CCR + version bump (gate:contracts enforces).
+#   5. Shared packages (database/auth/backend-shared): serialize — never two
+#      in_progress tasks that both list packages/database/** as primary.
+# Parallel lanes (safe concurrent pairs after deps met):
+#   Lane A: SEIP-OPS-003  (infra/**, docker-compose*.yml, docs ops notes)
+#   Lane B: SEIP-DB-003   (prisma/seed*.mjs or prisma/data/** only)
+#   Lane C: SEIP-WORKER-001 (apps/worker/** + outbox migration if needed)
+#   Lane D: SEIP-UI-002   (apps/web director) — NOT parallel with UI-003
+# Serial after contracts: ARCH-003 → API-003 → WORKER-002 / UI-004
+# AI chain blocked on OPEN-3: ARCH-005 → API-004 → UI-005 (reuse worker jobs)
+# =============================================================================
+
+  - id: SEIP-PLAN-001
+    title: "Sprint 2+ path map and anti-collision rules (meta)"
+    status: done
+    notes: >
+      Documents the dependency DAG and primary_paths for the tasks below so
+      Claude Code (or any co-pilot) does not open two branches that edit the
+      same tree. No code deliverable — this task is the board itself.
+    acceptance_criteria:
+      - Board lists worker, multi-role UI, reports, AI, ops with deps and paths  # DONE
+      - Parallel lanes A–D defined                                                # DONE
+
+  # --- Wave A: can start now (path-disjoint; prefer OPS-003 before WORKER compose) ---
+
+  - id: SEIP-OPS-003
+    title: Staging-oriented compose + secrets/TLS/backup checklist (on-prem)
+    status: backlog
+    wave: A
+    sprint: 2
+    branch: feat/SEIP-OPS-003-staging-ops
+    dependencies: [SEIP-OPS-002, SEIP-API-002]
+    primary_paths:
+      - infra/**
+      - docker-compose.staging.yml
+      - docs/project/ops-runbook.md
+      - .env.example
+    avoid_paths:
+      - apps/api/src/**
+      - apps/web/src/**
+      - prisma/schema.prisma
+    notes: >
+      ADR-0005 on-prem. Dev compose stays; add staging profile with non-dev secrets
+      pattern, healthchecks, backup/restore procedure for Postgres+MinIO, TLS notes.
+      Does NOT implement business features. Own compose layout before WORKER-001
+      adds a worker service entry (WORKER-001 depends on this).
+    acceptance_criteria:
+      - Staging compose (or documented profile) for postgres + minio + api + web
+      - Secrets never committed; .env.example documents required vars
+      - Backup/restore checklist for Postgres and MinIO object store
+      - TLS termination guidance for reverse proxy (no fake certs in git)
+
+  - id: SEIP-DB-003
+    title: Seed full IndicatorLevelDescription text from ว9/ว10 (residual DB-002)
+    status: backlog
+    wave: A
+    sprint: 2
+    branch: feat/SEIP-DB-003-level-descriptions
+    dependencies: [SEIP-DB-002]
+    primary_paths:
+      - prisma/seed.mjs
+      - prisma/data/**
+      - tests/backend/seed-taxonomy.test.mjs
+    avoid_paths:
+      - prisma/schema.prisma
+      - apps/**
+    notes: >
+      Data-only. Do not change schema. Source = evaluation-framework.md + official
+      PDFs (not invent wording). Parallel-safe with OPS-003 and UI tasks.
+      NOT parallel with WORKER-001 if worker needs a schema migration in the same
+      window — finish DB-003 first or use WORKER-001's own migration only.
+    acceptance_criteria:
+      - Level descriptions seeded for teacher + admin frameworks (idempotent)
+      - Tests assert coverage for scored indicators × rank tiers (or documented subset)
+      - No schema migration required
+
+  # --- Wave B: worker foundation ---
+
+  - id: SEIP-WORKER-001
+    title: Async worker — outbox consumer, virus scan, duration probe, storage GC
+    status: backlog
+    wave: B
+    sprint: 2
+    branch: feat/SEIP-WORKER-001-async-pipeline
+    dependencies: [SEIP-API-001, SEIP-DB-001, SEIP-OPS-003]
+    primary_paths:
+      - apps/worker/**
+      - packages/database/src/repositories/outbox.ts
+      - packages/database/src/repositories/jobs.ts
+      - prisma/migrations/*_outbox*
+    secondary_paths:
+      - packages/backend-shared/**
+      - apps/api/src/routes/evidence.ts
+      - docker-compose.yml
+    notes: >
+      Single worker process, multiple job types (scan, duration, outbox dispatch, GC).
+      API only enqueues / writes outbox — no second job runner later for AI/reports.
+      If outbox table migration is needed, this task owns it (not DB-003).
+      Secondary touch of evidence.ts only to emit outbox after completeFileUpload
+      if not already present — keep diff minimal.
+    acceptance_criteria:
+      - apps/worker runs against same DATABASE_URL + S3_* as api
+      - After completeFileUpload, scan job transitions scan_status pending→clean|blocked
+      - Video duration probe fills duration_seconds when missing (UPL-003 authority)
+      - Outbox events from events.yaml are dispatched idempotently
+      - Integration test with real Postgres (+ MinIO where needed)
+      - No separate queue for future AI/report jobs — extend this worker
+
+  - id: SEIP-API-003a
+    title: Presigned download URL when scan_status=clean (UPL-006)
+    status: backlog
+    wave: B
+    sprint: 2
+    branch: feat/SEIP-API-003a-safe-download
+    dependencies: [SEIP-WORKER-001]
+    primary_paths:
+      - apps/api/src/routes/evidence.ts
+      - apps/api/src/lib/s3.ts
+      - apps/api/test/**
+    avoid_paths:
+      - apps/worker/**
+      - apps/web/**
+    notes: >
+      Small API follow-up after worker can mark clean. Do not parallel with other
+      evidence.ts edits.
+    acceptance_criteria:
+      - download_url issued only when scan_status=clean
+      - Short-lived presigned GET; never expose storageUri
+      - Test covers blocked/pending → null url
+
+  # --- Wave C: multi-role UI (serial UI-002 → UI-003 on apps/web) ---
+
+  - id: SEIP-UI-002
+    title: Director/admin UI — cycles, rounds, committee assignment
+    status: backlog
+    wave: C
+    sprint: 2
+    branch: feat/SEIP-UI-002-director-cycles
+    dependencies: [SEIP-API-002, SEIP-UI-001]
+    primary_paths:
+      - apps/web/src/pages/director/**
+      - apps/web/src/pages/admin/**
+      - apps/web/src/App.tsx
+      - apps/web/src/hooks/**
+    avoid_paths:
+      - apps/api/**
+      - apps/worker/**
+      - prisma/**
+    notes: >
+      Consumes existing cycles + createAssignment APIs only (no new contract unless CCR).
+      Role-gated nav from getCurrentUser. Do NOT start UI-003 until this merges —
+      both touch App.tsx routing.
+    acceptance_criteria:
+      - Director/school_admin can create/open cycle and rounds
+      - Create 3-member assignment (1 chair + 2 members) with validation errors shown
+      - Unauthorized roles cannot open these routes (UI hide + API still enforces)
+      - Uses generated OpenAPI types only
+
+  - id: SEIP-UI-003
+    title: Evaluator UI — submit scores + view assignment results
+    status: backlog
+    wave: C
+    sprint: 2
+    branch: feat/SEIP-UI-003-evaluator-scoring
+    dependencies: [SEIP-UI-002, SEIP-API-002]
+    primary_paths:
+      - apps/web/src/pages/evaluator/**
+      - apps/web/src/App.tsx
+      - apps/web/src/components/scoring/**
+    avoid_paths:
+      - apps/api/**
+      - apps/worker/**
+    notes: >
+      Depends UI-002 for shared shell/nav patterns. Uses submitMyScores /
+      getAssignmentResults. Shows per-evaluator ≥70% and workload gate clearly.
+    acceptance_criteria:
+      - Committee member can submit full indicator set for an assignment
+      - SCORE-002 / SCORE-005 surfaced as Thai errors
+      - Evaluatee cannot see results until round closed (matches API)
+      - Unit/component tests for score form validation
+
+  - id: SEIP-UI-003b
+    title: Teacher UI — scan status + download when clean
+    status: backlog
+    wave: C
+    sprint: 2
+    branch: feat/SEIP-UI-003b-scan-download
+    dependencies: [SEIP-WORKER-001, SEIP-API-003a, SEIP-UI-001]
+    primary_paths:
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+      - apps/web/src/pages/EvidenceListPage.tsx
+    avoid_paths:
+      - apps/web/src/pages/director/**
+      - apps/web/src/pages/evaluator/**
+    notes: >
+      Narrow UI polish; path-disjoint from director/evaluator folders. Avoid
+      simultaneous App.tsx edits with UI-002/003.
+    acceptance_criteria:
+      - List/detail reflect scan_status updates (poll or refresh)
+      - Download control only when clean + url present
+
+  # --- Wave D: reports (contract → API → worker job → UI) ---
+
+  - id: SEIP-ARCH-003
+    title: Reports contract v0.2 (PA1/PA2/PA3 surface) + permissions
+    status: backlog
+    wave: D
+    sprint: 2
+    branch: feat/SEIP-ARCH-003-reports-contract
+    dependencies: [SEIP-API-002, SEIP-UI-000]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - docs/contracts/error-codes.yaml
+      - docs/contracts/events.yaml
+      - docs/reviews/CCR-*
+    avoid_paths:
+      - apps/**
+      - prisma/**
+    notes: >
+      Contract-only. Inventory official form fields first. Bump version per
+      contract-policy. Parallel-safe with UI-002/003 and WORKER-001 (docs only).
+    acceptance_criteria:
+      - CCR filed and applied; openapi version bumped appropriately
+      - Report endpoints + DTOs listed; authz matrix complete for new operationIds
+      - gate:contracts green
+
+  - id: SEIP-API-003
+    title: Reports API — create/get report + section refs (no binary layout engine)
+    status: backlog
+    wave: D
+    sprint: 2
+    branch: feat/SEIP-API-003-reports-api
+    dependencies: [SEIP-ARCH-003, SEIP-DB-001]
+    primary_paths:
+      - apps/api/src/routes/reports.ts
+      - packages/database/src/repositories/reports.ts
+      - apps/api/test/reports*.test.mjs
+      - tests/security/permission-matrix.test.mjs
+    avoid_paths:
+      - apps/web/**
+      - apps/worker/**
+    notes: >
+      Uses Report/ReportSectionRef tables from DB-001. Heavy PDF/layout generation
+      is WORKER-002, not inline in HTTP handler. Serialize vs API-003a (different
+      route files — OK in parallel if no shared server.ts conflict; prefer after 003a).
+    acceptance_criteria:
+      - Endpoints per ARCH-003 contract
+      - Only confirmed mappings eligible for official sections
+      - Permission matrix extended; tenancy tests pass
+
+  - id: SEIP-WORKER-002
+    title: Report generation job type on existing worker
+    status: backlog
+    wave: D
+    sprint: 2
+    branch: feat/SEIP-WORKER-002-report-jobs
+    dependencies: [SEIP-WORKER-001, SEIP-API-003]
+    primary_paths:
+      - apps/worker/src/jobs/report*
+      - packages/database/src/repositories/reports.ts
+    avoid_paths:
+      - apps/web/**
+      - apps/api/src/routes/**
+    notes: >
+      Extends WORKER-001 — same process, new job type. Do not create apps/report-runner.
+    acceptance_criteria:
+      - Job builds report payload from scores + confirmed mappings
+      - Idempotent retries without duplicate issued reports
+      - Integration test with fixture assignment results
+
+  - id: SEIP-UI-004
+    title: Reports UI — request/download PA forms for allowed roles
+    status: backlog
+    wave: D
+    sprint: 2
+    branch: feat/SEIP-UI-004-reports
+    dependencies: [SEIP-API-003, SEIP-UI-002]
+    primary_paths:
+      - apps/web/src/pages/reports/**
+      - apps/web/src/App.tsx
+    avoid_paths:
+      - apps/api/**
+      - apps/worker/**
+    notes: >
+      After UI-002 shell exists. Serial with other App.tsx work.
+    acceptance_criteria:
+      - Role-appropriate report list/detail
+      - Clear empty/error/generating states
+
+  # --- Wave E: AI mapping (blocked on OPEN-3 / ADR) ---
+
+  - id: SEIP-ARCH-005
+    title: "ADR — AI provider + PDPA residency (closes OPEN-3)"
+    status: blocked
+    wave: E
+    sprint: 2
+    branch: feat/SEIP-ARCH-005-ai-adr
+    dependencies: [SEIP-ARCH-002]
+    primary_paths:
+      - docs/decisions/ADR-0007-ai-provider-pdpa.md
+      - docs/project/PROJECT_STATE.md
+    notes: >
+      BLOCKED until user decides provider and whether any personal data may leave
+      on-prem hardware (ADR-0005 tension). No code before ADR Accepted.
+    acceptance_criteria:
+      - ADR Accepted by user
+      - Explicit allow/deny for sending evidence text/images off-box
+      - OPEN-3 closed in PROJECT_STATE
+
+  - id: SEIP-API-004
+    title: "AI mapping suggest endpoint (contract already reserved)"
+    status: backlog
+    wave: E
+    sprint: 2
+    branch: feat/SEIP-API-004-ai-suggest
+    dependencies: [SEIP-ARCH-005, SEIP-API-001, SEIP-WORKER-001]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - apps/api/src/routes/mappings.ts
+      - apps/worker/src/jobs/ai-mapping*
+      - packages/database/src/repositories/mappings.ts
+    notes: >
+      CCR if contract surface changes beyond reserved ai_suggested.
+      Worker runs model call; API only enqueues + returns suggestion ids.
+      Human confirm still required (existing actOnMapping).
+    acceptance_criteria:
+      - POST suggest creates mapping_source=ai_suggested only
+      - No auto-confirm; permissions unchanged for confirm
+      - PDPA constraints from ADR-0007 enforced
+      - Tests for suggest + confirm path
+
+  - id: SEIP-UI-005
+    title: Teacher UI — show AI suggestions + confirm/reject
+    status: backlog
+    wave: E
+    sprint: 2
+    branch: feat/SEIP-UI-005-ai-suggestions
+    dependencies: [SEIP-API-004, SEIP-UI-001]
+    primary_paths:
+      - apps/web/src/pages/EvidenceSubmitPage.tsx
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+      - apps/web/src/components/mapping/**
+    avoid_paths:
+      - apps/web/src/pages/director/**
+      - apps/web/src/pages/evaluator/**
+    notes: >
+      Light touch on teacher pages; avoid parallel with large teacher refactors.
+    acceptance_criteria:
+      - Suggestions labeled as AI; user must confirm
+      - Errors/PDPA notices in Thai where appropriate
+
+  # --- Wave F: polish ---
+
+  - id: SEIP-QA-004
+    title: Browser e2e smoke (login → submit evidence) in CI
+    status: backlog
+    wave: F
+    sprint: 2
+    branch: feat/SEIP-QA-004-e2e-smoke
+    dependencies: [SEIP-UI-001, SEIP-OPS-002]
+    primary_paths:
+      - tests/e2e/**
+      - .github/workflows/ci.yml
+    notes: >
+      Playwright/Cypress smoke against compose stack. Path-disjoint from feature
+      work if it only adds tests/e2e + workflow job.
+    acceptance_criteria:
+      - One green e2e path on CI with Postgres+MinIO+api+web
+      - Documented in QUALITY-GATES.md
+
+  - id: SEIP-OPS-004
+    title: Login rate limiting + security headers at edge
+    status: backlog
+    wave: F
+    sprint: 2
+    branch: feat/SEIP-OPS-004-edge-security
+    dependencies: [SEIP-OPS-003]
+    primary_paths:
+      - infra/**
+      - apps/api/src/plugins/**
+    notes: >
+      Prefer reverse-proxy rate limit; api plugin only if unavoidable.
+      Avoid parallel with large api route work.
+    acceptance_criteria:
+      - Login brute-force limited
+      - Safe serving headers documented/enforced where applicable
