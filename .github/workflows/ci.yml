@@ -216,6 +216,11 @@ jobs:
         run: |
           npm run build:libs
           npm run build --workspace apps/api
+          # apps/api's reports-and-ai.test.mjs drives the REAL worker loop
+          # (imports apps/worker/dist/loop.js) — without this build the whole
+          # apps/api test step dies on ERR_MODULE_NOT_FOUND. Broken since the
+          # REPORTS-AI merge; found while fixing the red develop runs (SEC-002).
+          npm run build --workspace apps/worker
           node scripts/ci/ensure-minio-bucket.mjs
       - name: apps/api evidence-workflow integration tests
         run: npm run test:integration --workspace apps/api
@@ -365,7 +370,11 @@ jobs:
       S3_REGION: us-east-1
       JWT_SECRET: ci-only-secret-not-a-real-credential-min32
       PORT: "3011"
-      NODE_ENV: production
+      # NODE_ENV deliberately NOT set at job level: `npm ci` under
+      # NODE_ENV=production skips devDependencies, so the install/build step had
+      # no tsc/vite/prisma CLI and this job failed before ever reaching
+      # Playwright (broken since the job was added; found during SEC-002).
+      # The API process gets NODE_ENV=production inline where it starts.
       E2E_BASE_URL: http://127.0.0.1:5173
       VITE_API_PROXY_TARGET: http://127.0.0.1:3011
     steps:
@@ -399,7 +408,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Start API and web
         run: |
-          node apps/api/dist/index.js &
+          NODE_ENV=production node apps/api/dist/index.js &
           echo $! > /tmp/seip-api.pid
           npm run dev --workspace apps/web -- --host 127.0.0.1 --port 5173 &
           echo $! > /tmp/seip-web.pid

@@ -1,0 +1,10 @@
+# Historical findings only — the flagged lines no longer exist at HEAD.
+# gitleaks scans full git history, so the introducing commits stay flagged
+# forever unless fingerprinted here. Both are the same dev-only placeholder
+# fallback (`seip_dev_only_change_me`, the value docker-compose.yml ships for
+# local MinIO) that early versions of the worker tests inlined; the live code
+# now reads env-only (apps/worker/src/s3.ts carries the inline gitleaks:allow
+# for the credential FIELD NAME, and the test files take S3_SECRET_KEY from
+# the environment). Never fingerprint a real credential here — rotate it.
+7c8279227e2b8f414e2c0e0c1bd3af0c8fe62ce8:apps/worker/test/file-process.test.mjs:generic-api-key:30
+2566f1a6ce2111f6a76017018da1b474e68ca9cd:apps/worker/test/storage-gc.test.mjs:generic-api-key:30
