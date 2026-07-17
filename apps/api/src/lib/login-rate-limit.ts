@@ -1,10 +1,24 @@
-// In-process login throttle (SEC-AUTH-5 / SEIP-OPS-004).
-// Per-IP + per-account (email) fixed windows. Single-process MVP — multi-instance
-// deployments should put the edge nginx limit_req in front (per-IP) and later
-// share this counter via Redis if horizontal scale is required.
-//
-// Edge nginx is the first line of defense; this module is defense-in-depth so
-// local/dev and misconfigured reverse proxies still throttle brute force.
+/**
+ * Login throttle (SEC-AUTH-5 / SEIP-OPS-004) — process-global singleton (MVP).
+ *
+ * ## Defense layers
+ * 1. **Primary (always):** edge nginx `limit_req` on `/api/v1/auth/login` (per-IP).
+ *    See `infra/nginx/seip-staging.conf.example`. Fleet-wide even with N API replicas.
+ * 2. **Defense-in-depth:** this module — per-IP + per-email fixed windows inside
+ *    *one* Node process so local/dev and a misconfigured reverse proxy still
+ *    throttle brute force (AUTH-004).
+ *
+ * ## Multi-instance (accepted for MVP — not a launch blocker)
+ * Counters live in process memory. Two API replicas do **not** share counts.
+ * That is fine while the edge is the primary limiter. Shared Redis (or similar)
+ * is a future enhancement only if we run many API instances *without* a trusted
+ * edge — track in PROJECT_STATE “Sprint 2+ remaining”, not a SEC launch gate.
+ *
+ * ## Singleton
+ * One limiter per process, stored on `globalThis` so duplicate module graphs
+ * still share state. Boot calls `configureLoginRateLimiterFromEnv`. Tests may
+ * replace or reset process state via the test helpers below (documented, intentional).
+ */
 
 export interface LoginRateLimitOptions {
   /** Sliding-ish fixed window length (ms). */
@@ -34,6 +48,20 @@ const DEFAULTS: LoginRateLimitOptions = {
   maxPerEmail: 12,
 };
 
+const GLOBAL_KEY = '__seipLoginRateLimiter' as const;
+
+interface GlobalSlot {
+  limiter: LoginRateLimiter;
+}
+
+function globalSlot(): GlobalSlot {
+  const g = globalThis as typeof globalThis & { [GLOBAL_KEY]?: GlobalSlot };
+  if (!g[GLOBAL_KEY]) {
+    g[GLOBAL_KEY] = { limiter: new LoginRateLimiter() };
+  }
+  return g[GLOBAL_KEY];
+}
+
 export class LoginRateLimiter {
   private readonly opts: LoginRateLimitOptions;
   private readonly byIp = new Map<string, Bucket>();
@@ -59,7 +87,7 @@ export class LoginRateLimiter {
     return { ok: true };
   }
 
-  /** Test helper — wipe all counters. */
+  /** Wipe counters on this instance (tests / rare ops). */
   reset(): void {
     this.byIp.clear();
     this.byEmail.clear();
@@ -85,18 +113,47 @@ export class LoginRateLimiter {
   }
 }
 
-/** Process-wide default used by the API (tests may replace via setLoginRateLimiter). */
-let defaultLimiter = new LoginRateLimiter();
-
+/** Process-wide limiter used by auth routes. */
 export function getLoginRateLimiter(): LoginRateLimiter {
-  return defaultLimiter;
+  return globalSlot().limiter;
 }
 
+/**
+ * Replace the process-global instance (boot + tests).
+ * Prefer `configureLoginRateLimiterFromEnv` at server start and
+ * `installLoginRateLimiterForTests` in tests so restore is explicit.
+ */
 export function setLoginRateLimiter(limiter: LoginRateLimiter): void {
-  defaultLimiter = limiter;
+  globalSlot().limiter = limiter;
 }
 
-/** Build from env-ish numbers; invalid values fall back to defaults. */
+/** Boot: install env-derived limits as the process singleton. */
+export function configureLoginRateLimiterFromEnv(env: {
+  LOGIN_RATE_WINDOW_MS?: string;
+  LOGIN_RATE_MAX_PER_IP?: string;
+  LOGIN_RATE_MAX_PER_EMAIL?: string;
+} = process.env): LoginRateLimiter {
+  const limiter = loginRateLimiterFromEnv(env);
+  setLoginRateLimiter(limiter);
+  return limiter;
+}
+
+/**
+ * Test helper — swap the process singleton and return a restore function.
+ * Mutates process-global state by design (same graph as production routes).
+ */
+export function installLoginRateLimiterForTests(limiter: LoginRateLimiter): () => void {
+  const previous = getLoginRateLimiter();
+  setLoginRateLimiter(limiter);
+  return () => setLoginRateLimiter(previous);
+}
+
+/** Test helper — clear counters on the *current* singleton without replacing it. */
+export function resetLoginRateLimiterState(): void {
+  getLoginRateLimiter().reset();
+}
+
+/** Build a limiter from env-ish numbers; invalid values fall back to defaults. */
 export function loginRateLimiterFromEnv(env: {
   LOGIN_RATE_WINDOW_MS?: string;
   LOGIN_RATE_MAX_PER_IP?: string;

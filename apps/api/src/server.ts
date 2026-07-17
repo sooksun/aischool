@@ -12,13 +12,14 @@ import { cycleRoutes } from './routes/cycles.js';
 import { scoringRoutes } from './routes/scoring.js';
 import { reportRoutes } from './routes/reports.js';
 import { createS3Client, ensureBucket } from './lib/s3.js';
-import { loginRateLimiterFromEnv, setLoginRateLimiter } from './lib/login-rate-limit.js';
+import { configureLoginRateLimiterFromEnv } from './lib/login-rate-limit.js';
 
 export async function buildServer() {
   const env = loadEnv();
   // Trust X-Forwarded-For from edge nginx in production (SEIP-OPS-004 rate limit by real client IP).
   const trustProxy = env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true';
-  setLoginRateLimiter(loginRateLimiterFromEnv(process.env));
+  // Process-global singleton (MVP). Edge limit_req remains primary for multi-instance.
+  configureLoginRateLimiterFromEnv(process.env);
 
   const app = Fastify({
     logger: env.NODE_ENV !== 'test',
