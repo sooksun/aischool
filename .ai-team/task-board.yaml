@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-18T16:00:00+07:00
+updated_at: 2026-07-18T18:00:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -316,7 +316,7 @@ tasks:
 
   - id: SEIP-WORKER-001
     title: Async worker — outbox consumer, virus scan, duration probe, storage GC
-    status: backlog
+    status: done                # 2026-07-18 — handoff SEIP-WORKER-001.md; branch feat/SEIP-WORKER-001-async-pipeline
     wave: B
     sprint: 2
     branch: feat/SEIP-WORKER-001-async-pipeline
@@ -370,7 +370,7 @@ tasks:
 
   - id: SEIP-UI-002
     title: Director/admin UI — cycles, rounds, committee assignment
-    status: backlog
+    status: in_progress          # 2026-07-18 — claude, branch feat/SEIP-UI-002-director-cycles
     wave: C
     sprint: 2
     branch: feat/SEIP-UI-002-director-cycles

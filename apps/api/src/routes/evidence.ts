@@ -7,7 +7,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   listEvidence, createEvidence, getEvidenceDetail, updateEvidence, softDeleteEvidence,
-  createEvidenceFile, markEvidenceActiveIfDraft, getEvidenceCategoryById, writeAuditEvent,
+  registerEvidenceFileWithWorkerJobs, getEvidenceCategoryById, writeAuditEvent,
   listEvaluateePersonnelIdsForCommitteeMember,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
@@ -274,13 +274,15 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     const key = evidenceObjectKey(schoolId, evidenceId, fileId, body.original_filename);
 
     try {
-      const file = await createEvidenceFile({
+      // Same transaction: file row + draft→active + outbox evidence.file.registered
+      // + worker job file.process (SEIP-WORKER-001 / events.yaml delivery rule).
+      const file = await registerEvidenceFileWithWorkerJobs({
         id: fileId, evidenceId, storageUri: key, contentType: body.content_type,
         byteSize: BigInt(body.byte_size), checksumSha256: body.checksum_sha256,
         durationSeconds: body.duration_seconds ?? null, originalFilename: body.original_filename,
+        schoolId, actorUserId: auth.userId, requestId: request.id,
       });
 
-      await markEvidenceActiveIfDraft(schoolId, evidenceId);
       await writeAuditEvent({
         schoolId, actorUserId: auth.userId, action: 'file_registered', entityType: 'EvidenceFile',
         entityId: file.id, after: file, requestId: request.id,

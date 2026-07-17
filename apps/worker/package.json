@@ -1,0 +1,25 @@
+{
+  "name": "@seip/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SEIP async worker — outbox dispatch, file scan/duration probe, storage GC (module-boundaries.md).",
+  "scripts": {
+    "dev": "node --env-file=../../.env --watch dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "test:integration": "npm run build && node --env-file-if-exists=../../.env --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.712.0",
+    "@prisma/client": "^6.19.3",
+    "@seip/backend-shared": "*",
+    "@seip/database": "*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}
