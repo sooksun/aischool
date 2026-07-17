@@ -413,10 +413,9 @@ export interface paths {
         put?: never;
         /**
          * Request generation of a structured PA report (async worker fills payload)
-         * @description Creates a draft Report row and enqueues report.generate. Official PDF
-         *     layout is deferred (x-deferred.report-pdf-layout); clients consume
-         *     structured payload + section_refs. Section refs may only cite confirmed
-         *     mappings for official indicator sections.
+         * @description Creates a draft Report row and enqueues report.generate. Clients consume
+         *     structured payload + section_refs; PDF is available via getReportPdf once
+         *     generation completes. Section refs may only cite confirmed mappings.
          */
         post: operations["createReport"];
         delete?: never;
@@ -434,6 +433,28 @@ export interface paths {
         };
         /** Report detail including payload and section refs */
         get: operations["getReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/{reportId}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download PA form PDF generated from report payload
+         * @description Returns application/pdf built on demand from structured payload + section_refs.
+         *     Requires generation complete (not draft / generation_status=pending) — else RPT-002.
+         *     Layout is SEIP structure-faithful PA1/PA2/PA3 form, not the Protected Artifact plate.
+         */
+        get: operations["getReportPdf"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1876,6 +1897,32 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getReportPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PDF bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
 }

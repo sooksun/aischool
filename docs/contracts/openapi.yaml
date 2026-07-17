@@ -10,6 +10,7 @@ openapi: 3.1.0
 #   external consumer at this point would need a migration plan per policy.
 # version 2.1.0 — CCR-005 (additive): Reports list/create/get + AI mapping suggest
 #   (local_heuristic per ADR-0007). No breaking changes vs 2.0.0.
+# version 2.2.0 — CCR-007 (additive): GET /reports/{reportId}/pdf (PA form PDF).
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -18,12 +19,12 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.1.0
-  summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI)
+  version: 2.2.0
+  summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI + PDF)
   description: |
-    Contract v2.1 (CCR-005) — evidence workflow, PA evaluation, structured reports
-    (PA1/PA2/PA3 payload + section refs; official PDF layout remains a Protected
-    Artifact), and AI mapping suggest via on-prem `local_heuristic` (ADR-0007).
+    Contract v2.2 (CCR-007) — evidence workflow, PA evaluation, structured reports
+    (PA1/PA2/PA3 payload + section refs), on-demand **PA form PDF** (`getReportPdf`),
+    and AI mapping suggest via on-prem `local_heuristic` (ADR-0007).
 
     **Business rules that bind every implementation**
     - Tenancy: every resource is school-scoped; cross-school access returns RES-001 (indistinguishable from not-found).
@@ -31,6 +32,7 @@ info:
     - Scoring grain is per-evaluator (3 committee members); overall pass requires **every** evaluator ≥ 70% and the workload gate met.
     - Rounds are configurable 1..n per cycle; no endpoint assumes exactly 2.
     - Reports cite evidence by reference only (ReportSectionRef) — never embed file bytes.
+    - PDF is generated from structured payload (not a pixel-perfect ก.ค.ศ. plate); suitable for draft/print review.
     - AI mapping suggestions always land as mapping_source=ai_suggested + status=suggested; human confirm required.
     - Error bodies follow error-codes.yaml; codes are stable API surface.
 
@@ -42,8 +44,8 @@ info:
     name: SEIP Architecture (Claude Code)
 
 x-deferred:
-  report-pdf-layout:
-    reason: Official PA1/PA2/PA3 visual layout is a Protected Artifact; API returns structured JSON only
+  official-paper-signature-fidelity:
+    reason: Pixel-perfect ก.ค.ศ. print plates remain a Protected Artifact; getReportPdf is structure-faithful SEIP layout
   cloud-ai-provider:
     reason: ADR-0007 forbids foreign/cloud LLM while ADR-0005 holds; local_heuristic is the only enabled path
   notifications:
@@ -696,10 +698,9 @@ paths:
       operationId: createReport
       summary: Request generation of a structured PA report (async worker fills payload)
       description: |
-        Creates a draft Report row and enqueues report.generate. Official PDF
-        layout is deferred (x-deferred.report-pdf-layout); clients consume
-        structured payload + section_refs. Section refs may only cite confirmed
-        mappings for official indicator sections.
+        Creates a draft Report row and enqueues report.generate. Clients consume
+        structured payload + section_refs; PDF is available via getReportPdf once
+        generation completes. Section refs may only cite confirmed mappings.
       tags: [reports]
       requestBody:
         required: true
@@ -732,6 +733,30 @@ paths:
               schema: { $ref: '#/components/schemas/ReportDetail' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /reports/{reportId}/pdf:
+    get:
+      operationId: getReportPdf
+      summary: Download PA form PDF generated from report payload
+      description: |
+        Returns application/pdf built on demand from structured payload + section_refs.
+        Requires generation complete (not draft / generation_status=pending) — else RPT-002.
+        Layout is SEIP structure-faithful PA1/PA2/PA3 form, not the Protected Artifact plate.
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
 components:
   securitySchemes:

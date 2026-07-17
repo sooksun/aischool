@@ -72,7 +72,11 @@ npm run test:e2e
 ```
 
 CI starts Postgres, MinIO, migrate+seed, API, Vite, then Playwright Chromium.
-Fixture user is created by `tests/e2e/global-setup.mjs` (`e2e-teacher@seip.local`).
+Fixture users from `tests/e2e/global-setup.mjs`:
+- `e2e-teacher@seip.local` — evidence + reports nav
+- `e2e-director@seip.local` — cycles, reports, evaluator nav
+
+Smoke coverage (expanded): login → evidence list → submit pick-step; director cycles/reports/evaluator shell.
 
 Add the self-arming gate names to the required list **when they arm** (a required check that always no-ops gives false confidence; a required check that's armed is real). Protection setup itself still needs `gh auth login` or the web UI — steps recorded in `.ai-team/handoffs/SEIP-OPS-001.md`.
 

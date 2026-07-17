@@ -1,6 +1,7 @@
 # SEIP Permission Contract
 # version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
 # version: 1.1.0 — CCR-005 (additive): reports + suggestMappings operationIds.
+# version: 1.2.0 — CCR-007 (additive): getReportPdf.
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 #
 # The api module is the sole enforcement point (module-boundaries.md).
@@ -9,7 +10,7 @@
 # This file is also a TEST FIXTURE (SECURITY-BASELINE SEC-TEN-5): permission tests
 # generate their cases from this matrix, so contract and enforcement cannot drift.
 
-version: 1.1.0
+version: 1.2.0
 status: locked
 locked_at: 2026-07-17
 
@@ -91,10 +92,11 @@ matrix:
   submitMyScores:          { evaluator: committee, director: committee }   # director scores only as committee chair/member
   getAssignmentResults:    { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
 
-  # reports — structured PA payloads; subject sees own; director/admin school-wide
+  # reports — structured PA payloads + PDF; subject sees own; director/admin school-wide
   listReports:             { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
   createReport:            { director: school, school_admin: school }
   getReport:               { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
+  getReportPdf:            { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
 
 notes:
   - teacher:own on listEvidence means the default filter is owner=self and other owners are rejected.

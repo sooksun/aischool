@@ -3,7 +3,7 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const ERROR_CODES_VERSION = '1.2.0';
+export const ERROR_CODES_VERSION = '1.3.0';
 
 export type ErrorCode =
   | 'AUTH-001'
@@ -36,6 +36,7 @@ export type ErrorCode =
   | 'CYCLE-002'
   | 'CYCLE-003'
   | 'RPT-001'
+  | 'RPT-002'
   | 'AI-001'
   | 'RES-001'
   | 'RES-002'
@@ -73,6 +74,7 @@ export const ERROR_CODE_TABLE: Record<ErrorCode, { http: number; meaning: string
   'CYCLE-002': { http: 409, meaning: "Overlapping active cycle for (school" },
   'CYCLE-003': { http: 422, meaning: "Round period outside cycle bounds" },
   'RPT-001': { http: 422, meaning: "Invalid report request — unknown template" },
+  'RPT-002': { http: 422, meaning: "Report PDF not ready — still draft or generation_status pending" },
   'AI-001': { http: 422, meaning: "Mapping suggest rejected — evidence not eligible" },
   'RES-001': { http: 404, meaning: "Resource not found (or hidden by tenancy — indistinguishable by design)" },
   'RES-002': { http: 409, meaning: "Concurrent modification (stale version/etag)" },

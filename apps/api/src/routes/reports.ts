@@ -1,5 +1,6 @@
-// Structured PA reports (list/create/get). Payload generation is async via
-// report.generate worker job — HTTP only creates the draft + enqueues.
+// Structured PA reports (list/create/get) + on-demand PDF (getReportPdf).
+// Payload generation is async via report.generate worker job — HTTP only creates
+// the draft + enqueues; PDF is built from payload when ready (SEIP-PDF).
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -16,6 +17,7 @@ import {
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import { requireCurrentSchool } from '../plugins/auth.js';
 import { resolveGrant, requireOwnership, requireCommitteeAccessToPersonnel } from '../lib/permission-guard.js';
+import { buildPaReportPdf } from '../lib/pa-report-pdf.js';
 
 const TEMPLATE_CODES = ['PA1_s', 'PA1_bs', 'PA2_s', 'PA2_bs', 'PA3_s', 'PA3_bs'] as const;
 
@@ -175,5 +177,50 @@ export const reportRoutes: FastifyPluginAsync = async (app) => {
       payload: report.payload as Record<string, unknown>,
       section_refs: report.sectionRefs.map(serializeSectionRef),
     };
+  });
+
+  app.get('/reports/:reportId/pdf', { config: { operationId: 'getReportPdf' } }, async (request, reply) => {
+    const auth = request.auth!;
+    const schoolId = requireCurrentSchool(auth);
+    const grant = await resolveGrant('getReportPdf', auth, schoolId);
+    const { reportId } = z.object({ reportId: z.string().uuid() }).parse(request.params);
+
+    const report = await getReportDetail(schoolId, reportId);
+    if (!report) throw new ApiError('RES-001', 'Report not found');
+
+    if (grant === 'own') {
+      requireOwnership(auth, report.subjectPersonnelId);
+    } else if (grant === 'committee') {
+      await requireCommitteeAccessToPersonnel(schoolId, auth.userId, report.subjectPersonnelId);
+    } else if (grant === 'area-r') {
+      // read-only OK for PDF download
+    }
+
+    try {
+      const pdf = await buildPaReportPdf({
+        id: report.id,
+        templateCode: report.templateCode,
+        status: report.status,
+        generatedAt: report.generatedAt,
+        payload: report.payload as Record<string, unknown>,
+        sectionRefs: report.sectionRefs.map((s) => ({
+          sectionKey: s.sectionKey,
+          evidenceId: s.evidenceId,
+          mappingId: s.mappingId,
+          sortOrder: s.sortOrder,
+        })),
+      });
+      const filename = `${report.templateCode}-${report.id.slice(0, 8)}.pdf`;
+      reply
+        .header('content-type', 'application/pdf')
+        .header('content-disposition', `attachment; filename="${filename}"`)
+        .header('cache-control', 'private, no-store')
+        .send(pdf);
+    } catch (e) {
+      if (e instanceof Error && e.message === 'REPORT_NOT_READY') {
+        throw new ApiError('RPT-002', 'Report PDF not ready — still generating');
+      }
+      throw e;
+    }
   });
 };

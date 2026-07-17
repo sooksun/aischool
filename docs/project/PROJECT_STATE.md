@@ -33,7 +33,8 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 13. ~~SEIP-UI-003~~ **DONE** — evaluator scoring UI (`feat/SEIP-UI-003-evaluator-scoring`); handoff `.ai-team/handoffs/SEIP-UI-003.md`
 14. ~~SEIP-API-003a / UI-003b / QA-004~~ **DONE** on `feat/SEIP-WAVE-B-CF` — safe download_url, scan UI, Playwright e2e smoke
 15. ~~SEIP-OPS-004~~ **DONE** — edge login rate limit + security headers; API AUTH-004 defense-in-depth
-16. **Sprint 2+ remaining** — official PA PDF layout, expanded e2e, multi-instance Redis rate limits if needed.
+16. ~~PA form PDF + expanded e2e~~ **DONE** on `feat/SEIP-PDF-E2E` — getReportPdf, UI download, Playwright director/teacher paths
+17. **Sprint 2+ remaining** — multi-instance Redis rate limits if needed; pixel-perfect official paper plates (Protected Artifact).
 
 **Product slice (REPORTS-AI branch):** login → evidence → MinIO/worker scan → mapping (+ local AI suggest) → cycles/rounds → 3-evaluator scoring → structured PA report generation (JSON + section refs). PDF layout still deferred.
 
