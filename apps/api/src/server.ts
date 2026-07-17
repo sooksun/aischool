@@ -1,0 +1,40 @@
+import Fastify from 'fastify';
+import { randomUUID } from 'node:crypto';
+import { loadEnv } from './env.js';
+import { errorHandlerPlugin } from './plugins/error-handler.js';
+import { authPlugin } from './plugins/auth.js';
+import { authRoutes } from './routes/auth.js';
+import { taxonomyRoutes } from './routes/taxonomy.js';
+import { evidenceRoutes } from './routes/evidence.js';
+import { mappingRoutes } from './routes/mappings.js';
+import { createS3Client, ensureBucket } from './lib/s3.js';
+
+export async function buildServer() {
+  const env = loadEnv();
+  const app = Fastify({
+    logger: env.NODE_ENV !== 'test',
+    // AuditEvent.requestId is a @db.Uuid column (SEIP-DB-001) — Fastify's default
+    // id generator ("req-1", "req-2", ...) isn't a UUID and would 500 on the first
+    // audited mutation (found by the smoke test, not by typecheck: this is a
+    // runtime/DB-shape mismatch no type system here catches).
+    genReqId: () => randomUUID(),
+  });
+
+  await app.register(errorHandlerPlugin);
+  await app.register(authPlugin, { env });
+
+  // openapi.yaml: servers[0].url = /api/v1
+  await app.register(async (v1) => {
+    await v1.register(authRoutes, { env });
+    await v1.register(taxonomyRoutes);
+    await v1.register(evidenceRoutes, { env });
+    await v1.register(mappingRoutes);
+  }, { prefix: '/api/v1' });
+
+  if (env.NODE_ENV !== 'test') {
+    const s3 = createS3Client(env);
+    await ensureBucket(s3, env.S3_BUCKET);
+  }
+
+  return { app, env };
+}

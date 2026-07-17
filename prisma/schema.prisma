@@ -192,11 +192,16 @@ model School {
 /// Login identity. Separate from PersonnelProfile: an account is who you authenticate
 /// as; a profile is your employment record at a school.
 model UserAccount {
-  id          String     @id @default(uuid()) @db.Uuid
-  email       String     @unique                  // stored lowercase — enforced in app + CHECK
-  displayName String     @map("display_name")
-  status      UserStatus @default(invited)
-  createdAt   DateTime   @default(now()) @map("created_at")
+  id           String     @id @default(uuid()) @db.Uuid
+  email        String     @unique                  // stored lowercase — enforced in app + CHECK
+  displayName  String     @map("display_name")
+  /// SEIP-API-001 addition: DB-000/DB-001 modeled the evaluation domain, not
+  /// credential storage — no field existed to log in with. Argon2id PHC string
+  /// only (SEC-AUTH-1); nullable because an `invited` account has no password
+  /// until it's accepted, and a future SSO account may never have one.
+  passwordHash String?    @map("password_hash")
+  status       UserStatus @default(invited)
+  createdAt    DateTime   @default(now()) @map("created_at")
 
   memberships       SchoolMembership[]
   personnelProfiles PersonnelProfile[]
@@ -208,8 +213,30 @@ model UserAccount {
   roundResults      RoundResult[]
   workloadDecls     WorkloadDeclaration[]
   approvals         Approval[]
+  refreshTokens     RefreshToken[]
 
   @@map("user_account")
+}
+
+/// SEIP-API-001 addition: openapi.yaml's TokenPair promises a refresh_token, and
+/// SECURITY-BASELINE SEC-AUTH-2 requires rotation with reuse detection + logout
+/// revocation — neither is possible without server-side state, which DB-000/DB-001
+/// did not model (auth wasn't in scope for the data-model design). Additive only:
+/// no existing table changes. The raw token is a bearer secret — only its hash is
+/// stored, so a DB read alone can never impersonate a session.
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  tokenHash    String    @unique @map("token_hash") // sha256 of the opaque token
+  issuedAt     DateTime  @default(now()) @map("issued_at")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  replacedById String?   @map("replaced_by_id") @db.Uuid // rotation chain: reuse of a revoked-and-replaced token is a theft signal
+
+  user UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@map("refresh_token")
 }
 
 /// Role of a user within a school, or across an area (area_admin, read-only per

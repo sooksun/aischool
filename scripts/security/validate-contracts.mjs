@@ -14,6 +14,8 @@ import { execSync } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 const run = (cmd) => {
   console.log(`\n$ ${cmd}`);
@@ -67,6 +69,33 @@ step('authz coverage (every operationId has a reviewed rule)', () => {
 
   const orphans = [...covered].filter((c) => !ops.includes(c));
   if (orphans.length) console.warn(`    warning: rules with no matching operation: ${orphans.join(', ')}`);
+});
+
+step('generated apps/web API types match openapi.yaml', () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const file = join(root, 'apps/web/src/api/schema.generated.ts');
+  const before = readFileSync(file, 'utf8');
+  run(`${NPX} --yes openapi-typescript@7 docs/contracts/openapi.yaml -o apps/web/src/api/schema.generated.ts`);
+  const after = readFileSync(file, 'utf8');
+  if (before !== after) {
+    throw new Error('apps/web/src/api/schema.generated.ts is stale — run `npm run codegen:api-types` and commit the diff');
+  }
+});
+
+step('generated backend-shared constants match error-codes.yaml/events.yaml', () => {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const before = {
+    errors: readFileSync(join(root, 'packages/backend-shared/src/error-codes.generated.ts'), 'utf8'),
+    events: readFileSync(join(root, 'packages/backend-shared/src/events.generated.ts'), 'utf8'),
+  };
+  run(`"${process.execPath}" scripts/codegen/generate-contract-constants.mjs`);
+  const after = {
+    errors: readFileSync(join(root, 'packages/backend-shared/src/error-codes.generated.ts'), 'utf8'),
+    events: readFileSync(join(root, 'packages/backend-shared/src/events.generated.ts'), 'utf8'),
+  };
+  if (before.errors !== after.errors || before.events !== after.events) {
+    throw new Error('committed generated files are stale — run `npm run codegen:contracts` and commit the diff');
+  }
 });
 
 process.exit(failed ? 1 : 0);

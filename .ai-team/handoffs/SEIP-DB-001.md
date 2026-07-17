@@ -120,3 +120,17 @@ npm run gate:ownership
 - [x] Pass threshold generated, not writable
 - [x] Secrets only in `.env.example` as throwaway dev values
 - [x] No production feature API/UI in this task (schema layer only)
+
+## Re-verified 2026-07-17 (post-merge)
+
+On tree after merge to develop (`be36eff`):
+
+```
+npm run db:validate     → schema valid
+prisma migrate deploy   → no pending (DB-001 migrations applied; later API migrations may also exist on branches)
+npm run test:backend    → 18 pass / 0 fail
+npm run gate:ownership  → 0 errors
+npm run gate:dep-audit  → 0 vulnerabilities
+```
+
+**Status: DONE** — Sprint 1 has a proven DB foundation on `develop`.

@@ -1,0 +1,22 @@
+{
+  "name": "@seip/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Prisma client + tenancy-safe repositories implementing entity-dictionary.md (module-boundaries.md). Owned by apps/api and apps/worker only — apps/web never imports this.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:integration": "npm run build && node --env-file-if-exists=../../.env --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "@seip/auth": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}
