@@ -9,12 +9,18 @@ import { CycleDetailPage } from './pages/director/CycleDetailPage';
 import { RoundAssignmentsPage } from './pages/director/RoundAssignmentsPage';
 import { ReportListPage } from './pages/reports/ReportListPage';
 import { ReportDetailPage } from './pages/reports/ReportDetailPage';
+import { EvaluatorHomePage } from './pages/evaluator/EvaluatorHomePage';
+import { EvaluatorCyclePage } from './pages/evaluator/EvaluatorCyclePage';
+import { EvaluatorRoundPage } from './pages/evaluator/EvaluatorRoundPage';
+import { AssignmentScorePage } from './pages/evaluator/AssignmentScorePage';
 import type { components } from './api/schema.generated';
 
 type Role = components['schemas']['Role'];
 
 const DIRECTOR_ROLES: Role[] = ['director', 'school_admin'];
 const REPORT_NAV_ROLES: Role[] = ['director', 'school_admin', 'teacher', 'deputy', 'evaluator'];
+/** Committee scorers: evaluator role + director as chair/member (permissions matrix). */
+const EVALUATOR_NAV_ROLES: Role[] = ['evaluator', 'director'];
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -43,13 +49,19 @@ function AppNav() {
   if (!user || location.pathname === '/login') return null;
   const isDirector = hasRole(user, DIRECTOR_ROLES);
   const showReports = hasRole(user, REPORT_NAV_ROLES);
-  if (!isDirector && !showReports) return null;
+  const isEvaluatorNav = hasRole(user, EVALUATOR_NAV_ROLES);
+  if (!isDirector && !showReports && !isEvaluatorNav) return null;
   return (
     <nav className="app-nav" aria-label="เมนูหลัก">
       <Link to="/" className={location.pathname === '/' ? 'active' : ''}>หลักฐานของฉัน</Link>
       {isDirector && (
         <Link to="/director/cycles" className={location.pathname.startsWith('/director') ? 'active' : ''}>
           จัดการรอบการประเมิน
+        </Link>
+      )}
+      {isEvaluatorNav && (
+        <Link to="/evaluator" className={location.pathname.startsWith('/evaluator') ? 'active' : ''}>
+          งานกรรมการ
         </Link>
       )}
       {showReports && (
@@ -83,6 +95,19 @@ export function App() {
 
         <Route path="/reports" element={<RequireAuth><ReportListPage /></RequireAuth>} />
         <Route path="/reports/:reportId" element={<RequireAuth><ReportDetailPage /></RequireAuth>} />
+
+        <Route path="/evaluator" element={
+          <RequireRole roles={EVALUATOR_NAV_ROLES}><EvaluatorHomePage /></RequireRole>
+        } />
+        <Route path="/evaluator/cycles/:cycleId" element={
+          <RequireRole roles={EVALUATOR_NAV_ROLES}><EvaluatorCyclePage /></RequireRole>
+        } />
+        <Route path="/evaluator/rounds/:roundId" element={
+          <RequireRole roles={EVALUATOR_NAV_ROLES}><EvaluatorRoundPage /></RequireRole>
+        } />
+        <Route path="/evaluator/assignments/:assignmentId" element={
+          <RequireRole roles={EVALUATOR_NAV_ROLES}><AssignmentScorePage /></RequireRole>
+        } />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
