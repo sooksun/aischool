@@ -140,13 +140,39 @@ jobs:
   integration:
     name: "Gate: integration tests"
     runs-on: ubuntu-latest
+    # These tests hit a real database, so this gate provides one. It runs the suite
+    # on a MIGRATED + SEEDED database — distinct from migration-validation, which
+    # runs the same suite on a from-zero, unseeded DB. Together: migrations apply
+    # cleanly AND the seed produces a working dataset the tests still pass against.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: seip
+          POSTGRES_PASSWORD: seip_ci
+          POSTGRES_DB: seip
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U seip -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Run if package.json defines scripts.test:integration
         run: |
           ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['test:integration']?'true':'false')}catch{process.stdout.write('false')}")
-          if [ "$ARMED" = "true" ]; then npm ci && npm run test:integration; else
-            echo "::notice::integration gate not yet armed — arms when scripts.test:integration is defined (Sprint 1)"; fi
+          if [ "$ARMED" != "true" ]; then
+            echo "::notice::integration gate not yet armed — arms when scripts.test:integration is defined"; exit 0; fi
+          npm ci
+          npx --yes prisma@6 migrate deploy
+          npx --yes prisma@6 generate
+          node prisma/seed.mjs
+          npm run test:integration
 
   build:
     name: "Gate: build"

@@ -17,9 +17,10 @@ The no-production-code constraint is **lifted**. Contracts are locked at v1.0.0 
 OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherited from Codex, review PASS) · UI-000 (evidence UX + CCR-002) · QA-001 (gates) · ARCH-002 (lock v1.0.0). QA-002 cancelled by ADR-0004.
 
 ## Current Objectives (Sprint 1)
-1. **SEIP-DB-001** — Prisma schema + migrations + constraint tests from `docs/architecture/data-model/entity-dictionary.md` ← **in progress**
-2. SEIP-UI-001 — evidence submission flow from `docs/architecture/ux/`
-3. Infra: docker-compose (PostgreSQL + MinIO) per ADR-0005
+1. ~~SEIP-DB-001~~ — schema + migrations + constraints + taxonomy seed → **review** (handoff `.ai-team/handoffs/SEIP-DB-001.md`; branch `feat/SEIP-DB-001-core-database`; **18 tests pass**)
+2. SEIP-DB-002 residual — full IndicatorLevelDescription wording from official PDFs (structure seed already in DB-001)
+3. SEIP-UI-001 — evidence submission flow from `docs/architecture/ux/` (after DB-001 merge)
+4. Infra: docker-compose (PostgreSQL + MinIO) per ADR-0005 — landed with DB-001
 
 ## Active Tasks
 See `.ai-team/task-board.yaml` (single tracker).
@@ -39,5 +40,5 @@ See `.ai-team/task-board.yaml` (single tracker).
 - Criteria and official forms may change by year → framework versioned as data (ADR-0003)
 - AI mapping must remain human-reviewable
 - Uploaded evidence contains personal data (PDPA) — never in git, storage design server-side
-- Video storage can grow quickly (OPEN-4)
+- Video storage can grow quickly (mitigated by ADR-0005 MinIO on-prem + retention policy)
 - Solo-agent risk (replaces multi-agent drift risk): no independent reviewer — mitigate with CI gates + user review before contract lock

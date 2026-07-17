@@ -10,13 +10,24 @@
     "gate:contracts": "node scripts/security/validate-contracts.mjs",
     "gate:secret-scan": "node scripts/security/run-gitleaks.mjs",
     "gate:dep-audit": "npm audit --audit-level=high",
-    "db:migrate": "prisma migrate deploy",
+    "db:validate": "prisma validate",
     "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma migrate reset --force",
     "test:backend": "node --test \"tests/backend/*.test.mjs\"",
+    "test:integration": "node --test \"tests/backend/*.test.mjs\"",
     "test:security": "node --test \"tests/security/*.test.mjs\""
   },
+  "prisma": {
+    "seed": "node prisma/seed.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
+  },
   "devDependencies": {
-    "prisma": "^6.19.3",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "prisma": "^6.19.3"
   }
 }
