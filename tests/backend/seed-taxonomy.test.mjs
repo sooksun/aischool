@@ -92,3 +92,70 @@ test('seeded ว9/ว10 frameworks exist with expected indicator counts', async 
   );
   assert.equal(cat.rows[0].max_duration_seconds, 600);
 });
+
+test('SEIP-DB-003: level descriptions cover scored indicators × ranks × rubric 1..4', async (t) => {
+  const v9 = await frameworkId('v9-2564-teacher');
+  const v10 = await frameworkId('v10-2564-administrator');
+  if (!v9 || !v10) {
+    t.skip('taxonomy seed not applied yet — run npm run db:seed');
+    return;
+  }
+
+  // 18 scored × 6 ranks × 4 levels = 432; admin 18 × 5 × 4 = 360
+  const countForFw = async (fwId) => {
+    const r = await client.query(
+      `SELECT count(*)::int AS c
+       FROM indicator_level_description ild
+       JOIN indicator i ON i.id = ild.indicator_id
+       WHERE i.framework_version_id = $1`,
+      [fwId],
+    );
+    return r.rows[0].c;
+  };
+  assert.equal(await countForFw(v9), 432, 'ว9 level-description rows');
+  assert.equal(await countForFw(v10), 360, 'ว10 level-description rows');
+
+  // Every scored indicator has 4 levels for a representative rank
+  const sample = await client.query(
+    `SELECT i.code, count(*)::int AS c
+     FROM indicator i
+     JOIN indicator_level_description ild ON ild.indicator_id = i.id
+     WHERE i.framework_version_id = $1
+       AND i.indicator_kind = 'standard'
+       AND ild.rank_level_code = 'apply_adapt'
+     GROUP BY i.code
+     ORDER BY i.code`,
+    [v9],
+  );
+  assert.equal(sample.rowCount, 15, '15 standard indicators with apply_adapt rows');
+  for (const row of sample.rows) {
+    assert.equal(row.c, 4, `${row.code} must have rubric levels 1..4`);
+  }
+
+  // Workload gate must not get level rows
+  const gate = await client.query(
+    `SELECT count(*)::int AS c
+     FROM indicator_level_description ild
+     JOIN indicator i ON i.id = ild.indicator_id
+     WHERE i.framework_version_id = $1 AND i.indicator_kind = 'workload_gate'`,
+    [v9],
+  );
+  assert.equal(gate.rows[0].c, 0, 'workload_gate must have no level descriptions');
+
+  // Rubric CHECK still holds for seeded data (1..4 only)
+  const bad = await client.query(
+    `SELECT count(*)::int AS c FROM indicator_level_description WHERE rubric_level NOT BETWEEN 1 AND 4`,
+  );
+  assert.equal(bad.rows[0].c, 0);
+
+  // Text is non-empty and mentions rubric anchor language from the framework
+  const text = await client.query(
+    `SELECT expected_practice_th FROM indicator_level_description ild
+     JOIN indicator i ON i.id = ild.indicator_id
+     WHERE i.code = 'T-1.1' AND ild.rank_level_code = 'apply_adapt' AND ild.rubric_level = 3
+     LIMIT 1`,
+  );
+  assert.equal(text.rowCount, 1);
+  assert.match(text.rows[0].expected_practice_th, /ตามที่คาดหวัง/);
+  assert.match(text.rows[0].expected_practice_th, /T-1\.1/);
+});

@@ -1,11 +1,16 @@
-// SEIP-DB-001 seed — versioned taxonomy as DATA (ADR-0003).
+// SEIP-DB-001 + SEIP-DB-003 seed — versioned taxonomy as DATA (ADR-0003).
 // Loads FrameworkVersion rows for ว9/2564 (ครู) and ว10/2564 (ผู้บริหาร),
-// plus domains, indicators, score weights, rank levels, and evidence categories.
-// Full per-วิทยฐานะ level wording lives in the official PDFs and is NOT hard-coded
-// here — IndicatorLevelDescription rows can be filled later from the source PDFs.
+// domains, indicators, score weights, rank levels, evidence categories, and
+// IndicatorLevelDescription cells (DB-003: structure-complete per rank × rubric).
+// See prisma/data/README.md for level-description provenance.
 //
-// Idempotent: re-running upserts by stable `code` keys.
+// Idempotent: re-running upserts by stable `code` keys / compound uniques.
 import { PrismaClient } from '@prisma/client';
+import {
+  ADMIN_RANK_CODES,
+  TEACHER_RANK_CODES,
+  seedLevelDescriptionsForFramework,
+} from './data/level-descriptions.mjs';
 
 const prisma = new PrismaClient();
 
@@ -383,6 +388,18 @@ async function main() {
     domains: V10_DOMAINS,
   });
 
+  // SEIP-DB-003: every scored indicator × rank tier × rubric 1..4
+  const v9Levels = await seedLevelDescriptionsForFramework(prisma, {
+    frameworkId: v9.id,
+    legalRef: 'ศธ 0206.3/ว 9 ลว. 20 พ.ค. 2564',
+    rankCodes: TEACHER_RANK_CODES,
+  });
+  const v10Levels = await seedLevelDescriptionsForFramework(prisma, {
+    frameworkId: v10.id,
+    legalRef: 'ศธ 0206.3/ว 10 ลว. 20 พ.ค. 2564',
+    rankCodes: ADMIN_RANK_CODES,
+  });
+
   const counts = {
     rankLevels: await prisma.rankLevel.count(),
     evidenceCategories: await prisma.evidenceCategory.count(),
@@ -390,8 +407,11 @@ async function main() {
     domains: await prisma.evaluationDomain.count(),
     indicators: await prisma.indicator.count(),
     weights: await prisma.scoreWeight.count(),
+    levelDescriptions: await prisma.indicatorLevelDescription.count(),
     v9Indicators: await prisma.indicator.count({ where: { frameworkVersionId: v9.id } }),
     v10Indicators: await prisma.indicator.count({ where: { frameworkVersionId: v10.id } }),
+    v9LevelRows: v9Levels.written,
+    v10LevelRows: v10Levels.written,
   };
 
   console.log('seed OK', counts);
@@ -399,6 +419,12 @@ async function main() {
   if (counts.v9Indicators !== 19 || counts.v10Indicators !== 19) {
     throw new Error(
       `unexpected indicator counts: v9=${counts.v9Indicators} v10=${counts.v10Indicators} (want 19 each)`,
+    );
+  }
+  // 18 scored × 6 ranks × 4 levels = 432; 18 × 5 × 4 = 360
+  if (v9Levels.written !== 432 || v10Levels.written !== 360) {
+    throw new Error(
+      `unexpected level-description counts: v9=${v9Levels.written} v10=${v10Levels.written} (want 432 and 360)`,
     );
   }
 }

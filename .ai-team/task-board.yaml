@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-18T12:00:00+07:00
+updated_at: 2026-07-18T16:00:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -290,7 +290,7 @@ tasks:
 
   - id: SEIP-DB-003
     title: Seed full IndicatorLevelDescription text from ว9/ว10 (residual DB-002)
-    status: backlog
+    status: done                # 2026-07-18 — 432+360 rows; handoff SEIP-DB-003.md
     wave: A
     sprint: 2
     branch: feat/SEIP-DB-003-level-descriptions

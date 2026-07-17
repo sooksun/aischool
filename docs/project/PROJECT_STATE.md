@@ -18,7 +18,8 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 
 ## Current Objectives (Sprint 1)
 1. ~~SEIP-DB-001~~ **DONE** — schema + migrations + seed + constraint tests
-2. ~~SEIP-DB-002~~ **DONE** (structure) — residual: full IndicatorLevelDescription from PDFs
+2. ~~SEIP-DB-002~~ **DONE** (structure)
+2b. ~~SEIP-DB-003~~ **DONE** — IndicatorLevelDescription matrix seeded (432+360; framework-anchored operational text)
 3. ~~SEIP-API-001~~ **DONE** — evidence-workflow 15 ops (3db868d)
 4. ~~SEIP-QA-003~~ **DONE** — permission matrix tests
 5. ~~SEIP-UI-001~~ **DONE** — evidence SPA (3db868d)
