@@ -581,6 +581,48 @@ model EvidenceFile {
   @@map("evidence_file")
 }
 
+// ─────────────────── worker / transactional outbox (SEIP-WORKER-001) ───────────────────
+
+/// Domain events written in the same transaction as the domain change
+/// (events.yaml + module-boundaries rule 4). Worker publishes / fans out;
+/// `publishedAt` null means still pending dispatch.
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventType     String    @map("event_type")
+  schemaVersion Int       @default(1) @map("schema_version")
+  schoolId      String?   @map("school_id") @db.Uuid
+  actorUserId   String?   @map("actor_user_id") @db.Uuid
+  requestId     String?   @map("request_id") @db.Uuid
+  payload       Json
+  occurredAt    DateTime  @default(now()) @map("occurred_at")
+  publishedAt   DateTime? @map("published_at")
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error") @db.Text
+
+  @@index([publishedAt, occurredAt])
+  @@index([eventType, publishedAt])
+  @@map("outbox_event")
+}
+
+/// Async work units (scan, duration probe, GC, future AI/report jobs).
+/// One worker process claims pending rows — no second queue runner.
+model WorkerJob {
+  id          String    @id @default(uuid()) @db.Uuid
+  jobType     String    @map("job_type")
+  payload     Json
+  status      String    @default("pending") // pending | running | done | failed
+  attempts    Int       @default(0)
+  availableAt DateTime  @default(now()) @map("available_at")
+  lockedAt    DateTime? @map("locked_at")
+  completedAt DateTime? @map("completed_at")
+  lastError   String?   @map("last_error") @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([status, availableAt])
+  @@index([jobType, status])
+  @@map("worker_job")
+}
+
 // ─────────────────── governed evidence↔indicator mapping ───────────────────
 
 /// The heart of "upload once, reuse through governed mappings". M:N with a status

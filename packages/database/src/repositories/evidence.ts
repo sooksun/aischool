@@ -4,8 +4,11 @@
 // because there is no query that omits the filter. A cross-school id therefore
 // returns `null`, indistinguishable from a truly-missing id (RES-001 by design,
 // permissions.yaml tenancy rule) — callers must not turn a null into a 403.
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../client.js';
 import type { EvidenceStatus, Prisma } from '@prisma/client';
+import { enqueueOutboxEvent } from './outbox.js';
+import { enqueueWorkerJob } from './jobs.js';
 
 export interface ListEvidenceFilter {
   ownerPersonnelId?: string; // undefined = no owner filter (school-wide grant); set = 'own' grant
@@ -152,10 +155,99 @@ export async function createEvidenceFile(input: CreateFileInput) {
   });
 }
 
+/**
+ * Complete-file path for the API: file row + draft→active + outbox
+ * `evidence.file.registered` + worker job `file.process` in ONE transaction
+ * (module-boundaries rule 4 — no dual-write after commit).
+ */
+export async function registerEvidenceFileWithWorkerJobs(input: CreateFileInput & {
+  schoolId: string;
+  actorUserId: string | null;
+  requestId?: string | null;
+}) {
+  const outboxId = randomUUID();
+  return prisma.$transaction(async (tx) => {
+    const file = await tx.evidenceFile.create({
+      data: {
+        id: input.id,
+        evidenceId: input.evidenceId,
+        storageProvider: 's3_compatible',
+        storageUri: input.storageUri,
+        contentType: input.contentType,
+        byteSize: input.byteSize,
+        checksumSha256: input.checksumSha256,
+        durationSeconds: input.durationSeconds,
+        originalFilename: input.originalFilename,
+        scanStatus: 'pending',
+      },
+    });
+
+    await tx.evidence.updateMany({
+      where: { id: input.evidenceId, schoolId: input.schoolId, status: 'draft' },
+      data: { status: 'active' },
+    });
+
+    await enqueueOutboxEvent({
+      id: outboxId,
+      eventType: 'evidence.file.registered',
+      schoolId: input.schoolId,
+      actorUserId: input.actorUserId,
+      requestId: input.requestId ?? null,
+      payload: {
+        evidence_id: input.evidenceId,
+        file_id: file.id,
+        content_type: input.contentType,
+        byte_size: Number(input.byteSize),
+      },
+    }, tx);
+
+    await enqueueWorkerJob({
+      jobType: 'file.process',
+      payload: {
+        file_id: file.id,
+        evidence_id: input.evidenceId,
+        school_id: input.schoolId,
+        outbox_event_id: outboxId,
+      },
+    }, tx);
+
+    return file;
+  });
+}
+
 export async function countFilesForEvidence(evidenceId: string): Promise<number> {
   return prisma.evidenceFile.count({ where: { evidenceId } });
 }
 
+export async function getEvidenceFileById(fileId: string) {
+  return prisma.evidenceFile.findUnique({
+    where: { id: fileId },
+    include: { evidence: { select: { id: true, schoolId: true, deletedAt: true } } },
+  });
+}
+
 export async function setFileScanStatus(fileId: string, status: 'clean' | 'blocked') {
   return prisma.evidenceFile.update({ where: { id: fileId }, data: { scanStatus: status } });
+}
+
+export async function setFileDurationSeconds(fileId: string, durationSeconds: number) {
+  return prisma.evidenceFile.update({
+    where: { id: fileId },
+    data: { durationSeconds },
+  });
+}
+
+/** Soft-deleted evidence whose files are eligible for storage GC. */
+export async function listFilesForStorageGc(cutoff: Date, limit = 50) {
+  return prisma.evidenceFile.findMany({
+    where: {
+      evidence: { deletedAt: { not: null, lte: cutoff } },
+    },
+    take: limit,
+    include: { evidence: { select: { id: true, schoolId: true, deletedAt: true } } },
+  });
+}
+
+export async function deleteEvidenceFileRow(fileId: string) {
+  return prisma.evidenceFile.delete({ where: { id: fileId } });
 }

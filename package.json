@@ -32,7 +32,8 @@
     "format:check": "npm run format:check --workspaces --if-present",
     "test:unit": "npm run build:libs && npm run test:unit --workspaces --if-present",
     "dev:api": "npm run dev --workspace apps/api",
-    "dev:web": "npm run dev --workspace apps/web"
+    "dev:web": "npm run dev --workspace apps/web",
+    "dev:worker": "npm run build:libs && npm run build --workspace apps/worker && npm run start --workspace apps/worker"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"
