@@ -3,6 +3,7 @@
 # version: 1.1.0 — CCR-005 (additive): reports + suggestMappings operationIds.
 # version: 1.2.0 — CCR-007 (additive): getReportPdf.
 # version: 1.3.0 — CCR-008 (additive): refreshToken + logout session lifecycle (SEC-AUTH-2).
+# version: 1.4.0 — CCR-010 (additive): getEvidenceFileDownloadUrl (lazy download, cleanup H2).
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 #
 # The api module is the sole enforcement point (module-boundaries.md).
@@ -11,7 +12,7 @@
 # This file is also a TEST FIXTURE (SECURITY-BASELINE SEC-TEN-5): permission tests
 # generate their cases from this matrix, so contract and enforcement cannot drift.
 
-version: 1.2.0
+version: 1.4.0
 status: locked
 locked_at: 2026-07-17
 
@@ -84,6 +85,7 @@ matrix:
   deleteEvidence:          { teacher: own, deputy: own, director: own, school_admin: school }
   initiateFileUpload:      { teacher: own, deputy: own, director: own, school_admin: school }
   completeFileUpload:      { teacher: own, deputy: own, director: own, school_admin: school }
+  getEvidenceFileDownloadUrl: { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
 
   # mappings — evidence owner proposes; confirmation is a governance act
   listEvidenceMappings:    { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }

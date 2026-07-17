@@ -292,6 +292,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evidence/{evidenceId}/files/{fileId}/download-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Issue a short-lived download URL for one clean evidence file
+         * @description Lazy download (CCR-010 / cleanup H2). Call only when the user intends to
+         *     download — `getEvidence` and `completeFileUpload` never presign object
+         *     storage. Requires `scan_status=clean` (UPL-006); pending/blocked return
+         *     UPL-006. Same tenancy grants as `getEvidence`. Never returns `storage_uri`.
+         */
+        get: operations["getEvidenceFileDownloadUrl"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evidence/{evidenceId}/mappings": {
         parameters: {
             query?: never;
@@ -800,10 +823,23 @@ export interface components {
             duration_seconds?: number | null;
             original_filename?: string;
             scan_status: components["schemas"]["ScanStatus"];
-            /** @description Short-lived read URL; null until scan_status=clean */
+            /**
+             * @description Always null on EvidenceFile payloads (CCR-010). Clients obtain a
+             *     short-lived URL via getEvidenceFileDownloadUrl when scan_status=clean
+             *     (UPL-006). Field retained for schema stability.
+             */
             download_url?: string | null;
             /** Format: date-time */
             uploaded_at: string;
+        };
+        FileDownloadUrl: {
+            /**
+             * Format: uri
+             * @description Short-lived presigned GET; never reuse after expires_at
+             */
+            download_url: string;
+            /** Format: date-time */
+            expires_at: string;
         };
         FileUploadInitiate: {
             content_type: string;
@@ -1654,6 +1690,41 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getEvidenceFileDownloadUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evidenceId: components["parameters"]["EvidenceId"];
+                fileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Short-lived presigned GET URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileDownloadUrl"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File not servable (scan pending or blocked — UPL-006) */
+            423: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     listEvidenceMappings: {

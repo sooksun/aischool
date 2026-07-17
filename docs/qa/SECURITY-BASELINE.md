@@ -30,7 +30,7 @@ Scope per original GROK.md review scope; enforcement responsibility is claude (A
 |---|---|---|
 | SEC-UPL-1 | Bytes flow client→object storage via short-lived presigned target; never through the API process; API stores metadata only | Review + integration test |
 | SEC-UPL-2 | Server-side validation of mime/size/duration against `EvidenceCategory` regardless of client checks (UPL-001..003); worker probe is authoritative for video duration (CCR-002) | Integration tests |
-| SEC-UPL-3 | Every file virus-scanned before it is servable; `download_url` null until `scan_status=clean`; blocked files quarantined (UPL-006) + owner notified | Integration tests + events |
+| SEC-UPL-3 | Every file virus-scanned before it is servable; `getEvidenceFileDownloadUrl` only when `scan_status=clean` (UPL-006); embedded `download_url` always null (CCR-010); blocked files quarantined + owner notified | Integration tests + events |
 | SEC-UPL-4 | Checksum sha256 verified at complete (UPL-005); mismatch discards the object | Integration tests |
 | SEC-UPL-5 | Served files: `Content-Disposition` safe filename, no content-type sniffing (`X-Content-Type-Options: nosniff`), presigned read URLs short-lived | Test (Sprint 1) |
 | SEC-UPL-6 | Upload endpoints rate-limited per user; storage keys unguessable (uuid, no user-supplied names) | Review |
