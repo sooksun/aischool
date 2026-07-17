@@ -1,10 +1,16 @@
 // EvidenceIndicatorMapping — the governed M:N at the heart of "upload once, reuse
 // through governed mappings" (system-context.md core principle). Confirmation is
 // a distinct governance act from creation (contract-policy.md), never implicit.
-import type { MappingSource, MappingStatus, Prisma } from '@prisma/client';
+import { Prisma, type MappingSource, type MappingStatus } from '@prisma/client';
 import { prisma } from '../client.js';
 import { enqueueOutboxEvent } from './outbox.js';
 import { rankIndicators } from '../lib/local-heuristic-mapping.js';
+
+type Db = Prisma.TransactionClient | typeof prisma;
+
+function isUniqueViolation(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
+}
 
 export async function listMappingsForEvidence(schoolId: string, evidenceId: string) {
   // schoolId filtered via the evidence relation, not a denormalized column on this
@@ -27,8 +33,8 @@ export async function createMapping(schoolId: string, input: {
   mappedByUserId: string;
   rationale: string | null;
   mappingSource?: MappingSource;
-}) {
-  return prisma.evidenceIndicatorMapping.create({
+}, db: Db = prisma) {
+  return db.evidenceIndicatorMapping.create({
     data: {
       schoolId,
       evidenceId: input.evidenceId,
@@ -47,8 +53,9 @@ export async function listActiveMappedIndicatorIds(
   schoolId: string,
   evidenceId: string,
   cycleId: string | null,
+  db: Db = prisma,
 ): Promise<string[]> {
-  const rows = await prisma.evidenceIndicatorMapping.findMany({
+  const rows = await db.evidenceIndicatorMapping.findMany({
     where: {
       schoolId,
       evidenceId,
@@ -63,6 +70,14 @@ export async function listActiveMappedIndicatorIds(
 /**
  * ADR-0007 local_heuristic: score evidence text against indicators in a framework,
  * create ai_suggested mappings for top matches that aren't already active.
+ *
+ * Cleanup H1:
+ * - Ranking is read-only and stays outside the write transaction.
+ * - All mapping rows + outbox events commit in **one** transaction (no partial
+ *   mapping-without-outbox after a mid-loop crash).
+ * - PostgreSQL aborts a transaction after P2002, so we do **not** catch-and-continue
+ *   inside the tx. Instead: re-read actives under the tx, insert the filtered set,
+ *   and on a unique race retry the whole write once. Non-P2002 errors propagate.
  */
 export async function suggestMappingsLocalHeuristic(input: {
   schoolId: string;
@@ -74,6 +89,7 @@ export async function suggestMappingsLocalHeuristic(input: {
   maxSuggestions: number;
   requestId?: string | null;
 }): Promise<{ items: Awaited<ReturnType<typeof createMapping>>[]; skippedActive: number }> {
+  // ── read-only ranking (outside tx) ──────────────────────────────────────
   const indicators = await prisma.indicator.findMany({
     where: {
       frameworkVersionId: input.frameworkVersionId,
@@ -82,73 +98,92 @@ export async function suggestMappingsLocalHeuristic(input: {
     select: { id: true, code: true, nameTh: true, indicatorKind: true },
   });
 
-  const activeIds = new Set(
-    await listActiveMappedIndicatorIds(input.schoolId, input.evidenceId, input.cycleId),
-  );
-
-  // Over-fetch then filter actives so we still return up to maxSuggestions
+  // Over-fetch so after filtering actives we still have up to maxSuggestions.
   const ranked = rankIndicators(input.evidenceText, indicators, {
-    max: input.maxSuggestions + activeIds.size,
+    max: Math.max(input.maxSuggestions * 3, input.maxSuggestions + 10),
     minScore: 0.05,
   });
 
-  let skippedActive = 0;
-  const toCreate = [];
-  for (const m of ranked) {
-    if (activeIds.has(m.indicatorId)) {
-      skippedActive++;
-      continue;
-    }
-    toCreate.push(m);
-    if (toCreate.length >= input.maxSuggestions) break;
-  }
-
-  const items = [];
-  for (const m of toCreate) {
+  // ── atomic writes (retry once on concurrent unique race) ────────────────
+  const MAX_ATTEMPTS = 2;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
-      const row = await createMapping(input.schoolId, {
-        evidenceId: input.evidenceId,
-        indicatorId: m.indicatorId,
-        cycleId: input.cycleId,
-        mappedByUserId: input.mappedByUserId,
-        rationale: m.rationale,
-        mappingSource: 'ai_suggested',
+      return await prisma.$transaction(async (tx) => {
+        const activeIds = new Set(
+          await listActiveMappedIndicatorIds(input.schoolId, input.evidenceId, input.cycleId, tx),
+        );
+
+        let skippedActive = 0;
+        const toCreate = [];
+        for (const m of ranked) {
+          if (activeIds.has(m.indicatorId)) {
+            skippedActive++;
+            continue;
+          }
+          toCreate.push(m);
+          if (toCreate.length >= input.maxSuggestions) break;
+        }
+
+        const items: Awaited<ReturnType<typeof createMapping>>[] = [];
+        for (const m of toCreate) {
+          // No try/catch here: a P2002 aborts the PG transaction. Outer loop retries.
+          const row = await createMapping(input.schoolId, {
+            evidenceId: input.evidenceId,
+            indicatorId: m.indicatorId,
+            cycleId: input.cycleId,
+            mappedByUserId: input.mappedByUserId,
+            rationale: m.rationale,
+            mappingSource: 'ai_suggested',
+          }, tx);
+          items.push(row);
+          await enqueueOutboxEvent(
+            {
+              eventType: 'evidence.mapping.suggested',
+              schoolId: input.schoolId,
+              actorUserId: input.mappedByUserId,
+              requestId: input.requestId ?? null,
+              payload: {
+                mapping_id: row.id,
+                evidence_id: input.evidenceId,
+                indicator_id: m.indicatorId,
+                mapping_source: 'ai_suggested',
+              },
+            },
+            tx,
+          );
+        }
+
+        if (items.length > 0) {
+          await enqueueOutboxEvent(
+            {
+              eventType: 'ai.suggestion.created',
+              schoolId: input.schoolId,
+              actorUserId: input.mappedByUserId,
+              requestId: input.requestId ?? null,
+              payload: {
+                evidence_id: input.evidenceId,
+                mapping_ids: items.map((i) => i.id),
+                provider: 'local_heuristic',
+                suggestion_count: items.length,
+              },
+            },
+            tx,
+          );
+        }
+
+        return { items, skippedActive };
       });
-      items.push(row);
-      await enqueueOutboxEvent({
-        eventType: 'evidence.mapping.suggested',
-        schoolId: input.schoolId,
-        actorUserId: input.mappedByUserId,
-        requestId: input.requestId ?? null,
-        payload: {
-          mapping_id: row.id,
-          evidence_id: input.evidenceId,
-          indicator_id: m.indicatorId,
-          mapping_source: 'ai_suggested',
-        },
-      });
-    } catch {
-      // Race on partial unique index — count as skipped
-      skippedActive++;
+    } catch (e) {
+      lastError = e;
+      if (isUniqueViolation(e) && attempt + 1 < MAX_ATTEMPTS) {
+        // Concurrent suggest on same (evidence, indicator, cycle) — retry with fresh actives.
+        continue;
+      }
+      throw e;
     }
   }
-
-  if (items.length > 0) {
-    await enqueueOutboxEvent({
-      eventType: 'ai.suggestion.created',
-      schoolId: input.schoolId,
-      actorUserId: input.mappedByUserId,
-      requestId: input.requestId ?? null,
-      payload: {
-        evidence_id: input.evidenceId,
-        mapping_ids: items.map((i) => i.id),
-        provider: 'local_heuristic',
-        suggestion_count: items.length,
-      },
-    });
-  }
-
-  return { items, skippedActive };
+  throw lastError;
 }
 
 export interface ListMappingsFilter {
