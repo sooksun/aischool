@@ -149,6 +149,23 @@ tasks:
       - Tenancy isolation proven, not just asserted                  # DONE — cross-school RES-001 test
       - Permission matrix enforced from permissions.yaml at runtime  # DONE — SEC-TEN-5
 
+  - id: SEIP-QA-003
+    title: Permission matrix tests (arms the permission-tests CI gate)
+    status: review              # close-out .ai-team/handoffs/SEIP-QA-003.md — awaiting user merge
+    branch: feat/SEIP-API-001-evidence-workflow
+    dependencies: [SEIP-API-001]
+    notes: >
+      tests/security/permission-matrix.test.mjs — generated FROM permissions.yaml
+      (not hand-duplicated), 78+ assertions across 13 operations x 6 roles.
+      Found and fixed a real bug: area_admin's X-School-Id resolution rejected
+      every header (no direct school membership to match against) instead of
+      checking area-based access. Arms the previously-empty permission-tests gate.
+    acceptance_criteria:
+      - Test cases generated from permissions.yaml, not hand-picked  # DONE
+      - Every implemented operation x role combination covered        # DONE — 13 ops x 6 roles
+      - area_admin read-only boundary verified                        # DONE
+      - CCR-003 header semantics verified (single vs multi-membership) # DONE
+
   - id: SEIP-UI-001
     title: Evidence submission flow implementation
     status: backlog

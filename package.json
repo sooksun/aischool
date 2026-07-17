@@ -23,7 +23,7 @@
     "db:reset": "prisma migrate reset --force",
     "test:backend": "node --test \"tests/backend/*.test.mjs\"",
     "test:integration": "node --test \"tests/backend/*.test.mjs\"",
-    "test:security": "node --test \"tests/security/*.test.mjs\"",
+    "test:security": "npm run build:libs && npm run build --workspace apps/api && node --env-file-if-exists=.env --test \"tests/security/*.test.mjs\"",
     "build:libs": "npm run build --workspace=packages/backend-shared && npm run build --workspace=packages/auth && npm run build --workspace=packages/database",
     "build": "npm run build:libs && npm run build --workspaces --if-present",
     "typecheck": "npm run build:libs && npm run typecheck --workspaces --if-present",
