@@ -73,3 +73,7 @@ Independent re-run before marking **done** (Postgres 17 + MinIO healthy locally)
 - Upload path is metadata + MinIO presign (no bytes through API); worker verification still deferred (CCR-004).
 
 **Status: DONE** on branch `feat/SEIP-API-001-evidence-workflow`. Merge to `develop` is the remaining shipping step (user approves).
+
+## Merge
+
+Merged to `develop` as `3db868d` (with UI-001). CI break on first post-merge run fixed in `556958c` (MinIO service startup + contract gate `npm ci`).

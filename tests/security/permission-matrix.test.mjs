@@ -24,7 +24,9 @@ const prisma = new PrismaClient();
 let app;
 const ROLES = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin'];
 const tokenFor = {};
+const userIdFor = {};
 let school, area, evidenceId, indicatorId, mappingId, frameworkId, deletableEvidenceId, categoryId;
+let cycleId, roundId, assignmentId, teacherPersonnelId;
 
 before(async () => {
   ({ app } = await buildServer());
@@ -57,6 +59,7 @@ before(async () => {
     const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: user.email, password } });
     assert.equal(login.statusCode, 200, `setup: ${role} must be able to log in`);
     tokenFor[role] = login.json().access_token;
+    userIdFor[role] = user.id;
   }
 
   // Real resource ids, created via the teacher (who has genuine grants for these),
@@ -79,6 +82,35 @@ before(async () => {
 
   const mapping = await app.inject({ method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, headers: { authorization: `Bearer ${tokenFor.teacher}` }, payload: { indicator_id: indicatorId } });
   mappingId = mapping.json().id;
+
+  // evaluator holds 'committee' grants on getEvidence/listEvidenceMappings — like
+  // 'own', necessary but not sufficient: a real committee seat is required, not
+  // just the role. Give evaluator an actual seat over OWNER_ROLE (teacher)'s
+  // personnel, so the sweep's default "else" branch can prove a genuine member
+  // is NOT denied (the negative case — a role holding 'committee' without a real
+  // seat — is proven by COMMITTEE_SENSITIVE_OPS below, since no OTHER role in
+  // this fixture ever gets a committee seat).
+  const teacherPersonnel = await prisma.personnelProfile.findFirstOrThrow({ where: { schoolId: school.id, userId: userIdFor.teacher } });
+  const cycle = await prisma.evaluationCycle.create({
+    data: { schoolId: school.id, frameworkVersionId: fw.id, fiscalYear: 9999, evaluationKind: 'pa', title: 'perm sweep cycle', startsOn: new Date('2026-01-01'), endsOn: new Date('2026-12-31') },
+  });
+  const round = await prisma.evaluationRound.create({
+    data: { cycleId: cycle.id, roundNumber: 1, purpose: 'perm sweep', periodStart: new Date('2026-01-01'), periodEnd: new Date('2026-12-31') },
+  });
+  const assignment = await prisma.evaluationAssignment.create({
+    data: {
+      schoolId: school.id, roundId: round.id, evaluateePersonnelId: teacherPersonnel.id,
+      committee: { createMany: { data: [
+        { evaluatorUserId: userIdFor.evaluator, committeeRole: 'chair', seatNumber: 1 },
+        { evaluatorUserId: userIdFor.director, committeeRole: 'member', seatNumber: 2 },
+        { evaluatorUserId: userIdFor.school_admin, committeeRole: 'member', seatNumber: 3 },
+      ] } },
+    },
+  });
+  cycleId = cycle.id;
+  roundId = round.id;
+  assignmentId = assignment.id;
+  teacherPersonnelId = teacherPersonnel.id;
 });
 
 after(async () => {
@@ -112,17 +144,56 @@ const OPERATIONS = () => ({
   // one action every granted role can legally perform, so it exercises "has grant"
   // uniformly without a role-conditional payload.
   actOnMapping: { method: 'PATCH', url: `/api/v1/mappings/${mappingId}`, payload: { action: 'revoke' } },
+
+  listCycles: { method: 'GET', url: '/api/v1/cycles' },
+  createCycle: { method: 'POST', url: '/api/v1/cycles', payload: { framework_version_id: frameworkId, fiscal_year: 9998, evaluation_kind: 'pa', title: 'sweep cycle', starts_on: '2026-01-01', ends_on: '2026-12-31' } },
+  getCycle: { method: 'GET', url: `/api/v1/cycles/${cycleId}` },
+  updateCycle: { method: 'PATCH', url: `/api/v1/cycles/${cycleId}`, payload: { title: 'sweep update' } },
+  createRound: { method: 'POST', url: `/api/v1/cycles/${cycleId}/rounds`, payload: { round_number: 1, purpose: 'sweep', period_start: '2026-02-01', period_end: '2026-11-30' } },
+  // purpose-only patch: no status field, so CYCLE-001's transition check never
+  // engages — this operation's job is proving the PERMISSION layer, not scoring's
+  // state machine (already covered by scoring-flow.test.mjs).
+  updateRound: { method: 'PATCH', url: `/api/v1/rounds/${roundId}`, payload: { purpose: 'sweep update' } },
+
+  listAssignments: { method: 'GET', url: `/api/v1/rounds/${roundId}/assignments` },
+  // Reuses the fixture's own evaluatee/committee shape — a real, VAL-002-free
+  // payload so granted roles only ever fail on the (roundId, evaluatee) unique
+  // constraint (RES-002, not a permission denial) on the second attempt.
+  createAssignment: { method: 'POST', url: `/api/v1/rounds/${roundId}/assignments`, payload: {
+    evaluatee_personnel_id: teacherPersonnelId,
+    committee: [
+      { evaluator_user_id: userIdFor.evaluator, committee_role: 'chair', seat_number: 1 },
+      { evaluator_user_id: userIdFor.director, committee_role: 'member', seat_number: 2 },
+      { evaluator_user_id: userIdFor.school_admin, committee_role: 'member', seat_number: 3 },
+    ],
+  } },
+  getAssignment: { method: 'GET', url: `/api/v1/assignments/${assignmentId}` },
+  // Round is deliberately left 'planned' (never opened) — a genuine committee
+  // member (evaluator/director, both really seated) will fail SCORE-002, an
+  // ACCEPTABLE non-permission outcome for this sweep's purposes (same philosophy
+  // as createMapping's expected VAL-002 above: "granted -> not blocked by the
+  // PERMISSION layer", other-reason failures are fine and expected).
+  submitMyScores: { method: 'PUT', url: `/api/v1/assignments/${assignmentId}/my-scores`, payload: { indicator_scores: [{ indicator_id: randomUUID(), rubric_level: 1 }] } },
+  // getAssignmentResults is deliberately NOT in this sweep: its 'own' grant
+  // (teacher/deputy) carries an EXTRA temporal rule ("visible only once the round
+  // is closed", permissions.yaml note) that returns PERM-001 even for the genuine
+  // evaluatee on a non-closed round — which would collide with this sweep's
+  // "OWNER_ROLE must never see PERM-001" assumption for a reason that has nothing
+  // to do with a matrix mismatch. That behavior (including the genuine-evaluatee
+  // case, once closed) is covered directly by scoring-flow.test.mjs instead.
 });
 
-// The fixture evidence/mapping above is owned by 'teacher'. An 'own' or
-// 'own-revoke' grant is necessary but not sufficient — the caller must also BE
-// the owner. Operations below are 'own'-sensitive per permissions.yaml; for any
-// role that holds one of these grants but isn't OWNER_ROLE, denial is the CORRECT
-// outcome (proves the ownership boundary), not a matrix mismatch.
+// The fixture evidence/mapping above is owned by 'teacher', who is ALSO the
+// fixture assignment's evaluatee (deliberately, so one OWNER_ROLE constant
+// covers both). An 'own' or 'own-revoke' grant is necessary but not sufficient
+// — the caller must also BE the owner/evaluatee. Operations below are
+// 'own'-sensitive per permissions.yaml; for any role that holds one of these
+// grants but isn't OWNER_ROLE, denial is the CORRECT outcome (proves the
+// ownership boundary), not a matrix mismatch.
 const OWNER_ROLE = 'teacher';
 const OWN_SENSITIVE_OPS = new Set([
   'getEvidence', 'updateEvidence', 'deleteEvidence', 'initiateFileUpload',
-  'listEvidenceMappings', 'createMapping', 'actOnMapping',
+  'listEvidenceMappings', 'createMapping', 'actOnMapping', 'getAssignment',
 ]);
 
 test('every implemented operation x every role matches its permissions.yaml disposition', async () => {
@@ -181,7 +252,7 @@ test('every implemented operation x every role matches its permissions.yaml disp
     }
   }
 
-  assert.ok(assertions >= 13 * 6, `sweep should cover at least 13 operations x 6 roles, got ${assertions} assertions`);
+  assert.ok(assertions >= 23 * 6, `sweep should cover at least 23 operations x 6 roles, got ${assertions} assertions`);
   assert.deepEqual(failures, [], `${failures.length} mismatch(es) between permissions.yaml and enforcement:\n${failures.join('\n')}`);
 });
 

@@ -19,13 +19,15 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 ## Current Objectives (Sprint 1)
 1. ~~SEIP-DB-001~~ **DONE** — schema + migrations + seed + 18 constraint tests (`be36eff`)
 2. ~~SEIP-DB-002~~ **DONE** (structure) — residual only: full IndicatorLevelDescription wording from PDFs
-3. ~~SEIP-API-001~~ **DONE** — evidence-workflow API 15/27 ops, merged to `develop` (`3db868d`)
+3. ~~SEIP-API-001~~ **DONE** — evidence-workflow API 16/27 ops, merged to `develop` (`3db868d`)
 4. ~~SEIP-QA-003~~ **DONE** — permission-matrix tests arm `test:security` / permission-tests gate
 5. ~~SEIP-UI-001~~ **DONE** — evidence submission SPA (`apps/web`), verified end-to-end in a real browser against the real API + Postgres + MinIO, merged to `develop` (`3db868d`)
-6. Contracts at **v2.0.0** (CCR-004, breaking: `FileUploadComplete` gained required metadata fields) — was v1.0.0 at Sprint 0 exit
-7. Future: SEIP-API-002 (cycles/rounds/scoring), SEIP-WORKER-001 (scan/duration probe/outbox dispatch), director/evaluator UI screens, PA1/PA2/PA3 report generation (deferred, needs official form field inventory)
+6. ~~SEIP-OPS-002~~ **DONE** — develop CI break fixed same-day (`556958c`) — see incident note below
+7. ~~SEIP-API-002~~ **DONE** — cycles + committee scoring, the remaining 11/27 ops, on `feat/SEIP-API-002-cycles-scoring` — **all 27 contract operations now implemented**; awaiting user review/merge
+8. Contracts at **v2.0.0** (CCR-004, breaking: `FileUploadComplete` gained required metadata fields) — was v1.0.0 at Sprint 0 exit
+9. Future: SEIP-WORKER-001 (virus scan/video-duration probe/outbox event dispatch — events.yaml defines events but nothing dispatches them yet), director/evaluator UI screens (cycle management, committee scoring UI — apps/web still only has the teacher evidence-submission flow), full IndicatorLevelDescription rubric text from the official PDFs (SEIP-DB-002 residual), PA1/PA2/PA3 report generation (deferred, needs official form field inventory)
 
-**`develop` now contains a complete, working vertical slice**: real login → evidence submission → real MinIO upload → indicator mapping → governed confirmation, provable end-to-end.
+**`develop` now contains a complete, working vertical slice**: real login → evidence submission → real MinIO upload → indicator mapping → governed confirmation, provable end-to-end. **`feat/SEIP-API-002-cycles-scoring` (awaiting merge) completes the API surface**: cycle/round setup → committee assignment → per-evaluator scoring → ≥70%-per-evaluator pass verdict, also provable end-to-end (`apps/api/test/scoring-flow.test.mjs`).
 
 ### Incident: develop CI broke on the API-001+UI-001 merge, fixed same-day
 The merge (`3db868d`, 2026-07-17) went in with CI never having exercised real

@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-17T22:30:00+07:00
+updated_at: 2026-07-17T23:59:00+07:00
 # Single-agent mode per ADR-0004 (2026-07-17): Claude Code is the sole developer.
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
@@ -128,7 +128,7 @@ tasks:
 
   - id: SEIP-API-001
     title: Backend evidence-workflow API (15 of 27 contract operations)
-    status: done                # 2026-07-17 — verified green; handoff SEIP-API-001.md; branch feat/SEIP-API-001-evidence-workflow (merge to develop pending)
+    status: done                # 2026-07-17 — merged develop 3db868d; handoff SEIP-API-001.md
     branch: feat/SEIP-API-001-evidence-workflow
     dependencies: [SEIP-ARCH-002, SEIP-DB-001]
     notes: >
@@ -168,7 +168,7 @@ tasks:
 
   - id: SEIP-UI-001
     title: Evidence submission flow implementation
-    status: review              # close-out .ai-team/handoffs/SEIP-UI-001.md — awaiting user merge
+    status: done                # 2026-07-17 — merged develop 3db868d; verified re-run; handoff SEIP-UI-001.md
     branch: feat/SEIP-API-001-evidence-workflow
     dependencies: [SEIP-ARCH-002, SEIP-DB-001, SEIP-API-001]
     notes: >
@@ -181,3 +181,52 @@ tasks:
       - Teacher submits evidence with minimal fields   # DONE — verified live in browser
       - Responsive mobile support                       # DONE — verified live, 375px viewport
       - Accessibility checks pass                        # DONE — semantic roles/aria verified via accessibility tree
+
+  - id: SEIP-OPS-002
+    title: Fix develop CI break from the API-001+UI-001 merge
+    status: done                # 2026-07-17 — fixed 556958c, verified green on GitHub Actions run 29549242802
+    dependencies: [SEIP-API-001, SEIP-UI-001]
+    notes: >
+      First real exercise of the integration/permission-tests gates' Postgres+MinIO
+      service containers on GitHub's own runners surfaced 2 latent bugs: (1)
+      contract-compatibility never ran `npm ci`, so its codegen-diff step's bare
+      js-yaml import had nothing to resolve; (2) MinIO's `--entrypoint sh` override
+      replaced startup with a no-op shell — GitHub Actions services can't pass
+      MinIO's required `server /data` command, so it now starts as a manual step.
+      Root-caused via GitHub's jobs API (log download needed elevated auth this
+      session doesn't have) + local reproduction in isolated dirs and real Docker,
+      not guessed. Full test suite re-verified against disposable CI-matching
+      containers before push.
+    acceptance_criteria:
+      - Root cause identified for all 3 failing gates, not just patched around  # DONE
+      - Fix verified locally against disposable, CI-matching infra              # DONE
+      - develop green on GitHub Actions (not just locally)                     # DONE — run 29549242802, 12/12 jobs
+
+  - id: SEIP-API-002
+    title: Cycles + committee scoring (remaining 11 of 27 contract operations)
+    status: done                # 2026-07-17 — feat/SEIP-API-002-cycles-scoring, awaiting merge
+    branch: feat/SEIP-API-002-cycles-scoring
+    dependencies: [SEIP-API-001, SEIP-DB-001]
+    notes: >
+      Closes the gap SEIP-API-001 explicitly deferred. cycles tag (listCycles,
+      createCycle, getCycle, updateCycle, createRound, updateRound) + scoring tag
+      (listAssignments, createAssignment, getAssignment, submitMyScores,
+      getAssignmentResults) — all 27 contract operations now implemented.
+      Also un-stubbed the evaluator:committee grant on 4 evidence/mapping
+      endpoints (previously hard-denied with "scoring deferred" — the DB-001
+      schema already modeled EvaluationCycle/Round/Assignment/CommitteeMember/
+      IndicatorScore/RoundResult in full; this is the API layer over it).
+      Scoring formula (part1 standard=equal-weight average, part2 challenge=
+      maxPoints-weighted, total=part1*60%+part2*40%) derived from
+      evaluation-framework.md + seeded ScoreWeight/Indicator data, not assumed —
+      documented in scoring.ts. permission-matrix.test.mjs extended from 13 to 23
+      operations x 6 roles; caught a real own-grant inconsistency (RES-001 vs the
+      established PERM-001 precedent) before merge.
+    acceptance_criteria:
+      - All 27 openapi.yaml operations implemented                              # DONE
+      - Per-evaluator scoring, 3-member committee, workload gate enforced       # DONE
+      - "≥70% from EVERY evaluator individually" proven, not just averaged      # DONE — scoring-flow.test.mjs
+      - Round state machine (planned->open->scoring->closed) enforced           # DONE — CYCLE-001
+      - evaluator:committee grant wired up on evidence/mappings                 # DONE
+      - Verified end-to-end against disposable Postgres+MinIO                  # DONE — 12 apps/api + 6 database + 3 security tests
+      - permission-matrix sweep extended to cover the new operations            # DONE — 13->23 ops

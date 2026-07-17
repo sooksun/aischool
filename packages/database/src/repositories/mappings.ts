@@ -43,19 +43,22 @@ export interface ListMappingsFilter {
   indicatorId?: string;
   cycleId?: string;
   status?: MappingStatus;
+  /** 'committee' grant: mappings whose evidence belongs to an evaluatee the caller
+   * currently sits on a committee for (permissions.yaml note). */
+  ownerPersonnelIdIn?: string[];
   page: number;
   pageSize: number;
 }
 
-/** School-wide queue (director/school_admin grant). The evaluator:committee grant
- * for this same endpoint needs EvaluationAssignment/CommitteeMember join logic,
- * which is deferred with the rest of committee scoring (see apps/api README). */
+/** School-wide queue (director/school_admin grant), or narrowed to the caller's
+ * current evaluatees for the evaluator:committee grant. */
 export async function listMappings(schoolId: string, f: ListMappingsFilter) {
   const where: Prisma.EvidenceIndicatorMappingWhereInput = {
     schoolId,
     indicatorId: f.indicatorId,
     cycleId: f.cycleId,
     status: f.status,
+    ...(f.ownerPersonnelIdIn ? { evidence: { ownerPersonnelId: { in: f.ownerPersonnelIdIn } } } : {}),
   };
   const [items, total] = await Promise.all([
     prisma.evidenceIndicatorMapping.findMany({
