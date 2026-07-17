@@ -404,7 +404,7 @@ tasks:
 
   - id: SEIP-UI-003
     title: Evaluator UI — submit scores + view assignment results
-    status: backlog
+    status: done                # 2026-07-18 - handoff SEIP-UI-003.md; branch feat/SEIP-UI-003-evaluator-scoring
     wave: C
     sprint: 2
     branch: feat/SEIP-UI-003-evaluator-scoring

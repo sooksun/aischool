@@ -29,8 +29,9 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 9. ~~SEIP-WORKER-001~~ **DONE** — outbox + file.process (scan/duration) + storage GC
 10. ~~SEIP-UI-002~~ **DONE** — director/admin UI for cycles, rounds, committee assignment; handoff `.ai-team/handoffs/SEIP-UI-002.md`
 11. ~~SEIP-OPS-003~~ **DONE** — staging compose + TLS/backup runbook + worker (`6b8b66c` on develop)
-12. ~~Wave D+E reports/AI~~ **DONE on branch `feat/SEIP-REPORTS-AI`** — ARCH-003/API-003/WORKER-002/UI-004 + ARCH-005/API-004/UI-005; handoff `.ai-team/handoffs/SEIP-REPORTS-AI.md` (awaiting merge)
-13. **Sprint 2+ remaining** — UI-003, API-003a, QA-004 e2e, official PA PDF layout (deferred).
+12. ~~Wave D+E reports/AI~~ **DONE** (`f014cf8`) — ARCH-003/API-003/WORKER-002/UI-004 + ARCH-005/API-004/UI-005
+13. ~~SEIP-UI-003~~ **DONE** — evaluator scoring UI (`feat/SEIP-UI-003-evaluator-scoring`); handoff `.ai-team/handoffs/SEIP-UI-003.md`
+14. **Sprint 2+ remaining** — API-003a, UI-003b, QA-004 e2e, official PA PDF layout (deferred).
 
 **Product slice (REPORTS-AI branch):** login → evidence → MinIO/worker scan → mapping (+ local AI suggest) → cycles/rounds → 3-evaluator scoring → structured PA report generation (JSON + section refs). PDF layout still deferred.
 
