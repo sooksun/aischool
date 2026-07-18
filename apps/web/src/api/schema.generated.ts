@@ -999,6 +999,15 @@ export interface components {
              *     to load taxonomy for scoring — no graph walk over cycles/rounds.
              */
             framework_version_id: string;
+            /**
+             * @description วิทยฐานะ of the person being evaluated (CCR-013). IndicatorLevel rows
+             *     are keyed by (rank_level_code, rubric_level), so without this a client
+             *     cannot tell which rank's expected-practice text applies and is forced
+             *     to invent generic rubric labels — which is what apps/web did. There is
+             *     no personnel lookup operation, so this cannot be resolved client-side.
+             * @example apply_adapt
+             */
+            evaluatee_rank_level_code: string;
         };
         ScoreSubmission: {
             /** @description Chair may declare the workload gate in the same call (SCORE-004) */

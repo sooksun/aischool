@@ -169,6 +169,25 @@ test('createRound rejects a period outside the cycle bounds (CYCLE-003)', async 
   assert.equal(badRound.json().code, 'CYCLE-003');
 });
 
+// CCR-013: IndicatorLevelDescription rows are keyed by (rank_level_code,
+// rubric_level). Without the evaluatee's rank on the assignment, a scoring client
+// cannot select the right expected-practice text and is pushed into inventing
+// generic labels — which is exactly what apps/web did, contradicting ADR-0003.
+// There is no personnel lookup operation, so this must come from the assignment.
+test('getAssignment exposes the evaluatee rank needed to select rubric level text', async () => {
+  const { cycle, round } = await makeOpenRound(3010);
+  const assignment = await makeAssignment(cycle.id, round.id);
+
+  const res = await app.inject({
+    method: 'GET', url: `/api/v1/assignments/${assignment.id}`, headers: auth(directorToken),
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(
+    res.json().evaluatee_rank_level_code, 'score_kru',
+    "must be the EVALUATEE's rank, not the caller's",
+  );
+});
+
 test('full committee scoring flow: 3 evaluators submit -> rollup computed -> overall pass', async () => {
   const { cycle, round } = await makeOpenRound(3003);
   const assignment = await makeAssignment(cycle.id, round.id);

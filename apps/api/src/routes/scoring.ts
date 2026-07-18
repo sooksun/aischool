@@ -179,6 +179,9 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
       my_submission_state: mySubmissionState,
       // CCR-009: pin framework for scoring UI — no client graph walk over cycles.
       framework_version_id: assignment.round.cycle.frameworkVersionId,
+      // CCR-013: selects which IndicatorLevel rows apply (ADR-0003 — the rubric
+      // text is seeded data, not UI copy).
+      evaluatee_rank_level_code: assignment.evaluatee.rankLevelCode,
     };
   });
 

@@ -26,6 +26,10 @@ openapi: 3.1.0
 #   it (all four values were already reachable in principle; only the honesty
 #   changed). Download policy is unchanged for the caller — `unscanned` is served
 #   exactly like `clean`; `blocked`/`pending` still return UPL-006.
+# version 2.8.0 — CCR-013 (additive): AssignmentDetail.evaluatee_rank_level_code.
+#   Required so a scoring client can select the right IndicatorLevel rows; without
+#   it the level text seeded per (indicator, rank, rubric_level) is unusable and
+#   the UI falls back to four generic phrases, contradicting ADR-0003.
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -34,11 +38,13 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.7.0
+  version: 2.8.0
   summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI + PDF)
   description: |
-    Contract v2.7 (CCR-012) — ScanStatus gains `unscanned`: a deployment with no
-    malware scanner now says so instead of claiming `clean`. v2.6 typed
+    Contract v2.8 (CCR-013) — AssignmentDetail carries the evaluatee's rank so
+    scoring can show the seeded per-rank expected-practice text. v2.7 ScanStatus
+    gains `unscanned`: a deployment with no malware scanner now says so instead of
+    claiming `clean`. v2.6 typed
     ReportPayload; v2.5 lazy file download; v2.4 list scan_status; core remains
     evidence, PA evaluation, reports, AI suggest.
 
@@ -1469,7 +1475,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/Assignment'
         - type: object
-          required: [workload_gate_declared, my_submission_state, framework_version_id]
+          required: [workload_gate_declared, my_submission_state, framework_version_id, evaluatee_rank_level_code]
           properties:
             workload_gate_declared: { type: boolean }
             workload_met: { type: [boolean, 'null'] }
@@ -1483,6 +1489,15 @@ components:
               description: |
                 Framework pinned by the assignment's cycle (CCR-009). Clients use this
                 to load taxonomy for scoring — no graph walk over cycles/rounds.
+            evaluatee_rank_level_code:
+              type: string
+              examples: [apply_adapt]
+              description: |
+                วิทยฐานะ of the person being evaluated (CCR-013). IndicatorLevel rows
+                are keyed by (rank_level_code, rubric_level), so without this a client
+                cannot tell which rank's expected-practice text applies and is forced
+                to invent generic rubric labels — which is what apps/web did. There is
+                no personnel lookup operation, so this cannot be resolved client-side.
 
     ScoreSubmission:
       type: object

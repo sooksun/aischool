@@ -36,6 +36,18 @@ export function validateScoreForm(
   return { ok: true };
 }
 
+/**
+ * Generic rubric band names — the scale itself (1..4), which IS fixed by the
+ * framework and is not per-indicator taxonomy.
+ *
+ * These are NOT the scoring criteria. The criteria are the seeded
+ * IndicatorLevelDescription rows shown beside each option in AssignmentScorePage
+ * (CCR-013). This list used to be all an evaluator saw, which meant every ว9/ว10
+ * indicator was scored against the same four phrases while the framework's own
+ * expected-practice text sat unread in the database — the ADR-0003 violation the
+ * 2026-07-18 audit flagged. Keep it as the short accessible name and as the
+ * fallback when a rank has no seeded rows; do not grow it into rubric content.
+ */
 export const RUBRIC_OPTIONS: { value: number; labelTh: string }[] = [
   { value: 1, labelTh: '1 — ต่ำกว่าที่คาดหวังมาก' },
   { value: 2, labelTh: '2 — ต่ำกว่าที่คาดหวัง' },

@@ -9,6 +9,7 @@ import {
   validateScoreForm,
   type ScoreRowInput,
 } from '../../components/scoring/validateScoreForm';
+import { levelTextFor, hasLevelText } from '../../lib/rubricLevels';
 import type { components } from '../../api/schema.generated';
 
 type AssignmentDetail = components['schemas']['AssignmentDetail'];
@@ -59,8 +60,12 @@ export function AssignmentScorePage() {
           setError('ไม่พบกรอบตัวชี้วัดของการมอบหมายนี้');
           return;
         }
+        // include=levels pulls IndicatorLevelDescription rows — the seeded
+        // per-(indicator, rank, rubric_level) expected-practice text this page is
+        // supposed to score against (ADR-0003). Omitting it was why the UI fell
+        // back to four generic phrases while 792 seeded rows went unread.
         const fw = unwrap(await api.GET('/frameworks/{frameworkId}', {
-          params: { path: { frameworkId: fwId } },
+          params: { path: { frameworkId: fwId }, query: { include: 'levels' } },
         })) as FrameworkDetail;
         if (cancelled) return;
         setFramework(fw);
@@ -212,6 +217,7 @@ export function AssignmentScorePage() {
           <h2>ตัวชี้วัด ({scorable.length} ข้อ)</h2>
           {scorable.map((ind) => {
             const row = rows.find((r) => r.indicator_id === ind.id);
+            const rankCode = detail?.evaluatee_rank_level_code ?? '';
             return (
               <fieldset
                 key={ind.id}
@@ -230,22 +236,40 @@ export function AssignmentScorePage() {
                   {ind.indicator_kind === 'challenge' ? ' (ประเด็นท้าทาย)' : ''}
                 </legend>
                 <div role="radiogroup" aria-label={`ระดับคะแนน ${ind.code}`}>
-                  {RUBRIC_OPTIONS.map((opt) => (
-                    <label
-                      key={opt.value}
-                      style={{ display: 'block', minHeight: 'var(--touch-target)', padding: '4px 0' }}
-                    >
-                      <input
-                        type="radio"
-                        name={`rubric-${ind.id}`}
-                        checked={row?.rubric_level === opt.value}
-                        onChange={() => setLevel(ind.id, opt.value)}
-                      />
-                      {' '}
-                      {opt.labelTh}
-                    </label>
-                  ))}
+                  {RUBRIC_OPTIONS.map((opt) => {
+                    // The seeded expected-practice text for THIS indicator at the
+                    // evaluatee's rank. Generic label stays as the accessible name
+                    // and as the fallback when a rank/level row is absent, so a
+                    // gap in seed data degrades to the old behaviour rather than
+                    // rendering an empty option.
+                    const practice = levelTextFor(ind, rankCode, opt.value);
+                    return (
+                      <label
+                        key={opt.value}
+                        style={{ display: 'block', minHeight: 'var(--touch-target)', padding: '6px 0' }}
+                      >
+                        <input
+                          type="radio"
+                          name={`rubric-${ind.id}`}
+                          checked={row?.rubric_level === opt.value}
+                          onChange={() => setLevel(ind.id, opt.value)}
+                        />
+                        {' '}
+                        <strong>{opt.labelTh}</strong>
+                        {practice && (
+                          <span className="field-hint" style={{ display: 'block', marginLeft: 24 }}>
+                            {practice}
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
+                {!hasLevelText(ind, rankCode) && (
+                  <p className="field-hint">
+                    ยังไม่มีคำอธิบายระดับสำหรับวิทยฐานะนี้ — ใช้เกณฑ์กลาง
+                  </p>
+                )}
                 <label htmlFor={`c-${ind.id}`} className="field-hint">ความเห็น (ไม่บังคับ)</label>
                 <textarea
                   id={`c-${ind.id}`}

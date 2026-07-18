@@ -58,6 +58,11 @@ export async function getAssignmentDetail(assignmentId: string) {
     where: { id: assignmentId },
     include: {
       committee: true,
+      // CCR-013: IndicatorLevelDescription rows are keyed by (rank_level_code,
+      // rubric_level), so a scoring client needs the evaluatee's วิทยฐานะ to pick
+      // the right expected-practice text. There is no personnel lookup operation
+      // for it to resolve this itself.
+      evaluatee: { select: { rankLevelCode: true } },
       round: {
         select: {
           id: true, status: true,
