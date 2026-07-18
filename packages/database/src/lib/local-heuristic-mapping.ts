@@ -2,13 +2,38 @@
 // never calls an external network. Pure functions + thin DB helpers live here
 // so the API can run suggest synchronously without a worker round-trip.
 
-/** Normalize Thai/English text into lowercase tokens (letters/digits only). */
+/**
+ * Thai has no spaces between words, so splitting on whitespace cannot produce
+ * words — ICU segmentation does that. Built once: constructing a Segmenter is
+ * expensive relative to a tokenize() call, and rankIndicators calls tokenize per
+ * indicator.
+ *
+ * Requires a full-ICU runtime (Node 18+ ships one by default). On a small-icu
+ * build this degrades to "whole Thai run = one token" rather than throwing, so
+ * local-heuristic.test.mjs asserts segmentation actually happens.
+ */
+const WORD_SEGMENTER = new Intl.Segmenter('th', { granularity: 'word' });
+
+/**
+ * Normalize Thai/English text into lowercase word tokens.
+ *
+ * `\p{M}` in the keep-set is load-bearing. Thai vowel signs and tone marks
+ * (ั ิ ี ุ ู ่ ้ ็) are Unicode category Mn — NOT \p{L} and NOT \p{N} — so the
+ * previous class stripped them as if they were punctuation, shattering every
+ * word at each mark: "แผนการจัดการเรียนรู้" became ["แผนการจ","ดการเร","ยนร"].
+ * Scoring then compared accidental consonant runs, which produced plausible
+ * nonzero numbers while depressing real matches below minScore (2026-07-18
+ * audit).
+ */
 export function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
-    .split(/\s+/)
-    .filter((t) => t.length >= 2);
+  const cleaned = text.toLowerCase().replace(/[^\p{L}\p{N}\p{M}\s]+/gu, ' ');
+  const tokens: string[] = [];
+  for (const { segment, isWordLike } of WORD_SEGMENTER.segment(cleaned)) {
+    if (!isWordLike) continue;
+    const token = segment.trim();
+    if (token.length >= 2) tokens.push(token);
+  }
+  return tokens;
 }
 
 export function jaccardScore(a: Set<string>, b: Set<string>): number {
