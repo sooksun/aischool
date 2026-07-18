@@ -10,7 +10,8 @@ type Evidence = components['schemas']['Evidence'];
 type ScanStatus = components['schemas']['ScanStatus'];
 
 export function EvidenceListPage() {
-  const { user, logout } = useAuth();
+  const { user, logout, capabilities } = useAuth();
+  const { submitEvidence } = capabilities;
   const [items, setItems] = useState<Evidence[] | null>(null);
   const [error, setError] = useState(false);
 
@@ -65,7 +66,20 @@ export function EvidenceListPage() {
       {items !== null && items.length === 0 && (
         <div className="empty-state">
           <p>ยังไม่มีหลักฐาน</p>
-          <p className="field-hint">แตะปุ่ม + เพื่อส่งหลักฐานชิ้นแรกของคุณ</p>
+          {submitEvidence ? (
+            <>
+              {/* This used to read "แตะปุ่ม + เพื่อส่ง…" while offering no button —
+                  it described the floating '+', whose only label is an aria-label.
+                  A first-time teacher landed on an empty screen with nothing to
+                  press. The call to action is now the thing itself. */}
+              <p className="field-hint">รองรับไฟล์ PDF รูปภาพ และวิดีโอ</p>
+              <p>
+                <Link to="/evidence/new" className="btn btn-primary">+ ส่งหลักฐานชิ้นแรก</Link>
+              </p>
+            </>
+          ) : (
+            <p className="field-hint">ยังไม่มีหลักฐานที่คุณเข้าถึงได้</p>
+          )}
         </div>
       )}
 
@@ -91,7 +105,12 @@ export function EvidenceListPage() {
         </ul>
       )}
 
-      <Link to="/evidence/new" className="fab" aria-label="ส่งหลักฐานใหม่">+</Link>
+      {/* Gated like the nav entry: an evaluator reaches this list through a
+          committee grant but holds no createEvidence grant, so the FAB would be
+          a dead end for them. */}
+      {submitEvidence && (
+        <Link to="/evidence/new" className="fab" aria-label="ส่งหลักฐานใหม่">+</Link>
+      )}
     </main>
   );
 }
