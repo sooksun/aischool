@@ -4,6 +4,7 @@
 // never gets duplicated into the audit trail. That allowlist is enforced HERE,
 // structurally — a caller can pass a full entity object and this module strips
 // it down, rather than trusting every call site to remember to.
+import type { Prisma } from '@prisma/client';
 import { prisma } from './client.js';
 
 type Primitive = string | number | boolean | null;
@@ -45,8 +46,17 @@ export interface AuditWrite {
   requestId?: string;
 }
 
-export async function writeAuditEvent(w: AuditWrite): Promise<void> {
-  await prisma.auditEvent.create({
+/**
+ * `tx` lets a caller enrol the audit row in a surrounding transaction, matching
+ * enqueueWorkerJob's convention. Worth doing wherever the audited write is
+ * itself transactional: rolling back should un-say "this happened", and a
+ * committed change with no trail is a compliance gap on an append-only log.
+ */
+export async function writeAuditEvent(
+  w: AuditWrite,
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<void> {
+  await tx.auditEvent.create({
     data: {
       schoolId: w.schoolId,
       actorUserId: w.actorUserId,

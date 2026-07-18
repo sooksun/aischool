@@ -8,7 +8,7 @@ import {
   listAssignmentsForRound, createAssignmentWithCommittee, getAssignmentDetail,
   getCommitteeMembership, countCommitteeMembers,
   getWorkloadDeclaration, upsertWorkloadDeclaration,
-  replaceIndicatorScores, getIndicatorScores, upsertRoundResult, getRoundResultsForAssignment,
+  replaceScoresAndRollup, getIndicatorScores, getRoundResultsForAssignment,
   getPersonnelById, countExistingUserIds, countCommitteeEligibleUserIds, getFrameworkById, getFrameworkDetail, writeAuditEvent,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
@@ -245,10 +245,6 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
       throw new ApiError('SCORE-005', `Score set incomplete — expected ${byIndicatorId.size} scored indicators, got ${submittedIds.length}`);
     }
 
-    await replaceIndicatorScores(assignmentId, auth.userId, body.indicator_scores.map((s) => ({
-      indicatorId: s.indicator_id, rubricLevel: s.rubric_level, comment: s.comment ?? null,
-    })));
-
     // Rollup: part1 (standard, equal-weight average) / part2 (challenge,
     // maxPoints-weighted) / total = part1*part1_weight% + part2*part2_weight%
     // (ScoreWeight part1_total=60, part2_total=40 — framework data, not a constant).
@@ -266,15 +262,26 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
     const part2Weight = weights.part2_total ?? 40;
     const totalPercent = part1Percent * (part1Weight / 100) + part2Percent * (part2Weight / 100);
 
-    const result = await upsertRoundResult(assignmentId, auth.userId, {
-      part1Percent: round2(part1Percent), part2Percent: round2(part2Percent), totalPercent: round2(totalPercent),
-      passedWorkloadGate: workloadRow.workloadMet,
-    });
-
-    await writeAuditEvent({
-      schoolId: assignment.schoolId, actorUserId: auth.userId, action: 'scores_submitted',
-      entityType: 'EvaluationAssignment', entityId: assignmentId, requestId: request.id,
-    });
+    // Scores, the rollup derived from them, and the audit row commit together.
+    // Previously three sequential awaits: a failure between them left the new
+    // scores next to the PREVIOUS RoundResult, and since total_percent feeds the
+    // generated passed_individual_threshold column, the DB's own pass/fail verdict
+    // silently contradicted the scores behind it (2026-07-18 audit).
+    const result = await replaceScoresAndRollup(
+      assignmentId,
+      auth.userId,
+      body.indicator_scores.map((s) => ({
+        indicatorId: s.indicator_id, rubricLevel: s.rubric_level, comment: s.comment ?? null,
+      })),
+      {
+        part1Percent: round2(part1Percent), part2Percent: round2(part2Percent), totalPercent: round2(totalPercent),
+        passedWorkloadGate: workloadRow.workloadMet,
+      },
+      {
+        schoolId: assignment.schoolId, actorUserId: auth.userId, action: 'scores_submitted',
+        entityType: 'EvaluationAssignment', entityId: assignmentId, requestId: request.id,
+      },
+    );
     return serializeEvaluatorResult(result);
   });
 

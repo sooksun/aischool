@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
+import { replaceScoresAndRollup } from '@seip/database';
 
 const prisma = new PrismaClient();
 let app;
@@ -185,6 +186,83 @@ test('getAssignment exposes the evaluatee rank needed to select rubric level tex
   assert.equal(
     res.json().evaluatee_rank_level_code, 'score_kru',
     "must be the EVALUATEE's rank, not the caller's",
+  );
+});
+
+// Scores and the rollup derived from them must commit together. They used to be
+// separate awaits, so a failure in between left the new scores paired with the
+// PREVIOUS RoundResult — and total_percent feeds the STORED GENERATED
+// passed_individual_threshold column, so the database's own pass/fail verdict
+// would quietly contradict the scores behind it until someone resubmitted.
+//
+// Forced here by making the LAST write in the transaction (the audit row) fail on
+// a foreign key. If the transaction is real, the scores and rollup written before
+// it roll back too.
+test('a failure mid-submission rolls back scores AND rollup together', async () => {
+  const { cycle, round } = await makeOpenRound(3011);
+  const assignment = await makeAssignment(cycle.id, round.id);
+
+  await app.inject({
+    method: 'PUT', url: `/api/v1/assignments/${assignment.id}/my-scores`, headers: auth(directorToken),
+    payload: {
+      workload_met: true,
+      indicator_scores: [
+        { indicator_id: standardIndicatorAId, rubric_level: 4 },
+        { indicator_id: standardIndicatorBId, rubric_level: 4 },
+        { indicator_id: challengeIndicatorId, rubric_level: 4 },
+      ],
+    },
+  });
+
+  const evaluatorUserId = (await prisma.committeeMember.findFirstOrThrow({
+    where: { assignmentId: assignment.id, committeeRole: 'chair' },
+  })).evaluatorUserId;
+  const before = await prisma.roundResult.findUniqueOrThrow({
+    where: { assignmentId_evaluatorUserId: { assignmentId: assignment.id, evaluatorUserId } },
+  });
+  const scoresBefore = await prisma.indicatorScore.findMany({
+    where: { assignmentId: assignment.id, evaluatorUserId }, orderBy: { indicatorId: 'asc' },
+  });
+  assert.equal(Number(before.totalPercent), 100, 'setup: all level-4 scores rolls up to 100%');
+
+  await assert.rejects(
+    replaceScoresAndRollup(
+      assignment.id,
+      evaluatorUserId,
+      [
+        { indicatorId: standardIndicatorAId, rubricLevel: 1, comment: null },
+        { indicatorId: standardIndicatorBId, rubricLevel: 1, comment: null },
+        { indicatorId: challengeIndicatorId, rubricLevel: 1, comment: null },
+      ],
+      { part1Percent: 25, part2Percent: 25, totalPercent: 25, passedWorkloadGate: true },
+      {
+        // audit_event carries no FKs on purpose (rows must outlive the entities
+        // they describe), so the failure is forced with an `action` past the
+        // varchar(191) limit — a write error at the LAST statement in the
+        // transaction, which is exactly where a non-atomic version would already
+        // have committed the scores and rollup.
+        schoolId: null, actorUserId: evaluatorUserId, action: 'x'.repeat(300),
+        entityType: 'EvaluationAssignment', entityId: assignment.id,
+      },
+    ),
+    'the failing audit write must abort the whole submission',
+  );
+
+  const after = await prisma.roundResult.findUniqueOrThrow({
+    where: { assignmentId_evaluatorUserId: { assignmentId: assignment.id, evaluatorUserId } },
+  });
+  const scoresAfter = await prisma.indicatorScore.findMany({
+    where: { assignmentId: assignment.id, evaluatorUserId }, orderBy: { indicatorId: 'asc' },
+  });
+
+  assert.equal(Number(after.totalPercent), 100, 'rollup must not move');
+  assert.equal(
+    after.passedIndividualThreshold, true,
+    'the generated pass/fail column must still agree with the scores on disk',
+  );
+  assert.deepEqual(
+    scoresAfter.map((s) => s.rubricLevel), scoresBefore.map((s) => s.rubricLevel),
+    'the rewritten scores must be gone — no half-applied submission',
   );
 });
 
