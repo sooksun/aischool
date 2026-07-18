@@ -8,7 +8,7 @@ import { PrismaClient } from '@prisma/client';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { registerEvidenceFileWithWorkerJobs } from '@seip/database';
 import { runOnce } from '../dist/loop.js';
-import { stubScanStatus, stubProbeDurationSeconds } from '../dist/jobs/file-process.js';
+import { stubScanStatus } from '../dist/jobs/file-process.js';
 
 const prisma = new PrismaClient();
 const env = {
@@ -36,7 +36,7 @@ async function putObject(key, body, contentType) {
   }));
 }
 
-async function fixture(filename = 'lesson.pdf', contentType = 'application/pdf') {
+async function fixture(filename = 'lesson.pdf', contentType = 'application/pdf', declaredByteSize = null) {
   const school = await prisma.school.create({
     data: { code: `w-${randomUUID().slice(0, 8)}`, name: 'Worker School' },
   });
@@ -92,7 +92,7 @@ async function fixture(filename = 'lesson.pdf', contentType = 'application/pdf')
     evidenceId: evidence.id,
     storageUri: key,
     contentType,
-    byteSize: BigInt(body.length),
+    byteSize: BigInt(declaredByteSize ?? body.length),
     checksumSha256: 'a'.repeat(64),
     durationSeconds: null,
     originalFilename: filename,
@@ -122,10 +122,27 @@ test('stubScanStatus blocks eicar/virus names', () => {
   assert.equal(stubScanStatus('my-VIRUS-file.bin'), 'blocked');
 });
 
-test('stubProbeDurationSeconds only for video and clamps', () => {
-  assert.equal(stubProbeDurationSeconds(1000n, 'application/pdf'), null);
-  const d = stubProbeDurationSeconds(5_000_000n, 'video/mp4');
-  assert.ok(d >= 1 && d <= 600);
+test('the worker does not invent a duration it never measured', async () => {
+  const { file } = await fixture('teach.mp4', 'video/mp4');
+  assert.equal(file.durationSeconds, null);
+  await runOnce(env, s3, { scheduleGc: false });
+  const updated = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
+  assert.equal(
+    updated.durationSeconds, null,
+    'duration must stay null until something actually probes the container — a byte-size estimate ' +
+    'written into this column reads as a measurement and cannot be told apart from one downstream',
+  );
+  assert.equal(updated.scanStatus, 'clean');
+});
+
+test('file.process blocks a file whose stored size does not match what was declared', async () => {
+  // Declared 18 bytes at initiate/complete, but the object in storage is bigger.
+  // Presigned ContentLength makes this unreachable through the normal path; the
+  // worker is the backstop for anything written another way (2026-07-18 audit).
+  const { file } = await fixture('mismatch.pdf', 'application/pdf', 9_999_999);
+  await runOnce(env, s3, { scheduleGc: false });
+  const updated = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
+  assert.equal(updated.scanStatus, 'blocked', 'a size mismatch must never be served as clean');
 });
 
 test('file.process marks clean and publishes outbox after register', async () => {
@@ -167,11 +184,3 @@ test('file.process blocks virus-named files', async () => {
   assert.equal(updated.scanStatus, 'blocked');
 });
 
-test('file.process probes duration for video when null', async () => {
-  const { file } = await fixture('teach.mp4', 'video/mp4');
-  assert.equal(file.durationSeconds, null);
-  await runOnce(env, s3, { scheduleGc: false });
-  const updated = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
-  assert.ok(updated.durationSeconds != null && updated.durationSeconds >= 1);
-  assert.equal(updated.scanStatus, 'clean');
-});
