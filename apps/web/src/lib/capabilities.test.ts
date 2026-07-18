@@ -61,6 +61,20 @@ describe('capabilitiesFromMemberships', () => {
     expect(c.manageCycles).toBe(false);
   });
 
+  // submitEvidence drives the "+ ส่งหลักฐาน" nav entry. It must mirror the
+  // createEvidence row in permissions.yaml — showing it to a role the API will
+  // reject is a dead end, hiding it from a role that owns evidence is the
+  // discoverability bug this capability was added to fix.
+  it('submitEvidence: exactly the roles createEvidence grants', () => {
+    for (const role of ['teacher', 'deputy', 'director', 'school_admin'] as Role[]) {
+      expect(capabilitiesFromMemberships([m(role)]).submitEvidence).toBe(true);
+    }
+    for (const role of ['evaluator', 'area_admin'] as Role[]) {
+      expect(capabilitiesFromMemberships([m(role)]).submitEvidence).toBe(false);
+    }
+    expect(capabilitiesFromMemberships([]).submitEvidence).toBe(false);
+  });
+
   it('CAPABILITY_ROLES lists only known Role values', () => {
     const known: Role[] = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin'];
     for (const roles of Object.values(CAPABILITY_ROLES)) {

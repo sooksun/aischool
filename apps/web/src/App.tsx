@@ -46,12 +46,21 @@ function AppNav() {
   const location = useLocation();
   if (!user || location.pathname === '/login') return null;
 
-  const { manageCycles, scoreAsCommittee, viewReports } = capabilities;
-  if (!manageCycles && !scoreAsCommittee && !viewReports) return null;
+  const { manageCycles, scoreAsCommittee, viewReports, submitEvidence } = capabilities;
+  if (!manageCycles && !scoreAsCommittee && !viewReports && !submitEvidence) return null;
 
   return (
     <nav className="app-nav" aria-label="เมนูหลัก">
       <Link to="/" className={location.pathname === '/' ? 'active' : ''}>หลักฐานของฉัน</Link>
+      {/* The only other way in is the floating '+' on the evidence list, whose
+          label lives in aria-label — visible to a screen reader, invisible to
+          everyone else. A teacher who was never shown that button cannot find
+          upload at all, so the primary action gets a named nav entry. */}
+      {submitEvidence && (
+        <Link to="/evidence/new" className={location.pathname === '/evidence/new' ? 'active' : ''}>
+          + ส่งหลักฐาน
+        </Link>
+      )}
       {manageCycles && (
         <Link to="/director/cycles" className={location.pathname.startsWith('/director') ? 'active' : ''}>
           จัดการรอบการประเมิน
