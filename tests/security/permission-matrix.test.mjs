@@ -322,6 +322,19 @@ test('X-School-Id header behavior: single membership ignores it safely; multi-me
   const multiUser = await prisma.userAccount.create({ data: { email: `perm-multi-${randomUUID()}@x.io`, displayName: 'Multi', status: 'active', passwordHash: await argonHash(multiPassword) } });
   await prisma.schoolMembership.create({ data: { userId: multiUser.id, schoolId: school.id, role: 'teacher', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
   await prisma.schoolMembership.create({ data: { userId: multiUser.id, schoolId: otherSchool.id, role: 'teacher', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
+  // Staff at BOTH schools. Required because listEvidence is the probe below and
+  // 'teacher' holds an 'own' grant on it: without a personnel profile at the
+  // resolved school there is no owner to scope to, and the operation now denies
+  // with PERM-001 (2026-07-18 audit — it previously returned an UNFILTERED list,
+  // which made this assertion pass for the wrong reason and only looked correct
+  // because otherSchool happens to hold no evidence). Keeping the probe honest:
+  // a 200 here must mean "the header resolved the school", not "the owner filter
+  // silently vanished". See tests/security/own-scope-null-personnel.test.mjs.
+  for (const schoolId of [school.id, otherSchool.id]) {
+    await prisma.personnelProfile.create({
+      data: { schoolId, userId: multiUser.id, fullName: 'Multi', positionRole: 'teacher', rankLevelCode: 'perm_kru' },
+    });
+  }
   const multiLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: multiUser.email, password: multiPassword } });
   const multiToken = multiLogin.json().access_token;
 

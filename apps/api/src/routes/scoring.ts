@@ -66,8 +66,16 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
 
     let evaluateePersonnelId: string | undefined;
     let committeeEvaluatorUserId: string | undefined;
-    if (grant === 'own') evaluateePersonnelId = auth.personnel?.id;
-    else if (grant === 'committee') committeeEvaluatorUserId = auth.userId;
+    // No personnel profile => DENY. An undefined evaluateePersonnelId is not a
+    // narrower filter, it is NO filter, and would expose every assignment in the
+    // round (incl. each colleague's full committee) to an 'own'-scoped caller
+    // (2026-07-18 audit — same shape as the listEvidence fix).
+    if (grant === 'own') {
+      if (!auth.personnel) {
+        throw new ApiError('PERM-001', 'own-scoped role has no personnel profile at this school');
+      }
+      evaluateePersonnelId = auth.personnel.id;
+    } else if (grant === 'committee') committeeEvaluatorUserId = auth.userId;
 
     const { items, total } = await listAssignmentsForRound(roundId, {
       evaluateePersonnelId, committeeEvaluatorUserId, page: q.page, pageSize: q.page_size,

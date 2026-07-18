@@ -81,10 +81,20 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
 
     // 'own' forces the filter to the caller regardless of what the client asked for
     // — this is the enforcement point, not a UI nicety (SEC-TEN-1 applied to roles,
-    // not just schools).
-    let ownerFilter = grant === 'own' ? auth.personnel?.id : q.owner_personnel_id;
-    if (grant === 'own' && q.owner_personnel_id && q.owner_personnel_id !== auth.personnel?.id) {
-      throw new ApiError('PERM-001', "own-scoped role may not list another owner's evidence");
+    // not just schools). No personnel profile => DENY, never an absent filter: an
+    // undefined ownerPersonnelId reaches Prisma as "no owner constraint at all",
+    // which silently widens 'own' to the entire school (2026-07-18 audit).
+    let ownerFilter: string | undefined;
+    if (grant === 'own') {
+      if (!auth.personnel) {
+        throw new ApiError('PERM-001', 'own-scoped role has no personnel profile at this school');
+      }
+      if (q.owner_personnel_id && q.owner_personnel_id !== auth.personnel.id) {
+        throw new ApiError('PERM-001', "own-scoped role may not list another owner's evidence");
+      }
+      ownerFilter = auth.personnel.id;
+    } else {
+      ownerFilter = q.owner_personnel_id;
     }
 
     let ownerFilterIn: string[] | undefined;
