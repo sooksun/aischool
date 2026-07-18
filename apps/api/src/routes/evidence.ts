@@ -257,9 +257,12 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     const category = await getEvidenceCategoryById(evidence.categoryId);
     if (!category) throw new ApiError('SYS-001', "evidence's own category vanished");
 
-    if (!category.allowedMimeTypes.includes(body.content_type)) {
+    // allowed_mime_types is a JSON column since ADR-0008 (MySQL has no scalar
+    // lists) — seed/tests only ever write a string array into it.
+    const allowedMimeTypes = (category.allowedMimeTypes ?? []) as string[];
+    if (!allowedMimeTypes.includes(body.content_type)) {
       throw new ApiError('UPL-001', `content type ${body.content_type} not allowed for category ${category.code}`,
-        [{ field: 'content_type', issue: `must be one of: ${category.allowedMimeTypes.join(', ')}` }]);
+        [{ field: 'content_type', issue: `must be one of: ${allowedMimeTypes.join(', ')}` }]);
     }
     if (category.maxByteSize && BigInt(body.byte_size) > category.maxByteSize) {
       throw new ApiError('UPL-002', `file exceeds ${category.maxByteSize} bytes for category ${category.code}`);

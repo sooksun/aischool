@@ -46,7 +46,7 @@
     "@node-rs/argon2": "^2.0.2",
     "@playwright/test": "^1.51.0",
     "js-yaml": "^4.3.0",
-    "pg": "^8.13.1",
+    "mysql2": "^3.23.0",
     "prisma": "^6.19.3"
   }
 }

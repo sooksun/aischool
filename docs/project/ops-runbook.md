@@ -23,8 +23,8 @@ Same architecture everywhere: **Node API + SPA + PostgreSQL + MinIO (S3 API)**. 
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | postgres, api/worker `DATABASE_URL` | Strong password; rotate with re-encrypt plan |
-| `DATABASE_URL` | api, worker (dev / process) | Staging compose builds this from POSTGRES_* |
+| `MYSQL_ROOT_PASSWORD` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | mysql, api/worker `DATABASE_URL` | Strong passwords; rotate with re-encrypt plan (ADR-0008) |
+| `DATABASE_URL` | api, worker (dev / process) | Staging compose builds this from MYSQL_*; dev uses Laragon MySQL `mysql://root@localhost:3306/seip` |
 | `JWT_SECRET` | api | ≥ 32 characters; rotating invalidates sessions |
 | `S3_ENDPOINT` | api, worker | Staging internal: `http://minio:9000` |
 | `S3_BUCKET` | api, worker, minio-init | Private bucket; no anonymous read |
@@ -54,7 +54,7 @@ Templates:
 4. Confirm health:
    ```bash
    docker compose -f docker-compose.staging.yml --env-file .env.staging ps
-   # Expect: postgres, minio, api, worker, web (minio-init exited 0)
+   # Expect: mysql, minio, api, worker, web (minio-init exited 0)
    # API container healthcheck is TCP :3001; process probe:
    curl -sS -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:3001/api/v1/auth/login \
      -H 'content-type: application/json' -d '{}'
@@ -144,24 +144,28 @@ Tests may replace the process singleton via `installLoginRateLimiterForTests` an
 
 ## 5. Backup and restore (release gate subject)
 
-Evidence videos and evaluation rows are **irreplaceable**. Backup **both** Postgres and MinIO on the same schedule (or document RPO/RTO if staggered).
+Evidence videos and evaluation rows are **irreplaceable**. Backup **both** MySQL and MinIO on the same schedule (or document RPO/RTO if staggered).
 
-### 5.1 PostgreSQL — backup
+### 5.1 MySQL — backup (ADR-0008)
 
 ```bash
 # Staging compose network; adjust container name from `docker compose ps`
-docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T postgres \
-  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "backup-seip-$(date +%Y%m%d).dump"
+docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T mysql \
+  mysqldump -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --triggers --routines \
+  "$MYSQL_DATABASE" > "backup-seip-$(date +%Y%m%d).sql"
 ```
 
+`--single-transaction` gives a consistent InnoDB snapshot without locking;
+`--triggers` matters here — the append-only audit triggers and the
+active_uk_key triggers are part of the schema's integrity, not decoration.
 Store dumps on encrypted media **off the app disk** (or second NAS on-prem). Retain per school policy (entity-dictionary retention intents: cycle+N / evidence+N).
 
-### 5.2 PostgreSQL — restore
+### 5.2 MySQL — restore
 
 ```bash
 # Destructive — confirm environment first
-docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T postgres \
-  pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists < backup-seip-YYYYMMDD.dump
+docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T mysql \
+  mysql -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < backup-seip-YYYYMMDD.sql
 ```
 
 Then re-run `prisma migrate deploy` if restore is older than current migrations.

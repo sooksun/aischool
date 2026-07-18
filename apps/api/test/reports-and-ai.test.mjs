@@ -244,7 +244,8 @@ test('createReport enqueues worker; runOnce fills payload and section refs', asy
   assert.equal(report.template_code, 'PA2_s');
 
   const job = await prisma.workerJob.findFirst({
-    where: { jobType: 'report.generate', payload: { path: ['report_id'], equals: report.id } },
+    // MySQL provider takes a JSONPath string here, not the Postgres array form (ADR-0008)
+    where: { jobType: 'report.generate', payload: { path: '$.report_id', equals: report.id } },
   });
   // Prisma JSON path filter may vary — fall back to scan
   const jobs = await prisma.workerJob.findMany({

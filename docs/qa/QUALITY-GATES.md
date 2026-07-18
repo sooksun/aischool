@@ -63,13 +63,21 @@ export DATABASE_URL=... JWT_SECRET=... S3_*=... PORT=3011
 npm run build:libs && npm run build --workspace apps/api
 node apps/api/dist/index.js
 
-# terminal 2:
+# terminal 2 (optional — playwright.config spawns vite itself when E2E_BASE_URL is unset):
 npm run dev --workspace apps/web
 
 # terminal 3:
 npx playwright install chromium
 npm run test:e2e
 ```
+
+**Windows PowerShell 5.1:** `&&` is a parser error — chain with `;` or separate
+lines (`docker compose up -d; npm run db:migrate; npm run db:seed`), and set env
+vars as `$env:DATABASE_URL = "..."` before `npm run test:e2e` (global-setup needs
+it to seed fixtures). The spawned vite is forced to `--host 127.0.0.1` in
+playwright.config.ts because on Windows vite's default host can bind IPv6-only
+(`[::1]`), which the IPv4 `baseURL` poll never reaches (found 2026-07-18 — the
+local webServer path had never actually run on Windows before that).
 
 CI starts Postgres, MinIO, migrate+seed, API, Vite, then Playwright Chromium.
 Fixture users from `tests/e2e/global-setup.mjs`:
@@ -111,6 +119,40 @@ passing on the same tree that introduced CCR-008 + the committee-integrity fix:
 | `npm run gate:contracts` | exit 0 — openapi 2.3.0, generated types + constants in sync |
 | `npm run gate:ownership` | exit 0 |
 | `npm run gate:dep-audit` | exit 0 — 0 vulnerabilities |
+
+## Verified runs (2026-07-18, local — full suite incl. e2e, Windows host)
+
+Against the shared dev compose stack (:5433/:9000), migrate deploy (no pending) +
+seed (792 level rows). All green: `test:backend` 19/19 · api integration 29/29 ·
+worker 9/9 · database 9/9 · `test:security` 3/3 · `typecheck` all workspaces ·
+gates ownership/contracts/dep-audit exit 0 · **`test:e2e` 10/10** — the first
+time the L2 depth specs ever ran green anywhere (CI does not run on `feat/*`
+branches, and the local webServer path was broken on Windows — see the
+PowerShell/IPv4 note above). The run surfaced and fixed **5 authoring bugs in
+`flows-depth.spec.ts`** (substring locators hitting "ไม่ผ่าน…", regex passed to
+`selectOption`, missing shell-wait before `page.goto` mid-login, missing
+`page.reload()` before asserting sessionStorage rotation) — all test bugs; no
+app defects found. Two first-run-only flakes (1× api integration, 2× worker
+file-process) appeared on the cold stack and vanished on re-run — consistent
+with cross-suite state in the shared dev DB; the disposable-stack discipline
+above remains the recommendation for release verification.
+
+## Verified runs (2026-07-18, local — ADR-0008 MySQL migration, full suite + e2e)
+
+Engine switched PostgreSQL → **MySQL 8.0.30** (Laragon host server, ADR-0008);
+migrations rebaselined (init + constraints in MySQL dialect), backend raw-SQL
+tests ported pg → mysql2. Everything re-verified on the same day against
+`mysql://root@localhost:3306/seip`:
+
+| Command | Result |
+|---|---|
+| `npm run db:migrate` + `db:seed` | exit 0 — 2 migrations, 792 level rows (432+360) |
+| `npm run test:backend` | 19/19 — CHECKs, BINARY email check, trigger-maintained `active_uk_key`, generated `pa_uk_key` + threshold, append-only triggers all enforced by MySQL itself |
+| `npm run test:integration --workspace apps/api` | 29/29 (one Prisma JSON-path filter ported to `'$.field'` form) |
+| worker / database / security suites | 9/9 · 9/9 · 3/3 |
+| `npm run typecheck` / `lint` / `build` / `test:unit` | all green (one cast added: evidence.ts UPL-001 `allowed_mime_types` Json) |
+| `npm run gate:ownership` / `gate:contracts` | exit 0 — contracts untouched by the engine swap |
+| **`npm run test:e2e`** | **10/10** — upload → scan-gated download, session refresh, report + PDF, chair scoring, all against Laragon MySQL |
 
 **Branch protection (user action still required):** `test:unit` / `test:integration` /
 `test:security` / `typecheck` / `build` / `lint` are armed and green but NOT in the

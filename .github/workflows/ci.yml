@@ -163,19 +163,20 @@ jobs:
     # (the previous approach here) overrides startup with a no-op shell that
     # exits immediately, so the server process never runs at all.
     services:
-      postgres:
-        image: postgres:17-alpine
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_USER: seip
-          POSTGRES_PASSWORD: seip_ci
-          POSTGRES_DB: seip
+          MYSQL_ROOT_PASSWORD: seip_ci_root
+          MYSQL_USER: seip
+          MYSQL_PASSWORD: seip_ci
+          MYSQL_DATABASE: seip
         ports:
-          - 5432:5432
+          - 3306:3306
         options: >-
-          --health-cmd "pg_isready -U seip -d seip"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pseip_ci_root"
+          --health-interval 5s --health-timeout 5s --health-retries 15
     env:
-      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
+      DATABASE_URL: mysql://seip:seip_ci@localhost:3306/seip
       S3_ENDPOINT: http://localhost:9000
       S3_BUCKET: seip-evidence
       S3_ACCESS_KEY: seip_ci
@@ -244,19 +245,20 @@ jobs:
     name: "Gate: migration validation"
     runs-on: ubuntu-latest
     services:
-      postgres:
-        image: postgres:17-alpine
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_USER: seip
-          POSTGRES_PASSWORD: seip_ci
-          POSTGRES_DB: seip
+          MYSQL_ROOT_PASSWORD: seip_ci_root
+          MYSQL_USER: seip
+          MYSQL_PASSWORD: seip_ci
+          MYSQL_DATABASE: seip
         ports:
-          - 5432:5432
+          - 3306:3306
         options: >-
-          --health-cmd "pg_isready -U seip -d seip"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pseip_ci_root"
+          --health-interval 5s --health-timeout 5s --health-retries 15
     env:
-      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
+      DATABASE_URL: mysql://seip:seip_ci@localhost:3306/seip
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -270,7 +272,7 @@ jobs:
       - name: Validate schema
         if: steps.arm.outputs.armed == 'true'
         run: npx --yes prisma@6 validate
-      - name: Apply migrations up (proves the up-path against a real Postgres)
+      - name: Apply migrations up (proves the up-path against a real MySQL)
         if: steps.arm.outputs.armed == 'true'
         run: npx --yes prisma@6 migrate deploy
         # No `migrate diff` drift check on purpose: the constraints migration adds
@@ -288,23 +290,24 @@ jobs:
     name: "Gate: permission tests"
     runs-on: ubuntu-latest
     # Generated FROM permissions.yaml (SEC-TEN-5) against the real API, so it needs
-    # the same Postgres + MinIO as the integration gate — see that job's comments
+    # the same MySQL + MinIO as the integration gate — see that job's comments
     # for why services has no compose-style init container, and why MinIO is
     # started as a manual step below rather than a `services:` entry.
     services:
-      postgres:
-        image: postgres:17-alpine
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_USER: seip
-          POSTGRES_PASSWORD: seip_ci
-          POSTGRES_DB: seip
+          MYSQL_ROOT_PASSWORD: seip_ci_root
+          MYSQL_USER: seip
+          MYSQL_PASSWORD: seip_ci
+          MYSQL_DATABASE: seip
         ports:
-          - 5432:5432
+          - 3306:3306
         options: >-
-          --health-cmd "pg_isready -U seip -d seip"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pseip_ci_root"
+          --health-interval 5s --health-timeout 5s --health-retries 15
     env:
-      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
+      DATABASE_URL: mysql://seip:seip_ci@localhost:3306/seip
       S3_ENDPOINT: http://localhost:9000
       S3_BUCKET: seip-evidence
       S3_ACCESS_KEY: seip_ci
@@ -348,21 +351,22 @@ jobs:
   e2e-smoke:
     name: "Gate: e2e smoke"
     runs-on: ubuntu-latest
-    # SEIP-QA-004: login → evidence list against real api+web+Postgres+MinIO.
+    # SEIP-QA-004: login → evidence list against real api+web+MySQL+MinIO.
     services:
-      postgres:
-        image: postgres:17-alpine
+      mysql:
+        image: mysql:8.0
         env:
-          POSTGRES_USER: seip
-          POSTGRES_PASSWORD: seip_ci
-          POSTGRES_DB: seip
+          MYSQL_ROOT_PASSWORD: seip_ci_root
+          MYSQL_USER: seip
+          MYSQL_PASSWORD: seip_ci
+          MYSQL_DATABASE: seip
         ports:
-          - 5432:5432
+          - 3306:3306
         options: >-
-          --health-cmd "pg_isready -U seip -d seip"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pseip_ci_root"
+          --health-interval 5s --health-timeout 5s --health-retries 15
     env:
-      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
+      DATABASE_URL: mysql://seip:seip_ci@localhost:3306/seip
       S3_ENDPOINT: http://localhost:9000
       S3_BUCKET: seip-evidence
       S3_ACCESS_KEY: seip_ci

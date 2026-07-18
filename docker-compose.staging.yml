@@ -7,28 +7,31 @@
 #   2. docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --build
 #   3. Put nginx (infra/nginx/seip-staging.conf.example) in front for TLS.
 #
-# Services: postgres + minio + api + worker + web.
+# Services: mysql + minio + api + worker + web (ADR-0008: MySQL 8).
 # Dev stack remains docker-compose.yml (throwaway credentials, host ports).
 # Do not copy staging secrets into the dev compose.
 
 name: seip-staging
 
 services:
-  postgres:
-    image: postgres:17-alpine
+  mysql:
+    image: mysql:8.0
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-seip}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER:?set MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-seip}
+    # Match the dev/Laragon charset so dumps move between environments cleanly.
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
-      - seip_staging_pgdata:/var/lib/postgresql/data
-    # Staging: do not publish Postgres to the host by default. App containers
+      - seip_staging_mysqldata:/var/lib/mysql
+    # Staging: do not publish MySQL to the host by default. App containers
     # reach it on the internal network. Uncomment for emergency DBA access only.
     # ports:
-    #   - "127.0.0.1:5433:5432"
+    #   - "127.0.0.1:3307:3306"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u $$MYSQL_USER -p$$MYSQL_PASSWORD"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -43,7 +46,7 @@ services:
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
     volumes:
       - seip_staging_minio:/data
-    # Same rule as Postgres: keep S3 API off the public interface; nginx may
+    # Same rule as MySQL: keep S3 API off the public interface; nginx may
     # proxy only if you intentionally need browser-side console (usually no).
     # ports:
     #   - "127.0.0.1:9000:9000"
@@ -82,7 +85,7 @@ services:
       dockerfile: infra/docker/Dockerfile.api
     restart: unless-stopped
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       minio:
         condition: service_healthy
@@ -91,7 +94,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3001"
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}?schema=public
+      DATABASE_URL: mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-seip}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET min 32 chars}
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: ${S3_BUCKET:-seip-evidence}
@@ -122,7 +125,7 @@ services:
       dockerfile: infra/docker/Dockerfile.worker
     restart: unless-stopped
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
       minio:
         condition: service_healthy
@@ -133,7 +136,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}?schema=public
+      DATABASE_URL: mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-seip}
       S3_ENDPOINT: http://minio:9000
       S3_BUCKET: ${S3_BUCKET:-seip-evidence}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
@@ -163,5 +166,5 @@ networks:
     driver: bridge
 
 volumes:
-  seip_staging_pgdata:
+  seip_staging_mysqldata:
   seip_staging_minio:
