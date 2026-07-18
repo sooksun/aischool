@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Sprint 1 — First production features** (opened 2026-07-17 when the ARCH-002 merge went green on develop, run `b5c6d6a`). Single-agent mode per ADR-0004.
 
+> ⚠️ **Not releasable.** Three blockers (B-1/B-2/B-3 under Current Objectives) mean a fresh install cannot create a login and no score can be submitted through the API. See "Audit correction — 2026-07-19".
+
 ## Development Model
 Claude Code is the sole developer (architect + backend + frontend + QA); the user is the final approver. The multi-AI team model (Codex/Antigravity/Grok) was retired by ADR-0004 — its docs remain with SUPERSEDED banners.
 
@@ -24,9 +26,9 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 4. ~~SEIP-QA-003~~ **DONE** — permission matrix tests
 5. ~~SEIP-UI-001~~ **DONE** — evidence SPA (3db868d)
 6. ~~SEIP-OPS-002~~ **DONE** — develop CI fix (556958c)
-7. ~~SEIP-API-002~~ **DONE** — cycles + committee scoring (remaining 11 ops); all 27 contract operations implemented
-8. Contracts at **v2.1.0** (CCR-005 reports + AI suggest; was 2.0.0 after CCR-004)
-9. ~~SEIP-WORKER-001~~ **DONE** — outbox + file.process (scan/duration) + storage GC
+7. ~~SEIP-API-002~~ **DONE** — cycles + committee scoring (remaining 11 ops); all 27 contract operations implemented *(contract has since grown to 35 ops; all 35 are implemented)*
+8. Contracts at **v2.8.0** (was v2.1.0 at CCR-005; CCR-010 lazy download_url → 2.5.0, CCR-011 ReportPayloadV1 → 2.6.0, CCR-012 `unscanned` → 2.7.0, CCR-013 rubric text → 2.8.0)
+9. ~~SEIP-WORKER-001~~ **DONE** — outbox + file.process + storage GC. **Superseded in part by CCR-012:** the virus-scan stub and the duration probe were *deleted*, not fixed — `file.process` now only verifies stored size against declared size. There is no scanner. See "Audit correction" below.
 10. ~~SEIP-UI-002~~ **DONE** — director/admin UI for cycles, rounds, committee assignment; handoff `.ai-team/handoffs/SEIP-UI-002.md`
 11. ~~SEIP-OPS-003~~ **DONE** — staging compose + TLS/backup runbook + worker (`6b8b66c` on develop)
 12. ~~Wave D+E reports/AI~~ **DONE** (`f014cf8`) — ARCH-003/API-003/WORKER-002/UI-004 + ARCH-005/API-004/UI-005
@@ -41,9 +43,23 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 21. ~~Cleanup L1~~ **DONE** — PDF UX draft/review fidelity (not official plate)
 22. ~~Cleanup L2~~ **DONE** — e2e depth (upload, score, report/PDF, session refresh)
 23. ~~DB engine migration~~ **DONE 2026-07-18** — PostgreSQL → MySQL 8 per ADR-0008 (Laragon localhost dev; staging/CI containers swapped; migrations rebaselined; full suite + e2e green on MySQL).
-24. **Sprint 2+ remaining** — multi-instance Redis rate limits *only if* no trusted edge; pixel-perfect official paper plates (Protected Artifact).
+24. ~~Cleanup L2-a~~ **DONE 2026-07-19** — `.category-card` selected-state CSS matched `aria-pressed` while the markup renders `role="radio" aria-checked`; the rule never applied, so picking an evidence category gave sighted users no visual confirmation. Verified fixed against the real stylesheet on the dev server.
+25. **Sprint 2 — BLOCKERS (must precede any release; each needs a CCR + major bump):**
+    - **B-1 Onboarding path.** No operation in `openapi.yaml` creates `School` / `UserAccount` / `SchoolMembership` / `PersonnelProfile`, and `prisma/seed.mjs` seeds none of them. `hashPassword` has no caller outside its own test. **A fresh install cannot produce a first login.**
+    - **B-2 PerformanceAgreement + AgreementChallenge.** Both models have **zero references** in `apps/` and `packages/`. `submitMyScores` therefore always fails the workload gate (`apps/api/src/routes/scoring.ts:220-227`, VAL-002/SCORE-004). ประเด็นท้าทาย (ส่วนที่ 2) is **40% of the วPA score** and has no code at all.
+    - **B-3 Approval.** Schema-only. Reports reach `pending_approval` and stall permanently.
+26. **Sprint 2+ remaining** — multi-instance Redis rate limits *only if* no trusted edge; pixel-perfect official paper plates (Protected Artifact); real file scanning to replace the deleted stub (CCR-012).
 
-**Product slice (REPORTS-AI branch):** login → evidence → MinIO/worker scan → mapping (+ local AI suggest) → cycles/rounds → 3-evaluator scoring → structured PA report generation (JSON + section refs). PDF layout still deferred.
+## Audit correction — 2026-07-19
+
+A full evidence-based code audit was run against `feat/cleanup-L2-e2e-depth` (`42173e0`). **It contradicted this document.** The previous wording of this section claimed the product slice "works" end-to-end; that is true only because `tests/e2e/global-setup.mjs:196` and `apps/api/test/scoring-flow.test.mjs:114` write bootstrap rows **straight into Prisma, bypassing the API**. Corrected statement:
+
+**Product slice, as reachable through the API today:** login → evidence upload → MinIO → `file.process` size check (no scan) → mapping (+ local AI suggest) → cycles/rounds → committee assignment → report JSON + section refs → on-demand PDF.
+**Not reachable through the API:** creating the first user/school/personnel (B-1); linking a PerformanceAgreement, hence submitting any score (B-2); ประเด็นท้าทาย (B-2); approving a report (B-3).
+
+Audited completeness ≈ **70%** weighted. Quality of what exists is high — 35/35 contract operations implemented with zero stubs or TODOs, `permission-guard.ts` reads `permissions.yaml` at runtime and fails closed, zero raw SQL, 180 verbatim ก.ค.ศ. paragraphs seeded, migration drift verified zero, `npm run typecheck` clean across all 6 workspaces, 164 real test cases. **The gap is missing scope, not rot** — closing it is a sprint of new contract operations, not bug-fixing.
+
+Lower-severity findings (full list in the audit session): `completeFileUpload` does not re-validate category rules despite a comment at `apps/api/src/routes/evidence.ts:289` claiming it does; 3 taxonomy routes never call `resolveGrant`; 4 FK fields unvalidated (→ P2003 500s, one cross-tenant write); outbox dispatch has no backoff and no dead-letter; `permissions.yaml` promises an `access_denied` AuditEvent that is emitted nowhere; the n8n key in `autokey.md` is gitignored but **not rotated**; backups are manual copy-paste per `ops-runbook.md:147`; no test-coverage instrumentation exists anywhere.
 
 
 ### Incident: develop CI broke on the API-001+UI-001 merge, fixed same-day
@@ -75,3 +91,5 @@ See `.ai-team/task-board.yaml` (single tracker).
 - Uploaded evidence contains personal data (PDPA) — never in git, storage design server-side
 - Video storage can grow quickly (mitigated by ADR-0005 MinIO on-prem + retention policy)
 - Solo-agent risk (replaces multi-agent drift risk): no independent reviewer — mitigate with CI gates + user review before contract lock
+- **Green CI is compatible with an undeployable system.** The e2e and scoring suites seed `PerformanceAgreement` and all identity rows directly through Prisma, so they prove the scoring *logic* while saying nothing about whether the flow is *reachable*. This masked B-1/B-2 until the 2026-07-19 audit. Any future fixture shortcut that bypasses the API must be recorded in `docs/qa/QUALITY-GATES.md` as a coverage caveat.
+- **Evidence store has no malware scanning.** CCR-012 deleted the filename-matching stub rather than replacing it; `unscanned` is disclosed in the UI but files are still served (`apps/api/src/routes/evidence.ts:376`). Accepted knowingly — revisit before any multi-school deployment.
