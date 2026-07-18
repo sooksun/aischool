@@ -33,15 +33,25 @@ export async function enqueueOutboxEvent(
   });
 }
 
-/** Claim unpublished outbox rows for dispatch. Same optimistic-CAS pattern as
- * jobs.ts's claimPendingJobs: select candidates, then a per-row conditional
- * updateMany (only succeeds if still unpublished) before treating a row as
- * claimed — a losing racer's updateMany affects 0 rows and the row is skipped,
- * rather than two concurrent dispatch passes both processing it. There's no
- * separate "claimed" flag on this table, so the claim reuses `attempts`
- * (already incremented on failure by markOutboxFailed) as the CAS gate — after
- * this change it also increments once per claim, which is the more standard
- * meaning for an attempts counter anyway. */
+/**
+ * Claim unpublished outbox rows for dispatch, one dispatcher at a time per row.
+ *
+ * The CAS gate is the `attempts` value read with the candidate — classic
+ * optimistic concurrency. A losing racer's WHERE no longer matches (the winner
+ * already incremented), so its updateMany affects 0 rows and it skips that row.
+ *
+ * The previous version gated on `publishedAt: null` alone while only
+ * incrementing `attempts`. Nothing in the claim changed the column being tested,
+ * so `publishedAt` was still null for the second racer: BOTH got count === 1 and
+ * both claimed the same row. The comment asserted the guarantee; the code never
+ * implemented it (2026-07-18 audit). Masked so far only because a single worker
+ * process runs the loop.
+ *
+ * WorkerJob does this with a real state transition (pending → running, jobs.ts).
+ * OutboxEvent has no status column, so `attempts` carries the CAS — one increment
+ * per claim, which is also what an attempts counter should mean. markOutboxFailed
+ * therefore does NOT increment again; the claim already counted the try.
+ */
 export async function claimUnpublishedOutbox(limit = 20) {
   const candidates = await prisma.outboxEvent.findMany({
     where: { publishedAt: null, attempts: { lt: 10 } },
@@ -52,7 +62,7 @@ export async function claimUnpublishedOutbox(limit = 20) {
   const claimed = [];
   for (const row of candidates) {
     const result = await prisma.outboxEvent.updateMany({
-      where: { id: row.id, publishedAt: null },
+      where: { id: row.id, publishedAt: null, attempts: row.attempts },
       data: { attempts: { increment: 1 } },
     });
     if (result.count === 1) {
@@ -69,12 +79,14 @@ export async function markOutboxPublished(id: string) {
   });
 }
 
+/** Records why a dispatch failed. Deliberately does NOT touch `attempts` —
+ * claimUnpublishedOutbox already counted this try when it took the row, and
+ * incrementing here too burned the `attempts < 10` retry budget at 2 per cycle,
+ * retiring an event after 5 real attempts instead of 10. Mirrors markJobFailed,
+ * which leaves the counter to claimPendingJobs for the same reason. */
 export async function markOutboxFailed(id: string, error: string) {
   return prisma.outboxEvent.update({
     where: { id },
-    data: {
-      attempts: { increment: 1 },
-      lastError: error.slice(0, 2000),
-    },
+    data: { lastError: error.slice(0, 2000) },
   });
 }
