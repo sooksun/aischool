@@ -20,7 +20,7 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 | Build | `npm run build` | `Gate: build` | self-arming | `scripts.build` defined |
 | Migration validation | `npx prisma validate` (DB-001 extends: `migrate diff` up/down) | `Gate: migration validation` | self-arming | `prisma/schema.prisma` exists |
 | Permission tests | `npm run test:security` — asserts the `permissions.yaml` matrix (esp. cross-school RES-001) | `Gate: permission tests` | self-arming | files in `tests/security/` |
-| E2E smoke | `npm run test:e2e` (Playwright: login → evidence list → open submit) | `Gate: e2e smoke` | **LIVE** (SEIP-QA-004) | always; needs Postgres+MinIO+api+web |
+| E2E smoke | `npm run test:e2e` (Playwright: login → evidence list → open submit) | `Gate: e2e smoke` | **LIVE** (SEIP-QA-004) | always; needs MySQL 8 + MinIO + api + web (ADR-0008) |
 | Code owner review | — (not a CI job) | branch protection + CODEOWNERS | policy | requires branch protection (below) |
 
 **Pass thresholds:** every gate is binary (exit 0). `dep-audit` fails on **high+** advisories. oasdiff fails on **breaking** changes only (additive contract changes pass). Secret scan fails on any leak — a confirmed false positive gets an inline `// gitleaks:allow` comment on the exact flagged line (gitleaks' native line-level suppression), with a code comment explaining why it isn't a real secret, reviewed in the same PR. Never skip the gate to work around one. (A repo-wide `.gitleaks.toml` allowlist was tried first for SEIP-API-001's one false positive — `credentials: { ..., secretAccessKey: env.S3_SECRET_KEY }`, gitleaks' `generic-api-key` rule matching the *identifier* `secretAccessKey:` regardless of the RHS being a literal or a variable reference — but its regex/fingerprint matching didn't reliably suppress findings already baked into git history when run through the pinned docker image; the inline comment is simpler, guaranteed to work per-line, and keeps the justification next to the code it excuses.)
@@ -28,6 +28,24 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 **Why the contract check runs on push, not just PRs:** ADR-0004 sanctions committing straight to `develop`, so a PR-only breaking-change check would almost never execute in the real workflow. On `push` it diffs against `github.event.before`; on `pull_request`, against the target branch. Both paths fail the build on a breaking change without an accompanying version bump.
 
 **Authz coverage (SEC-TEN-5):** `gate:contracts` fails if any `operationId` in `openapi.yaml` lacks either a rule in the `permissions.yaml` matrix or an explicit entry under `unauthenticated:` / `any_authenticated:`. An endpoint cannot ship with undocumented authorization.
+
+## Coverage caveats — what a green run does NOT prove
+
+Added 2026-07-19 after a full code audit found the suite passing on a system that cannot be deployed. **A green gate bounds only what it actually exercised.** Every known place where the gates' coverage is narrower than their name suggests is listed here. Keeping this list honest is part of the gate.
+
+**Rule going forward:** any test fixture that reaches past the API — direct Prisma writes, hand-seeded rows, mocked auth — **must be recorded in this section** in the same change that introduces it. A fixture that manufactures state the product cannot manufacture makes the suite prove the wrong thing.
+
+| Caveat | Evidence | Consequence |
+|---|---|---|
+| **Fixtures bypass the API to create state the product cannot create** | `tests/e2e/global-setup.mjs:196` and `apps/api/test/scoring-flow.test.mjs:114` call `performanceAgreement.create` directly; identity rows (school/user/membership/personnel) are likewise inserted straight through Prisma | This is why the suite was green while `submitMyScores` was unreachable and no fresh install could log in. Tracked as `SEIP-BLOCK-001` / `SEIP-BLOCK-002`; BLOCK-002's acceptance criteria require deleting the raw insert |
+| **Permission sweep covers 28 of 31 matrix operations** | `tests/security/permission-matrix.test.mjs:286` asserts `>= 28 * 6`; `completeFileUpload` and `getEvidenceFileDownloadUrl` are absent with no justification comment. `getAssignmentResults` is excluded *deliberately* and documented at `:193-199`, covered instead by `scoring-flow.test.mjs:333` | The two undocumented gaps are both on the PDPA upload/download surface. `gate:contracts` still guarantees they have *declared* authz — only the live assertion is missing |
+| **No coverage instrumentation exists anywhere** | no `coverage` config in any vite/vitest config or `package.json` | The 164 test cases have no denominator. "Unit tests pass" says nothing about what fraction of the code ran |
+| **Three e2e tests skip silently green** | `tests/e2e/flows-depth.spec.ts:82`, `:107`, `:127` — `test.skip(!creds.…)` | If `global-setup.mjs` half-fails in CI, the three deepest flows vanish and the build still reports success. A CI-only `throw` would close this |
+| **Two e2e assertions are too soft to catch failure** | `:103` asserts only that the create-report form closed, not that a report exists; `:121` asserts only `/\.pdf$/i` on the suggested filename | A silently-failing create, or a 0-byte / HTML-error body saved as `.pdf`, both pass |
+| **`Gate: integration tests` does not run the integration suites** | root `test:integration` in `package.json` is byte-identical to `test:backend` (`node --test "tests/backend/*.test.mjs"`) | The job name overstates it. Saved only because `ci.yml:226-231` invokes the three workspace suites separately. Also `ci.yml:216` creates the MinIO bucket *after* the step that would need it |
+| **`file.process` performs no malware scan** | CCR-012 deleted the filename-matching stub rather than replacing it; `apps/worker/src/jobs/file-process.ts:75-82` only compares stored size to declared size | No gate asserts uploaded evidence is safe, because nothing checks. `unscanned` is disclosed in the UI and still served (`apps/api/src/routes/evidence.ts:376`) |
+| **`dep-audit` ignores moderate advisories** | `npm audit --audit-level=high` | Moderate CVEs pass silently. Deliberate, noted here for completeness |
+| **No SAST, no container image scan, no license check** | `.github/workflows/ci.yml` has no CodeQL/Trivy/Grype job despite three Dockerfiles | Image and code-level vulnerability classes are entirely unexamined |
 
 ## Release gates (run before tagging a release from main — not CI jobs yet)
 
@@ -58,7 +76,7 @@ Gate: e2e smoke
 Local (API already on `PORT` matching Vite proxy, default proxy `3011`):
 
 ```bash
-# terminal 1: Postgres + MinIO via docker compose, then:
+# terminal 1: MinIO via docker compose (DB is the host's Laragon MySQL 8, ADR-0008), then:
 export DATABASE_URL=... JWT_SECRET=... S3_*=... PORT=3011
 npm run build:libs && npm run build --workspace apps/api
 node apps/api/dist/index.js
@@ -79,7 +97,7 @@ playwright.config.ts because on Windows vite's default host can bind IPv6-only
 (`[::1]`), which the IPv4 `baseURL` poll never reaches (found 2026-07-18 — the
 local webServer path had never actually run on Windows before that).
 
-CI starts Postgres, MinIO, migrate+seed, API, Vite, then Playwright Chromium.
+CI starts MySQL 8, MinIO, migrate+seed, API, Vite, then Playwright Chromium.
 Fixture users from `tests/e2e/global-setup.mjs`:
 - `e2e-teacher@seip.local` — evidence upload + reports nav
 - `e2e-director@seip.local` — cycles, create report, PDF, chair scoring
