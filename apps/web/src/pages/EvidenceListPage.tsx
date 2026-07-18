@@ -110,6 +110,9 @@ function scanStatusLabel(status: ScanStatus): string {
   switch (status) {
     case 'pending': return 'กำลังสแกน';
     case 'clean': return 'ปลอดภัย';
+    // CCR-012: no scanner ran, so this must not read as a safety verdict —
+    // 'ปลอดภัย' would be the exact claim the platform is not entitled to make.
+    case 'unscanned': return 'ยังไม่ได้สแกน';
     case 'blocked': return 'ถูกกัก';
     default: return status;
   }

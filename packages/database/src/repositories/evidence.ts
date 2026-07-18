@@ -50,13 +50,18 @@ export async function listEvidence(schoolId: string, f: ListEvidenceFilter) {
   return { items, total };
 }
 
-/** Worst-of file scan states for list/detail badges. null = no files. */
+/** Worst-of file scan states for list/detail badges. null = no files.
+ *
+ * Order is pending > blocked > unscanned > clean (CCR-012): 'clean' is only
+ * reported when EVERY file earned it, so one unverified file cannot hide behind
+ * a set of scanned ones. */
 export function aggregateScanStatus(
   files: { scanStatus: string }[],
-): 'pending' | 'clean' | 'blocked' | null {
+): 'pending' | 'clean' | 'unscanned' | 'blocked' | null {
   if (files.length === 0) return null;
   if (files.some((f) => f.scanStatus === 'pending')) return 'pending';
   if (files.some((f) => f.scanStatus === 'blocked')) return 'blocked';
+  if (files.some((f) => f.scanStatus === 'unscanned')) return 'unscanned';
   return 'clean';
 }
 
@@ -241,7 +246,7 @@ export async function getEvidenceFileById(schoolId: string, fileId: string) {
   });
 }
 
-export async function setFileScanStatus(fileId: string, status: 'clean' | 'blocked') {
+export async function setFileScanStatus(fileId: string, status: 'clean' | 'unscanned' | 'blocked') {
   return prisma.evidenceFile.update({ where: { id: fileId }, data: { scanStatus: status } });
 }
 

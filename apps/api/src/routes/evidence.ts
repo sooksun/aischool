@@ -365,8 +365,13 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
 
     const file = detail.files.find((f) => f.id === fileId);
     if (!file) throw new ApiError('RES-001', 'Evidence file not found');
-    if (file.scanStatus !== 'clean') {
-      throw new ApiError('UPL-006', 'File is not available for download until scan_status=clean');
+    // CCR-012: 'unscanned' is served like 'clean'. It means no scanner ran, which
+    // is disclosed through scan_status rather than enforced here — blocking it
+    // would stop the product working on every deployment without a scanner, and
+    // the alternative this replaced was labelling those same files 'clean'.
+    // 'pending' (worker hasn't run) and 'blocked' (quarantined) stay refused.
+    if (file.scanStatus !== 'clean' && file.scanStatus !== 'unscanned') {
+      throw new ApiError('UPL-006', `File is not available for download (scan_status=${file.scanStatus})`);
     }
 
     const { downloadUrl, expiresAt } = await presignDownload(

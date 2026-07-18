@@ -19,6 +19,13 @@ openapi: 3.1.0
 #   detail/complete (no MinIO presign on metadata reads).
 # version 2.6.0 — CCR-011 (additive, cleanup M2): ReportDetail.payload is
 #   ReportPayload (schema_version=1) instead of free-form object.
+# version 2.7.0 — CCR-012 (additive): ScanStatus gains `unscanned`. The platform
+#   ran no malware scanner, and now says so instead of reporting `clean` — the
+#   previous value was written by a stub that only matched on filename. New
+#   response enum value: clients switching exhaustively on ScanStatus must handle
+#   it (all four values were already reachable in principle; only the honesty
+#   changed). Download policy is unchanged for the caller — `unscanned` is served
+#   exactly like `clean`; `blocked`/`pending` still return UPL-006.
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -27,11 +34,12 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.6.0
+  version: 2.7.0
   summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI + PDF)
   description: |
-    Contract v2.6 (CCR-011 cleanup M2) — Report.payload is typed ReportPayload
-    (schema_version=1). v2.5 lazy file download; v2.4 list scan_status; core remains
+    Contract v2.7 (CCR-012) — ScanStatus gains `unscanned`: a deployment with no
+    malware scanner now says so instead of claiming `clean`. v2.6 typed
+    ReportPayload; v2.5 lazy file download; v2.4 list scan_status; core remains
     evidence, PA evaluation, reports, AI suggest.
 
     **Business rules that bind every implementation**
@@ -476,7 +484,7 @@ paths:
     post:
       operationId: completeFileUpload
       summary: 'Phase 2: confirm bytes uploaded; register file and enqueue virus scan'
-      description: Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served only when scan_status=clean (UPL-006).
+      description: Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served when scan_status is clean or unscanned; blocked/pending return UPL-006.
       tags: [evidence]
       parameters:
         - $ref: '#/components/parameters/EvidenceId'
@@ -507,8 +515,10 @@ paths:
       description: |
         Lazy download (CCR-010 / cleanup H2). Call only when the user intends to
         download — `getEvidence` and `completeFileUpload` never presign object
-        storage. Requires `scan_status=clean` (UPL-006); pending/blocked return
-        UPL-006. Same tenancy grants as `getEvidence`. Never returns `storage_uri`.
+        storage. Requires `scan_status` to be `clean` or `unscanned` (CCR-012 —
+        unscanned means no scanner ran, which is disclosed rather than blocked);
+        `pending`/`blocked` return UPL-006. Same tenancy grants as `getEvidence`.
+        Never returns `storage_uri`.
       tags: [evidence]
       parameters:
         - $ref: '#/components/parameters/EvidenceId'
@@ -973,7 +983,17 @@ components:
       description: PA form family × ส/บส variant (layout deferred; code selects payload shape)
     ScanStatus:
       type: string
-      enum: [pending, clean, blocked]
+      enum: [pending, clean, unscanned, blocked]
+      description: |
+        `pending` — queued, the worker has not processed the file yet.
+        `clean` — a scanner ran and found nothing.
+        `unscanned` — the file was processed but NO scanner ran, so the platform
+        makes no claim about its contents (CCR-012). This is the state on any
+        deployment without a malware scanner wired in. It is served like `clean`
+        — the distinction is disclosure, not restriction — and clients are
+        expected to surface it so nobody reads silence as a clean bill of health.
+        `blocked` — quarantined: a scanner rejected it, or the stored object did
+        not match the declared byte_size. Never served (UPL-006).
     RubricLevel:
       type: integer
       minimum: 1
@@ -1217,7 +1237,7 @@ components:
         scan_status:
           description: |
             Aggregate of attached files (CCR-009). null when there are no files.
-            Worst-of order: pending > blocked > clean. Present on list and detail so
+            Worst-of order: pending > blocked > unscanned > clean. Present on list and detail so
             clients never need N+1 detail fetches for list badges.
           oneOf:
             - type: 'null'

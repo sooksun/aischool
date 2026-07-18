@@ -8,7 +8,6 @@ import { PrismaClient } from '@prisma/client';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { registerEvidenceFileWithWorkerJobs } from '@seip/database';
 import { runOnce } from '../dist/loop.js';
-import { stubScanStatus } from '../dist/jobs/file-process.js';
 
 const prisma = new PrismaClient();
 const env = {
@@ -116,12 +115,6 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test('stubScanStatus blocks eicar/virus names', () => {
-  assert.equal(stubScanStatus('report.pdf'), 'clean');
-  assert.equal(stubScanStatus('eicar.com'), 'blocked');
-  assert.equal(stubScanStatus('my-VIRUS-file.bin'), 'blocked');
-});
-
 test('the worker does not invent a duration it never measured', async () => {
   const { file } = await fixture('teach.mp4', 'video/mp4');
   assert.equal(file.durationSeconds, null);
@@ -132,7 +125,7 @@ test('the worker does not invent a duration it never measured', async () => {
     'duration must stay null until something actually probes the container — a byte-size estimate ' +
     'written into this column reads as a measurement and cannot be told apart from one downstream',
   );
-  assert.equal(updated.scanStatus, 'clean');
+  assert.equal(updated.scanStatus, 'unscanned');
 });
 
 test('file.process blocks a file whose stored size does not match what was declared', async () => {
@@ -145,7 +138,7 @@ test('file.process blocks a file whose stored size does not match what was decla
   assert.equal(updated.scanStatus, 'blocked', 'a size mismatch must never be served as clean');
 });
 
-test('file.process marks clean and publishes outbox after register', async () => {
+test('file.process marks unscanned and publishes outbox after register', async () => {
   const { file, evidence } = await fixture('clean-lesson.pdf');
 
   const pendingJobs = await prisma.workerJob.count({
@@ -156,14 +149,14 @@ test('file.process marks clean and publishes outbox after register', async () =>
   await runOnce(env, s3, { scheduleGc: false });
 
   const updated = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
-  assert.equal(updated.scanStatus, 'clean');
+  assert.equal(updated.scanStatus, 'unscanned', 'no scanner ran, so the platform must not claim clean');
 
   const allScan = await prisma.outboxEvent.findMany({
     where: { eventType: 'evidence.file.scan_completed' },
   });
   const mine = allScan.filter((e) => e.payload?.file_id === file.id);
   assert.equal(mine.length, 1);
-  assert.equal(mine[0].payload.scan_status, 'clean');
+  assert.equal(mine[0].payload.scan_status, 'unscanned');
 
   const registered = await prisma.outboxEvent.findMany({
     where: { eventType: 'evidence.file.registered' },
@@ -177,10 +170,14 @@ test('file.process marks clean and publishes outbox after register', async () =>
   assert.equal(active.status, 'active');
 });
 
-test('file.process blocks virus-named files', async () => {
+test('a filename that looks like malware is NOT treated as a scan result', async () => {
+  // The removed stub blocked on the substring "eicar"/"virus" in the filename and
+  // called everything else clean. Renaming a file is not a scan in either
+  // direction, so this now reports unscanned like any other file — the blocked
+  // path is earned by the size check, not by string matching (CCR-012).
   const { file } = await fixture('eicar-test.pdf');
   await runOnce(env, s3, { scheduleGc: false });
   const updated = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
-  assert.equal(updated.scanStatus, 'blocked');
+  assert.equal(updated.scanStatus, 'unscanned');
 });
 

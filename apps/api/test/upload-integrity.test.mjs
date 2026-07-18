@@ -128,6 +128,52 @@ test('the duration requirement is scoped to capped categories only', async () =>
   assert.equal(res.statusCode, 201, 'an uncapped category must not suddenly require duration');
 });
 
+// CCR-012: the download gate keys on scan_status, and `unscanned` — the state
+// every file lands in while no scanner is wired — must be servable. If this ever
+// regresses to `clean`-only, no evidence is downloadable at all.
+test('download gate: unscanned is served, pending and blocked are not', async () => {
+  const content = Buffer.from('%PDF-1.4 gate probe');
+  const res = await initiate(pdfEvidenceId, {
+    content_type: 'application/pdf', byte_size: content.length,
+    checksum_sha256: createHash('sha256').update(content).digest('hex'),
+    original_filename: 'gate.pdf',
+  });
+  const target = res.json();
+  const put = await fetch(target.upload_url, {
+    method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: content,
+  });
+  assert.ok(put.ok, 'a truthful upload must still succeed');
+
+  const complete = await app.inject({
+    method: 'POST', url: `/api/v1/evidence/${pdfEvidenceId}/files/${target.file_id}/complete`,
+    headers: auth(teacherToken),
+    payload: {
+      checksum_sha256: createHash('sha256').update(content).digest('hex'),
+      content_type: 'application/pdf', byte_size: content.length, original_filename: 'gate.pdf',
+    },
+  });
+  assert.equal(complete.statusCode, 200);
+  assert.equal(complete.json().scan_status, 'pending', 'not yet processed by the worker');
+
+  const url = () => app.inject({
+    method: 'GET',
+    url: `/api/v1/evidence/${pdfEvidenceId}/files/${target.file_id}/download-url`,
+    headers: auth(teacherToken),
+  });
+
+  assert.equal((await url()).statusCode, 423, 'pending must not be served (UPL-006)');
+
+  for (const [status, expected] of [['unscanned', 200], ['blocked', 423], ['clean', 200]]) {
+    await prisma.evidenceFile.update({
+      where: { id: target.file_id }, data: { scanStatus: status },
+    });
+    const got = await url();
+    assert.equal(got.statusCode, expected, `scan_status=${status} should return ${expected}`);
+    if (expected === 200) assert.ok(got.json().download_url, `${status} must yield a real URL`);
+    else assert.equal(got.json().code, 'UPL-006');
+  }
+});
+
 test('storage rejects a PUT whose real size differs from the declared byte_size', async () => {
   const declared = Buffer.from('%PDF-1.4 small declared body');
   const actual = Buffer.concat([declared, Buffer.alloc(4096, 0x41)]); // much bigger

@@ -22,16 +22,20 @@ export interface FileProcessPayload {
 }
 
 /**
- * Stub scanner — production would shell out to ClamAV (or similar).
- * Deterministic rules so integration tests don't need a real AV engine:
- * - filename containing "eicar" or "virus" (case-insensitive) → blocked
- * - otherwise clean after HEAD succeeds
+ * There is no malware scanner wired in, so this job reports `unscanned` and the
+ * platform makes no claim about file contents (CCR-012).
+ *
+ * What used to be here matched "eicar"/"virus" against the FILENAME and returned
+ * `clean` for everything else — no bytes were ever read. That verdict drove the
+ * UI badge ("ปลอดภัย"), the scan_completed event, and the UPL-006 download gate,
+ * so the platform asserted a clean bill of health it had never earned on a
+ * PDPA-scoped evidence store. A stub that produces a verdict is worse than no
+ * stub: it is indistinguishable from a real result downstream.
+ *
+ * Wiring ClamAV means streaming the object to `clamd` (INSTREAM) here and mapping
+ * OK → 'clean', FOUND → 'blocked'. Until then `unscanned` is the honest answer,
+ * and its presence in production is the signal that the scanner is missing.
  */
-export function stubScanStatus(originalFilename: string): 'clean' | 'blocked' {
-  const lower = originalFilename.toLowerCase();
-  if (lower.includes('eicar') || lower.includes('virus')) return 'blocked';
-  return 'clean';
-}
 
 /**
  * There is deliberately NO duration probe here.
@@ -72,7 +76,9 @@ export async function processFileJob(
   const storedSize = head.ContentLength;
   const sizeMismatch = storedSize != null && BigInt(storedSize) !== file.byteSize;
 
-  const scanStatus = sizeMismatch ? 'blocked' : stubScanStatus(file.originalFilename);
+  // 'blocked' stays reachable without a scanner: a stored object that is not the
+  // size it was declared to be is quarantined regardless of its contents.
+  const scanStatus = sizeMismatch ? 'blocked' : 'unscanned';
   await setFileScanStatus(file.id, scanStatus);
 
   await enqueueOutboxEvent({

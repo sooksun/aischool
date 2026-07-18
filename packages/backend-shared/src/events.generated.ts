@@ -36,7 +36,7 @@ export interface Event_evidence_file_registered {
 export interface Event_evidence_file_scan_completed {
   evidence_id: string;
   file_id: string;
-  scan_status: 'clean' | 'blocked';
+  scan_status: 'clean' | 'unscanned' | 'blocked';
 }
 
 export interface Event_evidence_mapping_suggested {

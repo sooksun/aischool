@@ -283,7 +283,7 @@ export interface paths {
         put?: never;
         /**
          * Phase 2: confirm bytes uploaded; register file and enqueue virus scan
-         * @description Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served only when scan_status=clean (UPL-006).
+         * @description Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served when scan_status is clean or unscanned; blocked/pending return UPL-006.
          */
         post: operations["completeFileUpload"];
         delete?: never;
@@ -303,8 +303,10 @@ export interface paths {
          * Issue a short-lived download URL for one clean evidence file
          * @description Lazy download (CCR-010 / cleanup H2). Call only when the user intends to
          *     download — `getEvidence` and `completeFileUpload` never presign object
-         *     storage. Requires `scan_status=clean` (UPL-006); pending/blocked return
-         *     UPL-006. Same tenancy grants as `getEvidence`. Never returns `storage_uri`.
+         *     storage. Requires `scan_status` to be `clean` or `unscanned` (CCR-012 —
+         *     unscanned means no scanner ran, which is disclosed rather than blocked);
+         *     `pending`/`blocked` return UPL-006. Same tenancy grants as `getEvidence`.
+         *     Never returns `storage_uri`.
          */
         get: operations["getEvidenceFileDownloadUrl"];
         put?: never;
@@ -574,8 +576,19 @@ export interface components {
          * @enum {string}
          */
         ReportTemplateCode: "PA1_s" | "PA1_bs" | "PA2_s" | "PA2_bs" | "PA3_s" | "PA3_bs";
-        /** @enum {string} */
-        ScanStatus: "pending" | "clean" | "blocked";
+        /**
+         * @description `pending` — queued, the worker has not processed the file yet.
+         *     `clean` — a scanner ran and found nothing.
+         *     `unscanned` — the file was processed but NO scanner ran, so the platform
+         *     makes no claim about its contents (CCR-012). This is the state on any
+         *     deployment without a malware scanner wired in. It is served like `clean`
+         *     — the distinction is disclosure, not restriction — and clients are
+         *     expected to surface it so nobody reads silence as a clean bill of health.
+         *     `blocked` — quarantined: a scanner rejected it, or the stored object did
+         *     not match the declared byte_size. Never served (UPL-006).
+         * @enum {string}
+         */
+        ScanStatus: "pending" | "clean" | "unscanned" | "blocked";
         RubricLevel: number;
         LoginRequest: {
             /** Format: email */
@@ -783,7 +796,7 @@ export interface components {
             created_at: string;
             /**
              * @description Aggregate of attached files (CCR-009). null when there are no files.
-             *     Worst-of order: pending > blocked > clean. Present on list and detail so
+             *     Worst-of order: pending > blocked > unscanned > clean. Present on list and detail so
              *     clients never need N+1 detail fetches for list badges.
              */
             scan_status?: null | components["schemas"]["ScanStatus"];

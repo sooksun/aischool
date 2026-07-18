@@ -1,6 +1,9 @@
 # SEIP Domain Event Contract
 # version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
 # version: 1.1.0 — CCR-005 (additive): report.generated + ai.suggestion.created.
+# version: 1.2.0 — CCR-012 (additive): evidence.file.scan_completed payload gains
+#   scan_status=unscanned, emitted when no scanner ran (the previous stub reported
+#   `clean` for everything it did not recognise by filename).
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 # Adding an event or an optional payload field is additive (1.x); removing or
 # retyping a field, or changing an event name, is breaking (2.0).
@@ -37,9 +40,12 @@ events:
     note: Emitted by completeFileUpload; triggers async virus scan + video probe.
 
   evidence.file.scan_completed:
-    payload: { evidence_id: uuid, file_id: uuid, scan_status: 'enum[clean, blocked]' }
+    payload: { evidence_id: uuid, file_id: uuid, scan_status: 'enum[clean, unscanned, blocked]' }
     consumers: [notification, audit-projection]
-    note: blocked → file quarantined (UPL-006); owner notified.
+    note: >-
+      blocked → file quarantined (UPL-006); owner notified. unscanned → processed
+      but no scanner ran (CCR-012), served like clean; a notification consumer
+      should not word this as "ปลอดภัย".
 
   evidence.mapping.suggested:
     payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, mapping_source: 'enum[human, ai_suggested]' }

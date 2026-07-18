@@ -99,9 +99,15 @@ enum EvidenceStatus {
   rejected
 }
 
+/// CCR-012: `unscanned` = processed, but NO scanner ran, so the platform makes no
+/// claim about the contents. It is served like `clean` — the distinction is
+/// disclosure, not restriction. `blocked` is quarantine: a scanner rejected the
+/// file, or the stored object did not match the declared byte_size. Replaces a
+/// stub that reported `clean` for every filename it did not recognise.
 enum ScanStatus {
   pending
   clean
+  unscanned
   blocked
 }
 
