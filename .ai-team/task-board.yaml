@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-19T03:00:00+07:00
+updated_at: 2026-07-19T05:47:11+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -770,3 +770,91 @@ tasks:
       - Access-token refresh after corruption
       - Director create report + download PDF
       - Chair submits scores on seeded assignment
+
+  # --- Release blockers, opened by the 2026-07-19 code audit ---
+  # These are B-1/B-2/B-3 in docs/project/PROJECT_STATE.md ("Audit correction").
+  # Each is a missing contract surface, not a bug: the models exist in
+  # prisma/schema.prisma but have zero references in apps/ and packages/.
+  # None can merge without a CCR + major bump + user approval (CLAUDE.md).
+
+  - id: SEIP-BLOCK-001
+    title: "B-1 — onboarding path: no way to create the first login"
+    status: ready
+    sprint: 2
+    ccr: CCR-014
+    primary_paths:
+      - docs/reviews/CCR-014-onboarding-identity-operations.md
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - apps/api/src/routes/**
+      - packages/database/src/repositories/identity.ts
+      - prisma/seed.mjs
+    notes: >
+      No operation in openapi.yaml creates School / UserAccount / SchoolMembership /
+      PersonnelProfile, and seed.mjs seeds none of them. hashPassword
+      (packages/auth/src/password.ts:12) has no caller outside its own test. A fresh
+      install therefore has a complete framework taxonomy and nobody who can log in.
+      Decide during the CCR whether first-admin bootstrap is a seeded row, a CLI, or
+      a contract operation — the three have very different authz consequences.
+    acceptance_criteria:
+      - CCR-014 written and approved by the user before merge
+      - openapi major bump; permissions.yaml rule for every new operationId
+      - School / UserAccount / SchoolMembership / PersonnelProfile creatable
+      - hashPassword has a real (non-test) caller
+      - "db:reset && db:migrate && db:seed then login succeeds — proven by a test, no direct Prisma writes"
+      - tests/security permission sweep extended to the new operations
+
+  - id: SEIP-BLOCK-002
+    title: "B-2 — PerformanceAgreement + AgreementChallenge have no code (40% of the score)"
+    status: ready
+    sprint: 2
+    ccr: CCR-015
+    dependencies: [SEIP-BLOCK-001]
+    primary_paths:
+      - docs/reviews/CCR-015-performance-agreement-and-challenge.md
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - apps/api/src/routes/scoring.ts
+      - packages/database/src/repositories/**
+      - tests/e2e/global-setup.mjs
+    notes: >
+      prisma.performanceAgreement and prisma.agreementChallenge have zero references
+      in apps/ and packages/. Consequence: submitMyScores always dies at the workload
+      gate (apps/api/src/routes/scoring.ts:220-227 — VAL-002 then SCORE-004), so no
+      score can be submitted through the API at all. ประเด็นท้าทาย (ส่วนที่ 2) is 40%
+      of the วPA score per ADR-0003 and has no implementation whatsoever.
+      The suites pass only because scoring-flow.test.mjs:114 and global-setup.mjs:196
+      insert the agreement row straight through Prisma — removing those inserts is
+      the real proof this task is done.
+    acceptance_criteria:
+      - CCR-015 written and approved by the user before merge
+      - PerformanceAgreement creatable and linkable to an assignment
+      - AgreementChallenge (ประเด็นท้าทาย) modelled end to end, weights from ScoreWeight per ADR-0003
+      - submitMyScores succeeds through the API alone on a freshly seeded DB
+      - "tests/e2e/global-setup.mjs no longer calls performanceAgreement.create directly"
+      - agreement_id validated for existence + school + cycle + evaluatee (currently unchecked at scoring.ts:97)
+
+  - id: SEIP-BLOCK-003
+    title: "B-3 — Approval is schema-only; reports stall at pending_approval"
+    status: ready
+    sprint: 2
+    ccr: CCR-016
+    dependencies: [SEIP-BLOCK-002]
+    primary_paths:
+      - docs/reviews/CCR-016-report-approval.md
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - docs/contracts/events.yaml
+      - apps/api/src/routes/reports.ts
+      - packages/database/src/repositories/reports.ts
+    notes: >
+      prisma.approval has zero references in apps/ and packages/. report.generate
+      flips draft -> pending_approval and nothing can move it further, so every
+      generated report is terminal. Note reports.ts:241 already carries the comment
+      "approval workflow is later" — this is that task.
+    acceptance_criteria:
+      - CCR-016 written and approved by the user before merge
+      - Approve / reject operations with an explicit report state machine
+      - Approval recorded with actor + timestamp; AuditEvent written
+      - Emits the report approval event declared in events.yaml
+      - Test proves a report leaves pending_approval through the API
