@@ -3,7 +3,7 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const ERROR_CODES_VERSION = '1.4.0';
+export const ERROR_CODES_VERSION = '1.5.0';
 
 export type ErrorCode =
   | 'AUTH-001'
@@ -39,6 +39,8 @@ export type ErrorCode =
   | 'RPT-001'
   | 'RPT-002'
   | 'AI-001'
+  | 'AGR-001'
+  | 'AGR-002'
   | 'RES-001'
   | 'RES-002'
   | 'RES-003'
@@ -79,6 +81,8 @@ export const ERROR_CODE_TABLE: Record<ErrorCode, { http: number; meaning: string
   'RPT-001': { http: 422, meaning: "Invalid report request — unknown template" },
   'RPT-002': { http: 422, meaning: "Report PDF not ready — still draft or generation_status pending" },
   'AI-001': { http: 422, meaning: "Mapping suggest rejected — evidence not eligible" },
+  'AGR-001': { http: 409, meaning: "An agreement already exists for this (cycle" },
+  'AGR-002': { http: 422, meaning: "Agreement not in a state that allows this — content freezes on submit" },
   'RES-001': { http: 404, meaning: "Resource not found (or hidden by tenancy — indistinguishable by design)" },
   'RES-002': { http: 409, meaning: "Concurrent modification (stale version/etag)" },
   'RES-003': { http: 409, meaning: "Duplicate — an active membership already exists for this (school" },

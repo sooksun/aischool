@@ -27,7 +27,7 @@ const tokenFor = {};
 const userIdFor = {};
 let secondEvaluatorUserId;
 let school, area, evidenceId, indicatorId, mappingId, frameworkId, deletableEvidenceId, categoryId;
-let cycleId, roundId, assignmentId, teacherPersonnelId;
+let cycleId, roundId, assignmentId, teacherPersonnelId, agreementId;
 
 before(async () => {
   ({ app } = await buildServer());
@@ -123,6 +123,28 @@ before(async () => {
   roundId = round.id;
   assignmentId = assignment.id;
   teacherPersonnelId = teacherPersonnel.id;
+
+  // A REAL agreement owned by OWNER_ROLE (teacher), created through the API like
+  // the evidence fixture above. A random id would 404 before the ownership check
+  // ever ran, so the sweep would be asserting nothing about `own` on these
+  // operations — which is exactly what it did on the first run of this change.
+  //
+  // Via the API rather than Prisma on purpose: CCR-015's whole point is that the
+  // product can create these now, and a fixture that quietly went around the
+  // operations would reintroduce the shortcut that hid SEIP-BLOCK-002.
+  const agreementRes = await app.inject({
+    method: 'POST', url: '/api/v1/agreements',
+    headers: { authorization: `Bearer ${tokenFor.teacher}`, 'x-school-id': school.id },
+    // No challenge: this fixture's framework is synthetic and carries only a
+    // `standard` indicator, so there is no C.1 to anchor one against. The sweep
+    // does not need one — it needs a real agreement row to test ownership
+    // against. A granted owner therefore gets AGR-002 on submitAgreement rather
+    // than 200, which the sweep treats as an acceptable non-permission failure
+    // (same philosophy as createMapping's expected VAL-002).
+    payload: { cycle_id: cycle.id, personnel_id: teacherPersonnel.id },
+  });
+  assert.equal(agreementRes.statusCode, 201, `setup: agreement fixture — ${agreementRes.body}`);
+  agreementId = agreementRes.json().id;
 });
 
 after(async () => {
@@ -147,6 +169,17 @@ const OPERATIONS = () => ({
   // so it has no matrix row and no role dimension to sweep. Its security
   // properties — single-use, no-oracle AUTH-005, rate limiting — are covered
   // directly by apps/api/test/onboarding-flow.test.mjs.
+
+  // agreements (CCR-015). A random agreement id yields RES-001 for granted
+  // roles, never PERM-001 — same philosophy as getReport below. createAgreement
+  // uses the fixture's real teacher personnel so a granted role fails at most on
+  // AGR-001 (already exists), which is not a permission denial.
+  listAgreements: { method: 'GET', url: '/api/v1/agreements' },
+  getAgreement: { method: 'GET', url: `/api/v1/agreements/${agreementId}` },
+  createAgreement: { method: 'POST', url: '/api/v1/agreements', payload: { cycle_id: cycleId, personnel_id: teacherPersonnelId } },
+  updateAgreement: { method: 'PATCH', url: `/api/v1/agreements/${agreementId}`, payload: {} },
+  submitAgreement: { method: 'POST', url: `/api/v1/agreements/${agreementId}/submit` },
+  acknowledgeAgreement: { method: 'POST', url: `/api/v1/agreements/${randomUUID()}/acknowledge` },
 
   listFrameworks: { method: 'GET', url: '/api/v1/frameworks' },
   getFramework: { method: 'GET', url: `/api/v1/frameworks/${frameworkId}` },
@@ -254,6 +287,16 @@ const OWN_SENSITIVE_OPS = new Set([
   // knowledge of it was missing, which is precisely what going unswept means.
   'completeFileUpload', 'getEvidenceFileDownloadUrl',
   'listEvidenceMappings', 'createMapping', 'suggestMappings', 'actOnMapping', 'getAssignment',
+  // CCR-015. The evaluatee owns their ข้อตกลง: teacher/deputy/director all hold
+  // `own` on these, so for any of them who is not the fixture's owner, PERM-001
+  // is the ownership boundary working. Note createAgreement is deliberately
+  // included — a director filing on a teacher's behalf is denied by design (the
+  // director acknowledges, they do not author).
+  // getAgreement included, listAgreements deliberately NOT: a list with an `own`
+  // grant FILTERS rows (a deputy legitimately gets 200 with their own, possibly
+  // empty, set), while a detail read must DENY. Same distinction as
+  // listEvidence vs getEvidence above.
+  'getAgreement', 'createAgreement', 'updateAgreement', 'submitAgreement',
 ]);
 
 test('every implemented operation x every role matches its permissions.yaml disposition', async () => {
@@ -312,11 +355,11 @@ test('every implemented operation x every role matches its permissions.yaml disp
     }
   }
 
-  // 34 of the 35 matrix rows. The one exclusion is getAssignmentResults, whose
+  // 40 of the 41 matrix rows. The one exclusion is getAssignmentResults, whose
   // temporal rule is explained and separately covered above. Raise this number
   // whenever a row is added — a sweep that silently covers less than the matrix
   // is how completeFileUpload and getEvidenceFileDownloadUrl went unswept.
-  assert.ok(assertions >= 34 * 6, `sweep should cover at least 34 operations x 6 roles, got ${assertions} assertions`);
+  assert.ok(assertions >= 40 * 6, `sweep should cover at least 40 operations x 6 roles, got ${assertions} assertions`);
   assert.deepEqual(failures, [], `${failures.length} mismatch(es) between permissions.yaml and enforcement:\n${failures.join('\n')}`);
 });
 

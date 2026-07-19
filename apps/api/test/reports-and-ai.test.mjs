@@ -254,8 +254,19 @@ test('createReport enqueues worker; runOnce fills payload and section refs', asy
   const match = jobs.find((j) => j.payload?.report_id === report.id);
   assert.ok(match, 'report.generate job should be enqueued');
 
-  // Process without S3 GC scheduling noise
-  await runOnce(env, fakeS3, { scheduleGc: false });
+  // Process without S3 GC scheduling noise.
+  //
+  // Loop until THIS job is claimed, rather than calling runOnce once. runOnce
+  // takes a single job off a queue that every other test file shares — node:test
+  // runs files in parallel processes, so a sibling's file.process job can be the
+  // one it picks, leaving this report at 'draft' and failing on a race that has
+  // nothing to do with reports. Flaked ~2 runs in 3 once the CCR-014/CCR-015
+  // suites were added and the queue got busier.
+  for (let i = 0; i < 25; i++) {
+    const stillPending = await prisma.workerJob.findUnique({ where: { id: match.id }, select: { status: true } });
+    if (stillPending?.status === 'succeeded') break;
+    await runOnce(env, fakeS3, { scheduleGc: false });
+  }
 
   const get = await app.inject({
     method: 'GET',

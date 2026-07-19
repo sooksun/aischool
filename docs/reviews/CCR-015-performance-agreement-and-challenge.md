@@ -1,7 +1,72 @@
 # CCR-015: ประเด็นท้าทาย is scored blind, and no score can be submitted at all
 
-Status: **DRAFT — awaiting user approval**
-Blocker: `SEIP-BLOCK-002` · Depends on: CCR-014 (`listPersonnel`) · Blocks: `SEIP-BLOCK-003`
+Status: **APPLIED 2026-07-19** (approved by the user the same day)
+Blocker: `SEIP-BLOCK-002` · Depends on: CCR-014 · Blocks: `SEIP-BLOCK-003`
+Shipped: openapi **3.0.0** (BREAKING) · permissions **1.6.0** · error-codes **1.5.0**
+
+## What changed between draft and implementation
+
+1. **`AgreementChallenge` is anchored by indicator *kind*, not by code.** The draft
+   said "anchored on `T-C.1` / `A-C.1`". Hard-coding those codes would contradict
+   ADR-0003 (taxonomy is data — a future framework may rename them), so
+   `findChallengeAnchorIndicator` selects the framework's lowest-sort-order
+   `challenge` indicator instead. Same outcome today, no hard-coded taxonomy.
+
+2. **`acknowledgeAgreement` needed a rule the matrix cannot express.** A director
+   is an evaluatee too under ว10, so `director: school` would let them acknowledge
+   their own agreement — a signature on your own commitments. Enforced in the
+   route (AGR-002) with a comment saying why it is not in `permissions.yaml`:
+   the matrix has no vocabulary for "any grant except over yourself".
+
+3. **A director may NOT file on a teacher's behalf.** Only `school_admin` holds
+   the `school` grant on `createAgreement`; teacher/deputy/director hold `own`.
+   This is deliberate — under ว9/ว10 the evaluatee writes their own ข้อตกลง and
+   the director's role is to acknowledge it — but it broke three tests I had
+   written on the opposite assumption, so it now has an explicit test of its own.
+
+4. **The permission sweep needed a real agreement fixture.** Pointed at a random
+   UUID, `updateAgreement`/`submitAgreement` returned 404 before the ownership
+   check ran, so the sweep asserted nothing about `own`. It now creates a real
+   agreement **through the API** — a Prisma shortcut there would have quietly
+   reintroduced the very pattern this CCR removes.
+
+Also fixed in passing: `global-setup.mjs` never repaired an existing assignment
+whose `agreementId` had gone stale, so the fixture was only correct on a virgin
+database.
+
+## Verified
+
+- `apps/api/test/agreement-flow.test.mjs` — **12 tests**: full lifecycle, the
+  submit freeze, submit-without-challenge refused, AGR-001 duplicate,
+  self-acknowledge refused, cross-school RES-001, ว9-teacher-on-ว10-cycle
+  VAL-003, own-scope list filtering, and **the committee actually reading the
+  challenge**.
+- Whole suite green: 66 API integration, 19 backend, 38 web unit, 23 package
+  unit, 6 security (**240 sweep assertions across 40 of 41 matrix rows**), 12 e2e.
+  `typecheck` and `lint` clean across 6 workspaces.
+- `oasdiff`: exactly **1 breaking change (`request-property-removed`), accepted
+  against the major bump** — precisely what the draft predicted.
+- Migration applied; both STORED GENERATED columns and all 4 triggers intact,
+  zero drift.
+- Driven in the browser: the teacher's PA1 page shows the submitted agreement
+  frozen with an explanation, and the committee chair's scoring page renders all
+  three challenge texts labelled `C.1 — 20 คะแนน`, `C.2.1 — 10`, `C.2.2 — 10`
+  directly above the 19 scorable indicators they rate.
+
+## The acceptance criterion, met
+
+`grep -rn "performanceAgreement.create" apps/ tests/` now returns only the
+repository that implements it and a comment recording what was removed. Both
+fixture shortcuts are gone:
+
+- `apps/api/test/scoring-flow.test.mjs` creates and submits the agreement through
+  `POST /agreements` + `/submit`.
+- `tests/e2e/global-setup.mjs` does the same over HTTP, and **fails loudly** if
+  the API is unreachable rather than falling back to a direct write.
+
+That deletion is what closes the `QUALITY-GATES.md` coverage caveat: the suite can
+no longer be green while scoring is unreachable, because the fixtures now walk the
+same path a school does.
 
 ## Request
 

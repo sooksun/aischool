@@ -12,6 +12,7 @@ import { cycleRoutes } from './routes/cycles.js';
 import { scoringRoutes } from './routes/scoring.js';
 import { reportRoutes } from './routes/reports.js';
 import { memberRoutes } from './routes/members.js';
+import { agreementRoutes } from './routes/agreements.js';
 import { createS3Client, ensureBucket } from './lib/s3.js';
 import { configureLoginRateLimiterFromEnv, configureInviteRateLimiterFromEnv } from './lib/login-rate-limit.js';
 
@@ -49,6 +50,7 @@ export async function buildServer() {
     await v1.register(scoringRoutes);
     await v1.register(reportRoutes);
     await v1.register(memberRoutes);
+    await v1.register(agreementRoutes);
   }, { prefix: '/api/v1' });
 
   if (env.NODE_ENV !== 'test') {

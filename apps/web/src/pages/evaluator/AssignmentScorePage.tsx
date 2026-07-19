@@ -186,6 +186,8 @@ export function AssignmentScorePage() {
           : 'ยังไม่ได้ประกาศ (ประธานต้องประกาศก่อนส่งคะแนน — SCORE-004)'}
       </p>
 
+      <ChallengePanel challenge={detail.challenge ?? null} />
+
       {member && (
         <form onSubmit={onSubmit} noValidate>
           <fieldset
@@ -367,5 +369,65 @@ export function AssignmentScorePage() {
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * The evaluatee's ประเด็นท้าทาย, shown while scoring (CCR-015).
+ *
+ * This panel is the reason contract v3.0 exists. Indicators C.1 / C.2.1 / C.2.2
+ * carry 40 of the 100 points and rate exactly these three texts — the method the
+ * teacher committed to, and the two targets they set. Until this shipped the
+ * committee assigned that 40% having never seen any of it, which made the number
+ * look like a judgement when it could not have been one.
+ */
+function ChallengePanel({ challenge }: { challenge: AssignmentDetail['challenge'] | null }) {
+  if (!challenge) {
+    // "No agreement filed" is a different fact from "the teacher wrote nothing",
+    // and an evaluator needs to be able to tell them apart before scoring 40%.
+    return (
+      <div className="alert alert-error" role="alert" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+        <strong>ยังไม่มีข้อตกลง (PA1) ของผู้รับการประเมินในรอบนี้</strong>
+        <p style={{ margin: '4px 0 0' }}>
+          ส่วนที่ 2 ประเด็นท้าทาย คิดเป็น 40 คะแนน แต่ยังไม่มีข้อความประเด็นท้าทายให้พิจารณา
+          กรุณาให้ผู้รับการประเมินจัดทำและส่งข้อตกลงก่อน
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <section
+      aria-labelledby="challenge-heading"
+      style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: 16, marginBottom: 16 }}
+    >
+      <h2 id="challenge-heading" style={{ marginTop: 0 }}>ประเด็นท้าทาย (ส่วนที่ 2 — 40 คะแนน)</h2>
+      <p className="field-hint" style={{ marginTop: 0 }}>
+        ข้อความที่ผู้รับการประเมินจัดทำไว้ ใช้ประกอบการให้คะแนนตัวชี้วัด C.1 / C.2.1 / C.2.2
+      </p>
+
+      <p style={{ fontWeight: 600, marginBottom: 4 }}>{challenge.title}</p>
+      {challenge.target_group && (
+        <p className="field-hint" style={{ margin: '0 0 12px' }}>กลุ่มเป้าหมาย: {challenge.target_group}</p>
+      )}
+
+      <ChallengeField label="วิธีดำเนินการ (C.1 — 20 คะแนน)" value={challenge.method_plan} />
+      <ChallengeField label="ผลลัพธ์เชิงปริมาณที่คาดหวัง (C.2.1 — 10 คะแนน)" value={challenge.quantitative_target} />
+      <ChallengeField label="ผลลัพธ์เชิงคุณภาพที่คาดหวัง (C.2.2 — 10 คะแนน)" value={challenge.qualitative_target} />
+      {challenge.period_note && (
+        <p className="field-hint" style={{ marginBottom: 0 }}>ช่วงเวลา: {challenge.period_note}</p>
+      )}
+    </section>
+  );
+}
+
+function ChallengeField({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <p style={{ fontWeight: 600, margin: '0 0 2px', fontSize: '0.875rem' }}>{label}</p>
+      {value
+        ? <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{value}</p>
+        : <p className="field-hint" style={{ margin: 0 }}>— ผู้รับการประเมินไม่ได้ระบุ —</p>}
+    </div>
   );
 }

@@ -535,12 +535,23 @@ model WorkloadDeclaration {
 
 /// ประเด็นท้าทาย — the person's planned method + targets for ส่วนที่ 2.
 model AgreementChallenge {
-  id                 String  @id @default(uuid()) @db.Char(36)
-  agreementId        String  @map("agreement_id") @db.Char(36)
-  indicatorId        String  @map("indicator_id") @db.Char(36)
+  id          String @id @default(uuid()) @db.Char(36)
+  agreementId String @map("agreement_id") @db.Char(36)
+  /// CCR-015: the framework's วิธีดำเนินการ indicator (T-C.1 / A-C.1). One
+  /// challenge row per agreement — the PA1 form has exactly one ประเด็นท้าทาย,
+  /// and this row carries all three scored texts, so the unique key below
+  /// enforces "one per agreement" rather than merely de-duplicating indicators.
+  indicatorId String @map("indicator_id") @db.Char(36)
+  /// ประเด็นท้าทาย เรื่อง … — added CCR-015. Required: a plan with no subject is
+  /// not a challenge. Safe as NOT NULL because this table had zero rows in every
+  /// environment (nothing could create one until CCR-015).
+  title              String  @db.VarChar(500)
   methodPlan         String  @map("method_plan") @db.Text
   quantitativeTarget String? @map("quantitative_target") @db.Text
   qualitativeTarget  String? @map("qualitative_target") @db.Text
+  /// Both appear on the PA1 form; neither is scored.
+  targetGroup        String? @map("target_group") @db.VarChar(500)
+  periodNote         String? @map("period_note") @db.VarChar(500)
 
   agreement PerformanceAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
   indicator Indicator            @relation(fields: [indicatorId], references: [id], onDelete: Restrict)

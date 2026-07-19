@@ -514,6 +514,105 @@ export interface paths {
         patch: operations["actOnMapping"];
         trace?: never;
     };
+    "/agreements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Performance agreements visible to the caller
+         * @description A teacher sees their own; a director or school_admin sees the school's; an
+         *     evaluator sees those of the people they sit on a committee for.
+         */
+        get: operations["listAgreements"];
+        put?: never;
+        /**
+         * File a performance agreement for a cycle (แบบ PA1)
+         * @description One agreement per (cycle, personnel) — a second attempt is AGR-001, not a
+         *     second row. The challenge is written as part of the agreement rather than
+         *     through its own endpoint: it has no independent lifecycle, and an agreement
+         *     with an orphan challenge is not a state worth modelling.
+         *
+         *     Starts in `draft`. Content stays editable until `submitAgreement`.
+         */
+        post: operations["createAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agreements/{agreementId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One agreement with its ประเด็นท้าทาย */
+        get: operations["getAgreement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a draft agreement and its challenge
+         * @description Draft only. Once submitted, the content is frozen (AGR-002): editing a
+         *     submitted agreement would let an evaluatee rewrite the targets they are
+         *     about to be scored against, and editing an acknowledged one would rewrite
+         *     what the director signed.
+         */
+        patch: operations["updateAgreement"];
+        trace?: never;
+    };
+    "/agreements/{agreementId}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a draft agreement for the director to acknowledge
+         * @description draft → submitted, and the content freezes. Requires a challenge to exist —
+         *     submitting an agreement with no ประเด็นท้าทาย would hand the committee an
+         *     empty 40% to score, which is the defect this whole contract version exists
+         *     to close (AGR-002).
+         */
+        post: operations["submitAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agreements/{agreementId}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Director acknowledges a submitted agreement (ผอ. เห็นชอบ)
+         * @description submitted → acknowledged. Never available to the evaluatee, even though
+         *     they hold `own` on the agreement — acknowledging your own commitments is
+         *     not a signature.
+         */
+        post: operations["acknowledgeAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rounds/{roundId}/assignments": {
         parameters: {
             query?: never;
@@ -1197,15 +1296,115 @@ export interface components {
             committee_role: "chair" | "member";
             seat_number: number;
         };
+        /**
+         * @description `draft` — editable by the evaluatee. `submitted` — content frozen, awaiting
+         *     the director. `acknowledged` — ผอ. เห็นชอบ; this is what a committee scores
+         *     against.
+         * @enum {string}
+         */
+        AgreementStatus: "draft" | "submitted" | "acknowledged";
+        /**
+         * @description ประเด็นท้าทาย — one per agreement, matching the single challenge on the PA1
+         *     form. The three text fields are what indicators C.1 / C.2.1 / C.2.2 rate
+         *     (20 / 10 / 10 points), so they are the evidence behind 40% of the result.
+         */
+        AgreementChallenge: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The framework's วิธีดำเนินการ indicator (T-C.1 / A-C.1) — the anchor this challenge is filed under.
+             */
+            indicator_id: string;
+            /** @description ประเด็นท้าทาย เรื่อง … — the subject of the challenge. */
+            title: string;
+            /** @description วิธีดำเนินการ — scored by C.1 (20 points). */
+            method_plan: string;
+            /** @description ผลลัพธ์เชิงปริมาณ — the target C.2.1 is scored against (10 points). */
+            quantitative_target?: string | null;
+            /** @description ผลลัพธ์เชิงคุณภาพ — the target C.2.2 is scored against (10 points). */
+            qualitative_target?: string | null;
+            /** @description กลุ่มเป้าหมาย — not scored. */
+            target_group?: string | null;
+            /** @description ช่วงเวลาดำเนินการ — not scored. */
+            period_note?: string | null;
+        };
+        AgreementChallengeInput: {
+            title: string;
+            method_plan: string;
+            quantitative_target?: string | null;
+            qualitative_target?: string | null;
+            target_group?: string | null;
+            period_note?: string | null;
+        };
+        Agreement: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            school_id: string;
+            /** Format: uuid */
+            cycle_id: string;
+            /** Format: uuid */
+            personnel_id: string;
+            /**
+             * @description /ส for teachers (ว9), /บส for administrators (ว10). Derived from the personnel's position_role, not chosen by the client.
+             * @enum {string}
+             */
+            form_variant: "PA1_s" | "PA1_bs";
+            status: components["schemas"]["AgreementStatus"];
+            /** Format: date-time */
+            submitted_at?: string | null;
+        };
+        AgreementDetail: components["schemas"]["Agreement"] & {
+            /** @description Null while still being drafted; required before the agreement can be submitted. */
+            challenge?: null | components["schemas"]["AgreementChallenge"];
+        };
+        /**
+         * @description No `school_id` and no `form_variant` — both are derived (the school from
+         *     the caller's membership, the variant from the personnel's position_role).
+         *     `personnel_id` is required rather than implied because a school_admin may
+         *     file on behalf of staff, but it is validated against the caller's school
+         *     and against the `own` grant for an evaluatee filing their own.
+         */
+        AgreementCreate: {
+            /** Format: uuid */
+            cycle_id: string;
+            /** Format: uuid */
+            personnel_id: string;
+            /** @description Optional at creation so an agreement can be started and finished later; required by the time it is submitted. */
+            challenge?: components["schemas"]["AgreementChallengeInput"];
+        };
+        /** @description Draft only (AGR-002). Omitted fields are left unchanged. */
+        AgreementPatch: {
+            challenge?: components["schemas"]["AgreementChallengeInput"];
+        };
+        /**
+         * @description No `agreement_id` (removed in 3.0.0, CCR-015). PerformanceAgreement is
+         *     unique per (cycle, personnel) and the assignment knows both, so the server
+         *     derives it. It used to be accepted from the body and passed through
+         *     unvalidated, which let one person's assignment be attached to another
+         *     person's agreement — and since workload_declaration is unique per
+         *     (agreement, round), that made the ภาระงาน gate read and write the wrong
+         *     person's row.
+         */
         AssignmentCreate: {
             /** Format: uuid */
             evaluatee_personnel_id: string;
-            /** Format: uuid */
-            agreement_id?: string | null;
             /** @description Exactly 3 per ว9/ว10 (SCORE-001) — one chair, two members */
             committee: components["schemas"]["CommitteeMember"][];
         };
         AssignmentDetail: components["schemas"]["Assignment"] & {
+            /**
+             * @description The evaluatee's ประเด็นท้าทาย, read-only (CCR-015). This is the
+             *     whole point of contract v3.0: indicators C.1 / C.2.1 / C.2.2 carry
+             *     40% of the result and rate the method and targets recorded here, so
+             *     without it the committee was scoring free text they had never seen.
+             *
+             *     Null when the evaluatee has no agreement for this cycle yet — the
+             *     scoring UI must say so rather than render an empty field, because
+             *     "no challenge filed" and "challenge left blank" are different facts.
+             */
+            challenge?: null | components["schemas"]["AgreementChallenge"];
             workload_gate_declared: boolean;
             workload_met?: boolean | null;
             /**
@@ -1464,6 +1663,7 @@ export interface components {
         AssignmentId: string;
         ReportId: string;
         MembershipId: string;
+        AgreementId: string;
         Page: number;
         PageSize: number;
     };
@@ -2310,6 +2510,167 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Mapping"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listAgreements: {
+        parameters: {
+            query?: {
+                cycle_id?: string;
+                status?: components["schemas"]["AgreementStatus"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agreements */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agreement"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgreementCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agreement detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgreementPatch"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    submitAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Submitted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    acknowledgeAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];

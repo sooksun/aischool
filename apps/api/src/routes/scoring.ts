@@ -10,9 +10,11 @@ import {
   getWorkloadDeclaration, upsertWorkloadDeclaration,
   replaceScoresAndRollup, getIndicatorScores, getRoundResultsForAssignment,
   getPersonnelById, countExistingUserIds, countCommitteeEligibleUserIds, getFrameworkById, getFrameworkDetail, writeAuditEvent,
+  findAgreementForCycleAndPersonnel,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { resolveGrant, requireOwnership } from '../lib/permission-guard.js';
+import { serializeChallenge } from '../lib/serialize-agreement.js';
 
 function serializeCommitteeMember(m: { evaluatorUserId: string; committeeRole: string; seatNumber: number }) {
   return { evaluator_user_id: m.evaluatorUserId, committee_role: m.committeeRole, seat_number: m.seatNumber };
@@ -94,7 +96,6 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
 
     const body = z.object({
       evaluatee_personnel_id: z.string().uuid(),
-      agreement_id: z.string().uuid().nullable().optional(),
       committee: z.array(z.object({
         evaluator_user_id: z.string().uuid(),
         committee_role: z.enum(['chair', 'member']),
@@ -135,9 +136,21 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
       throw new ApiError('VAL-003', "evaluatee's position role does not match this round's framework");
     }
 
+    // CCR-015: derived, never supplied. PerformanceAgreement is unique per
+    // (cycle, personnel) and both are known here, so there is nothing for a
+    // client to choose — which is why AssignmentCreate.agreement_id was removed
+    // in contract 3.0.0. It used to arrive from the body unvalidated, and since
+    // workload_declaration is unique per (agreement, round), a mismatched id made
+    // this evaluatee's ภาระงาน gate read and write someone else's row.
+    //
+    // Null is a legitimate outcome: an assignment may be created before the
+    // evaluatee has filed their PA1. submitMyScores is what refuses (SCORE-004),
+    // at the point where a missing agreement actually matters.
+    const agreement = await findAgreementForCycleAndPersonnel(round.cycle.id, body.evaluatee_personnel_id);
+
     const assignment = await createAssignmentWithCommittee(round.cycle.schoolId, roundId, {
       evaluateePersonnelId: body.evaluatee_personnel_id,
-      agreementId: body.agreement_id ?? null,
+      agreementId: agreement?.id ?? null,
       committee: body.committee.map((c) => ({
         evaluatorUserId: c.evaluator_user_id, committeeRole: c.committee_role, seatNumber: c.seat_number,
       })),
@@ -182,6 +195,11 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
       // CCR-013: selects which IndicatorLevel rows apply (ADR-0003 — the rubric
       // text is seeded data, not UI copy).
       evaluatee_rank_level_code: assignment.evaluatee.rankLevelCode,
+      // CCR-015: what indicators C.1/C.2.1/C.2.2 actually rate. Null when the
+      // evaluatee has not filed a PA1 for this cycle — the UI must say that
+      // rather than render blank fields, because "no challenge filed" and
+      // "challenge left empty" are different facts about the same 40%.
+      challenge: serializeChallenge(assignment.agreement?.challenges[0]),
     };
   });
 

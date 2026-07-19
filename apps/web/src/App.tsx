@@ -16,6 +16,7 @@ import { EvaluatorRoundPage } from './pages/evaluator/EvaluatorRoundPage';
 import { AssignmentScorePage } from './pages/evaluator/AssignmentScorePage';
 import { MembersPage } from './pages/admin/MembersPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
+import { AgreementPage } from './pages/agreements/AgreementPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -68,6 +69,9 @@ function AppNav() {
           จัดการรอบการประเมิน
         </Link>
       )}
+      <Link to="/agreements" className={location.pathname.startsWith('/agreements') ? 'active' : ''}>
+        ข้อตกลง PA
+      </Link>
       {manageMembers && (
         <Link to="/admin/members" className={location.pathname.startsWith('/admin') ? 'active' : ''}>
           บุคลากร
@@ -114,6 +118,12 @@ export function App() {
         <Route path="/director/rounds/:roundId/assignments" element={
           <RequireCapability capability="manageCycles"><RoundAssignmentsPage /></RequireCapability>
         } />
+
+        {/* CCR-015: the evaluatee writes their own PA1. Behind RequireAuth
+            rather than a capability — every role that can be evaluated needs it,
+            and the page itself explains the case where the account has no
+            personnel record (an external evaluator). */}
+        <Route path="/agreements" element={<RequireAuth><AgreementPage /></RequireAuth>} />
 
         <Route path="/admin/members" element={
           <RequireCapability capability="manageMembers"><MembersPage /></RequireCapability>

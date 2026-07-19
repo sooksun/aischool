@@ -5,6 +5,7 @@
 # version: 1.3.0 — CCR-007 (additive): RPT-002 report PDF not ready.
 # version: 1.4.0 — CCR-014 (additive): AUTH-005 invite token not usable;
 #   RES-003 duplicate membership.
+# version: 1.5.0 — CCR-015 (additive): AGR-001, AGR-002 performance agreements.
 # Protected contract (contract-policy.md): changes require an approved CCR.
 # Codes are a stable API surface — clients map them to localized text. Adding a
 # code is additive (1.x); changing the meaning or HTTP status of an existing code,
@@ -19,7 +20,7 @@
 #   }
 # HTTP status is authoritative for transport semantics; `code` for business semantics.
 
-version: 1.4.0
+version: 1.5.0
 status: locked
 locked_at: 2026-07-17
 error_shape:
@@ -34,6 +35,7 @@ namespaces:
   MAP: evidence-indicator mapping rules
   SCORE: committee scoring rules
   CYCLE: cycle / round configuration and state
+  AGR: performance agreement (แบบ PA1) lifecycle and ประเด็นท้าทาย
   RPT: report generation and template rules
   AI: AI mapping suggestion rules
   RES: resource existence / conflict
@@ -94,6 +96,10 @@ codes:
   AI-001: { http: 422, meaning: Mapping suggest rejected — evidence not eligible, framework unknown, or provider unavailable }
 
   # --- RES ---
+  # agreements (CCR-015)
+  AGR-001: { http: 409, meaning: An agreement already exists for this (cycle, personnel) — one per cycle }
+  AGR-002: { http: 422, meaning: Agreement not in a state that allows this — content freezes on submit, and submitting requires a challenge }
+
   RES-001: { http: 404, meaning: Resource not found (or hidden by tenancy — indistinguishable by design) }
   RES-002: { http: 409, meaning: Concurrent modification (stale version/etag) }
   # Distinct from RES-002: nothing was concurrently modified and retrying will not

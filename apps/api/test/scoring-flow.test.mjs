@@ -107,23 +107,45 @@ async function makeOpenRound(fiscalYear) {
   return { cycle, round: openRes.json() };
 }
 
-// WorkloadDeclaration's FK requires a real PerformanceAgreement (agreement_id) —
-// without one, the workload gate can structurally never be satisfied (SCORE-004
-// would fire forever). Every scoring-flow fixture needs one linked.
+// WorkloadDeclaration's FK requires a real PerformanceAgreement — without one the
+// workload gate can structurally never be satisfied (SCORE-004 would fire
+// forever), so every scoring fixture needs one.
+//
+// This used to be `prisma.performanceAgreement.create(...)`, a direct DB write,
+// because no operation could make one. That single line is why a fully green test
+// suite coexisted with a system where no score could be submitted through the API
+// at all (SEIP-BLOCK-002). CCR-015 added the operations; the fixture now goes
+// through them, so this file can no longer pass while the real flow is broken.
 async function makeAgreement(cycleId) {
-  const agreement = await prisma.performanceAgreement.create({
-    data: { schoolId: school.id, cycleId, personnelId: teacherPersonnelId, formVariant: 'PA1_s', status: 'submitted' },
+  const res = await app.inject({
+    method: 'POST', url: '/api/v1/agreements', headers: auth(teacherToken),
+    payload: {
+      cycle_id: cycleId,
+      personnel_id: teacherPersonnelId,
+      challenge: {
+        title: 'ยกระดับผลสัมฤทธิ์การอ่านของนักเรียนชั้น ป.3',
+        method_plan: 'ใช้ชุดกิจกรรมการอ่านเชิงรุกสัปดาห์ละ 2 คาบ ควบคู่กับการวัดผลรายบุคคล',
+        quantitative_target: 'นักเรียนร้อยละ 80 มีคะแนนการอ่านเพิ่มขึ้นอย่างน้อย 10%',
+        qualitative_target: 'นักเรียนมีเจตคติที่ดีต่อการอ่านและเลือกหนังสืออ่านเองได้',
+      },
+    },
   });
-  return agreement.id;
+  assert.equal(res.statusCode, 201, JSON.stringify(res.json()));
+  const submitted = await app.inject({
+    method: 'POST', url: `/api/v1/agreements/${res.json().id}/submit`, headers: auth(teacherToken),
+  });
+  assert.equal(submitted.statusCode, 200, JSON.stringify(submitted.json()));
+  return res.json().id;
 }
 
 async function makeAssignment(cycleId, roundId) {
-  const agreementId = await makeAgreement(cycleId);
+  // The agreement must exist BEFORE the assignment: createAssignment derives
+  // agreementId from (cycle, evaluatee) rather than accepting it (CCR-015).
+  await makeAgreement(cycleId);
   const res = await app.inject({
     method: 'POST', url: `/api/v1/rounds/${roundId}/assignments`, headers: auth(directorToken),
     payload: {
       evaluatee_personnel_id: teacherPersonnelId,
-      agreement_id: agreementId,
       committee: [
         { evaluator_user_id: director.id, committee_role: 'chair', seat_number: 1 },
         { evaluator_user_id: evaluator2.id, committee_role: 'member', seat_number: 2 },

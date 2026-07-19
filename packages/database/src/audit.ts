@@ -24,6 +24,13 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   // same reason UserAccount omits email/displayName above. Who was onboarded is
   // answerable from userId without copying their name into the audit trail.
   PersonnelProfile: ['id', 'schoolId', 'userId', 'positionRole', 'rankLevelCode', 'status'],
+  // CCR-015. Submit and acknowledge are the governance acts on a PA1, so they
+  // must leave a trail — but the challenge text itself is excluded: title,
+  // methodPlan and the targets are the evaluatee's own words about their
+  // teaching, which is exactly the learner-adjacent free text SEC-PDPA-2 keeps
+  // out of the audit log (same reason Evidence omits title/description above).
+  // Who submitted what, and when, is answerable from id + status + personnelId.
+  PerformanceAgreement: ['id', 'schoolId', 'cycleId', 'personnelId', 'status'],
 };
 
 function allowlist(entityType: string, obj: Record<string, unknown> | undefined): Snapshot | undefined {

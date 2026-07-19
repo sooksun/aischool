@@ -814,8 +814,8 @@ tasks:
       - tests/security permission sweep extended to the new operations
 
   - id: SEIP-BLOCK-002
-    title: "B-2 — PerformanceAgreement + AgreementChallenge have no code (40% of the score)"
-    status: ready
+    title: "B-2 — PerformanceAgreement + AgreementChallenge have no code (ส่วนที่ 2 scored blind)"
+    status: done                # 2026-07-19 — CCR-015 APPLIED; openapi 3.0.0 (breaking), permissions 1.6.0, error-codes 1.5.0
     sprint: 2
     ccr: CCR-015
     dependencies: [SEIP-BLOCK-001]

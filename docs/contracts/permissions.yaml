@@ -10,6 +10,10 @@
 #   authority no role holds (area_admin is read-only across its area), and they
 #   ship as operator CLIs instead of a system_admin role that would rewrite every
 #   row below. See CCR-014 decisions 1 and 2.
+# version: 1.6.0 — CCR-015 (additive here; openapi is BREAKING at 3.0.0):
+#   performance agreements + ประเด็นท้าทาย. Note the asymmetry in the rows below —
+#   an evaluatee WRITES their own agreement but may never acknowledge it, and an
+#   evaluator READS it (to score the 40% it backs) but may never write it.
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 #
 # The api module is the sole enforcement point (module-boundaries.md).
@@ -18,7 +22,7 @@
 # This file is also a TEST FIXTURE (SECURITY-BASELINE SEC-TEN-5): permission tests
 # generate their cases from this matrix, so contract and enforcement cannot drift.
 
-version: 1.5.0
+version: 1.6.0
 status: locked
 locked_at: 2026-07-17
 
@@ -128,6 +132,24 @@ matrix:
     teacher: own-revoke    # owner may revoke their own suggested mapping only
     director: school
     school_admin: school
+
+  # agreements — แบบ PA1 + ประเด็นท้าทาย (CCR-015)
+  # The evaluatee owns the document: they write it, they submit it, they can never
+  # acknowledge it. `own` here means requireOwnership against the agreement's
+  # personnel_id, not merely holding the role — this is the record a career
+  # decision rests on.
+  # evaluator gets `committee` on reads only: they need the challenge text to score
+  # C.1/C.2.1/C.2.2 honestly, and no row below grants them any write.
+  listAgreements:          { teacher: own, deputy: own, director: school, school_admin: school, evaluator: committee, area_admin: area-r }
+  getAgreement:            { teacher: own, deputy: own, director: school, school_admin: school, evaluator: committee, area_admin: area-r }
+  createAgreement:         { teacher: own, deputy: own, director: own, school_admin: school }
+  updateAgreement:         { teacher: own, deputy: own, director: own, school_admin: school }
+  submitAgreement:         { teacher: own, deputy: own, director: own, school_admin: school }
+  # Deliberately NOT `own` for anyone: acknowledging is the director's signature on
+  # someone else's commitments. A director filing their own agreement (they are
+  # evaluatees under ว10 too) must be acknowledged by school_admin or another
+  # director — enforced in the route, since the matrix cannot express "not myself".
+  acknowledgeAgreement:    { director: school, school_admin: school }
 
   # scoring — committee of 3, per-evaluator records
   listAssignments:         { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }

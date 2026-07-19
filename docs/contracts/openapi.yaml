@@ -42,6 +42,25 @@ openapi: 3.1.0
 #   allow it would rewrite all 31 permission-matrix rows. See CCR-014 decisions
 #   1 and 2. listPersonnel additionally retires the raw evaluatee UUIDs the
 #   2026-07-19 audit found rendered as primary UI text in four screens.
+# version 3.0.0 — CCR-015 (BREAKING): performance agreements + ประเด็นท้าทาย.
+#   Adds listAgreements/getAgreement/createAgreement/updateAgreement/
+#   submitAgreement/acknowledgeAgreement, and AssignmentDetail.challenge.
+#   BREAKING: `AssignmentCreate.agreement_id` REMOVED. It was passed straight
+#   through unvalidated, so attaching person B's agreement to person A's
+#   assignment made A's ภาระงาน gate read and write B's declaration row
+#   (workload_declaration is unique per (agreement, round)). PerformanceAgreement
+#   is unique per (cycle, personnel) and an assignment already knows both, so the
+#   value is derivable — and a field that cannot be supplied cannot be supplied
+#   wrongly. Same reasoning as MemberInvite having no school_id (CCR-014).
+#   Migration: no external consumer exists (ADR-0004, single deployment); the only
+#   senders were two test fixtures, which CCR-015 replaces with real operations.
+#
+#   Note what this CCR does NOT add: the scoring of ส่วนที่ 2. That already worked
+#   — submitMyScores requires every is_scored indicator and weights T-C.1 (20) /
+#   T-C.2.1 (10) / T-C.2.2 (10) by max_points. What was missing was the thing being
+#   rated: the committee scored 40% of a teacher's result without ever being shown
+#   the method and targets that teacher had committed to. AssignmentDetail.challenge
+#   is the fix; the rest of this version is what makes a challenge exist at all.
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -50,10 +69,17 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.9.0
-  summary: School Evidence Intelligence Platform — core API (onboarding + evidence workflow + PA evaluation + reports/AI + PDF)
+  version: 3.0.0
+  summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation + reports/AI + PDF)
   description: |
-    Contract v2.9 (CCR-014) — onboarding: a school_admin can invite people into
+    Contract v3.0 (CCR-015) — performance agreements (แบบ PA1) and ประเด็นท้าทาย.
+    A teacher writes their own agreement, states the challenge they are taking on
+    with its method and quantitative/qualitative targets, submits it, and the
+    director acknowledges it. The committee then sees that text while scoring the
+    three indicators that rate it — before v3.0 they scored 40% of the result
+    blind. Breaking: `AssignmentCreate.agreement_id` is gone; the server derives it.
+
+    v2.9 (CCR-014) — onboarding: a school_admin can invite people into
     their school and an invitee can set their own password. Until v2.9 the API
     could evaluate a teacher but could not create one. Note what is *not* here by
     design: creating the first admin, and creating schools/areas. Both need
@@ -112,6 +138,8 @@ tags:
     description: Evidence metadata and two-phase file upload
   - name: mappings
     description: Governed evidence↔indicator mappings (human-confirmed; AI may suggest)
+  - name: agreements
+    description: Performance agreements (แบบ PA1) and ประเด็นท้าทาย — written by the evaluatee, acknowledged by the director
   - name: scoring
     description: Committee assignments and per-evaluator scoring
   - name: reports
@@ -841,6 +869,147 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
+  /agreements:
+    get:
+      operationId: listAgreements
+      summary: Performance agreements visible to the caller
+      description: |
+        A teacher sees their own; a director or school_admin sees the school's; an
+        evaluator sees those of the people they sit on a committee for.
+      tags: [agreements]
+      parameters:
+        - name: cycle_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AgreementStatus' }
+      responses:
+        '200':
+          description: Agreements
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Agreement' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createAgreement
+      summary: File a performance agreement for a cycle (แบบ PA1)
+      description: |
+        One agreement per (cycle, personnel) — a second attempt is AGR-001, not a
+        second row. The challenge is written as part of the agreement rather than
+        through its own endpoint: it has no independent lifecycle, and an agreement
+        with an orphan challenge is not a state worth modelling.
+
+        Starts in `draft`. Content stays editable until `submitAgreement`.
+      tags: [agreements]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgreementCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /agreements/{agreementId}:
+    get:
+      operationId: getAgreement
+      summary: One agreement with its ประเด็นท้าทาย
+      tags: [agreements]
+      parameters:
+        - $ref: '#/components/parameters/AgreementId'
+      responses:
+        '200':
+          description: Agreement detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateAgreement
+      summary: Edit a draft agreement and its challenge
+      description: |
+        Draft only. Once submitted, the content is frozen (AGR-002): editing a
+        submitted agreement would let an evaluatee rewrite the targets they are
+        about to be scored against, and editing an acknowledged one would rewrite
+        what the director signed.
+      tags: [agreements]
+      parameters:
+        - $ref: '#/components/parameters/AgreementId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgreementPatch' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /agreements/{agreementId}/submit:
+    post:
+      operationId: submitAgreement
+      summary: Submit a draft agreement for the director to acknowledge
+      description: |
+        draft → submitted, and the content freezes. Requires a challenge to exist —
+        submitting an agreement with no ประเด็นท้าทาย would hand the committee an
+        empty 40% to score, which is the defect this whole contract version exists
+        to close (AGR-002).
+      tags: [agreements]
+      parameters:
+        - $ref: '#/components/parameters/AgreementId'
+      responses:
+        '200':
+          description: Submitted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /agreements/{agreementId}/acknowledge:
+    post:
+      operationId: acknowledgeAgreement
+      summary: Director acknowledges a submitted agreement (ผอ. เห็นชอบ)
+      description: |
+        submitted → acknowledged. Never available to the evaluatee, even though
+        they hold `own` on the agreement — acknowledging your own commitments is
+        not a signature.
+      tags: [agreements]
+      parameters:
+        - $ref: '#/components/parameters/AgreementId'
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
   /rounds/{roundId}/assignments:
     get:
       operationId: listAssignments
@@ -1075,6 +1244,11 @@ components:
       schema: { type: string, format: uuid }
     MembershipId:
       name: membershipId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AgreementId:
+      name: agreementId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -1748,12 +1922,114 @@ components:
         committee_role: { type: string, enum: [chair, member] }
         seat_number: { type: integer, minimum: 1, maximum: 3 }
 
+    AgreementStatus:
+      type: string
+      description: |
+        `draft` — editable by the evaluatee. `submitted` — content frozen, awaiting
+        the director. `acknowledged` — ผอ. เห็นชอบ; this is what a committee scores
+        against.
+      enum: [draft, submitted, acknowledged]
+
+    AgreementChallenge:
+      type: object
+      description: |
+        ประเด็นท้าทาย — one per agreement, matching the single challenge on the PA1
+        form. The three text fields are what indicators C.1 / C.2.1 / C.2.2 rate
+        (20 / 10 / 10 points), so they are the evidence behind 40% of the result.
+      required: [id, indicator_id, title, method_plan]
+      properties:
+        id: { type: string, format: uuid }
+        indicator_id:
+          type: string
+          format: uuid
+          description: The framework's วิธีดำเนินการ indicator (T-C.1 / A-C.1) — the anchor this challenge is filed under.
+        title:
+          type: string
+          description: ประเด็นท้าทาย เรื่อง … — the subject of the challenge.
+        method_plan:
+          type: string
+          description: วิธีดำเนินการ — scored by C.1 (20 points).
+        quantitative_target:
+          type: [string, 'null']
+          description: ผลลัพธ์เชิงปริมาณ — the target C.2.1 is scored against (10 points).
+        qualitative_target:
+          type: [string, 'null']
+          description: ผลลัพธ์เชิงคุณภาพ — the target C.2.2 is scored against (10 points).
+        target_group: { type: [string, 'null'], description: กลุ่มเป้าหมาย — not scored. }
+        period_note: { type: [string, 'null'], description: ช่วงเวลาดำเนินการ — not scored. }
+
+    AgreementChallengeInput:
+      type: object
+      required: [title, method_plan]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 500 }
+        method_plan: { type: string, minLength: 1, maxLength: 5000 }
+        quantitative_target: { type: [string, 'null'], maxLength: 5000 }
+        qualitative_target: { type: [string, 'null'], maxLength: 5000 }
+        target_group: { type: [string, 'null'], maxLength: 500 }
+        period_note: { type: [string, 'null'], maxLength: 500 }
+
+    Agreement:
+      type: object
+      required: [id, school_id, cycle_id, personnel_id, form_variant, status]
+      properties:
+        id: { type: string, format: uuid }
+        school_id: { type: string, format: uuid }
+        cycle_id: { type: string, format: uuid }
+        personnel_id: { type: string, format: uuid }
+        form_variant:
+          type: string
+          enum: [PA1_s, PA1_bs]
+          description: /ส for teachers (ว9), /บส for administrators (ว10). Derived from the personnel's position_role, not chosen by the client.
+        status: { $ref: '#/components/schemas/AgreementStatus' }
+        submitted_at: { type: [string, 'null'], format: date-time }
+
+    AgreementDetail:
+      allOf:
+        - $ref: '#/components/schemas/Agreement'
+        - type: object
+          properties:
+            challenge:
+              description: Null while still being drafted; required before the agreement can be submitted.
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/AgreementChallenge'
+
+    AgreementCreate:
+      type: object
+      description: |
+        No `school_id` and no `form_variant` — both are derived (the school from
+        the caller's membership, the variant from the personnel's position_role).
+        `personnel_id` is required rather than implied because a school_admin may
+        file on behalf of staff, but it is validated against the caller's school
+        and against the `own` grant for an evaluatee filing their own.
+      required: [cycle_id, personnel_id]
+      properties:
+        cycle_id: { type: string, format: uuid }
+        personnel_id: { type: string, format: uuid }
+        challenge:
+          description: Optional at creation so an agreement can be started and finished later; required by the time it is submitted.
+          $ref: '#/components/schemas/AgreementChallengeInput'
+
+    AgreementPatch:
+      type: object
+      description: Draft only (AGR-002). Omitted fields are left unchanged.
+      properties:
+        challenge: { $ref: '#/components/schemas/AgreementChallengeInput' }
+
     AssignmentCreate:
       type: object
+      description: |
+        No `agreement_id` (removed in 3.0.0, CCR-015). PerformanceAgreement is
+        unique per (cycle, personnel) and the assignment knows both, so the server
+        derives it. It used to be accepted from the body and passed through
+        unvalidated, which let one person's assignment be attached to another
+        person's agreement — and since workload_declaration is unique per
+        (agreement, round), that made the ภาระงาน gate read and write the wrong
+        person's row.
       required: [evaluatee_personnel_id, committee]
       properties:
         evaluatee_personnel_id: { type: string, format: uuid }
-        agreement_id: { type: [string, 'null'], format: uuid }
         committee:
           type: array
           minItems: 3
@@ -1767,6 +2043,19 @@ components:
         - type: object
           required: [workload_gate_declared, my_submission_state, framework_version_id, evaluatee_rank_level_code]
           properties:
+            challenge:
+              description: |
+                The evaluatee's ประเด็นท้าทาย, read-only (CCR-015). This is the
+                whole point of contract v3.0: indicators C.1 / C.2.1 / C.2.2 carry
+                40% of the result and rate the method and targets recorded here, so
+                without it the committee was scoring free text they had never seen.
+
+                Null when the evaluatee has no agreement for this cycle yet — the
+                scoring UI must say so rather than render an empty field, because
+                "no challenge filed" and "challenge left blank" are different facts.
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/AgreementChallenge'
             workload_gate_declared: { type: boolean }
             workload_met: { type: [boolean, 'null'] }
             my_submission_state:

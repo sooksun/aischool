@@ -64,6 +64,23 @@ export async function getAssignmentDetail(assignmentId: string) {
       // the right expected-practice text. There is no personnel lookup operation
       // for it to resolve this itself.
       evaluatee: { select: { rankLevelCode: true } },
+      // CCR-015: the evaluatee's ประเด็นท้าทาย, so the scoring screen can show the
+      // method and targets that indicators C.1/C.2.1/C.2.2 actually rate. Without
+      // this join the committee assigns 40% of the result to free text it has
+      // never seen — the defect contract v3.0 exists to close.
+      agreement: {
+        select: {
+          id: true,
+          status: true,
+          challenges: {
+            select: {
+              id: true, indicatorId: true, title: true, methodPlan: true,
+              quantitativeTarget: true, qualitativeTarget: true,
+              targetGroup: true, periodNote: true,
+            },
+          },
+        },
+      },
       round: {
         select: {
           id: true, status: true,
