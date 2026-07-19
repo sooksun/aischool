@@ -828,20 +828,30 @@ tasks:
       - tests/e2e/global-setup.mjs
     notes: >
       prisma.performanceAgreement and prisma.agreementChallenge have zero references
-      in apps/ and packages/. Consequence: submitMyScores always dies at the workload
-      gate (apps/api/src/routes/scoring.ts:220-227 — VAL-002 then SCORE-004), so no
-      score can be submitted through the API at all. ประเด็นท้าทาย (ส่วนที่ 2) is 40%
-      of the วPA score per ADR-0003 and has no implementation whatsoever.
-      The suites pass only because scoring-flow.test.mjs:114 and global-setup.mjs:196
-      insert the agreement row straight through Prisma — removing those inserts is
-      the real proof this task is done.
+      in apps/ and packages/. Two consequences.
+      (1) submitMyScores always dies at the workload gate
+      (apps/api/src/routes/scoring.ts:220-227 — VAL-002 then SCORE-004), so no score
+      can be submitted through the API at all.
+      (2) CORRECTION to this entry's original wording: ประเด็นท้าทาย does NOT "have
+      no implementation" — the 40% IS computed, because submitMyScores requires every
+      is_scored indicator and weights T-C.1/T-C.2.1/T-C.2.2 by maxPoints. What is
+      missing is the thing being rated: AgreementChallenge holds the method plan and
+      the quantitative/qualitative targets, and nothing writes or reads it. The
+      committee scores ส่วนที่ 2 BLIND. That is the sharper defect and CCR-015 leads
+      with it.
+      The suites pass only because scoring-flow.test.mjs:114 and global-setup.mjs
+      insert the agreement row straight through Prisma — deleting those inserts is
+      the acceptance criterion, not a side-effect.
     acceptance_criteria:
-      - CCR-015 written and approved by the user before merge
-      - PerformanceAgreement creatable and linkable to an assignment
-      - AgreementChallenge (ประเด็นท้าทาย) modelled end to end, weights from ScoreWeight per ADR-0003
+      - CCR-015 approved by the user before merge (drafted 2026-07-19)
+      - "openapi 2.9.0 -> 3.0.0 — BREAKING: AssignmentCreate.agreement_id removed (derived server-side, not client input)"
+      - PerformanceAgreement creatable, with a draft -> submitted -> acknowledged lifecycle that freezes content on submit
+      - AgreementChallenge written by the evaluatee; weights stay ScoreWeight rows per ADR-0003
+      - "AssignmentDetail exposes the challenge so the committee stops scoring ส่วนที่ 2 blind"
       - submitMyScores succeeds through the API alone on a freshly seeded DB
-      - "tests/e2e/global-setup.mjs no longer calls performanceAgreement.create directly"
-      - agreement_id validated for existence + school + cycle + evaluatee (currently unchecked at scoring.ts:97)
+      - "the raw performanceAgreement.create is DELETED from scoring-flow.test.mjs and global-setup.mjs"
+      - Permission sweep extended to all 6 new operations (floor rises from 34)
+      - AUDIT_ALLOWLIST gains PerformanceAgreement, or submit/acknowledge audit rows silently log nothing
 
   - id: SEIP-BLOCK-003
     title: "B-3 — Approval is schema-only; reports stall at pending_approval"
