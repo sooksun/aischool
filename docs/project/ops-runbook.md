@@ -190,63 +190,105 @@ means re-inviting, not recovering.
 There is no email dependency anywhere in that flow, deliberately: an on-prem
 school server (ADR-0005) may have no SMTP relay.
 
-## 5. Backup and restore (release gate subject)
+## 5. Backup and restore (automated)
 
-Evidence videos and evaluation rows are **irreplaceable**. Backup **both** MySQL and MinIO on the same schedule (or document RPO/RTO if staggered).
+Evidence videos and evaluation rows are **irreplaceable**. Until 2026-07-20 this
+section was two commands and a hope that someone typed them; the audit called it
+the largest unbounded downside in the system. It is now a script that runs on a
+timer and **proves each dump restorable before calling it a backup**.
 
-### 5.1 MySQL — backup (ADR-0008)
-
-```bash
-# Staging compose network; adjust container name from `docker compose ps`
-docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T mysql \
-  mysqldump -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --triggers --routines \
-  "$MYSQL_DATABASE" > "backup-seip-$(date +%Y%m%d).sql"
-```
-
-`--single-transaction` gives a consistent InnoDB snapshot without locking;
-`--triggers` matters here — the append-only audit triggers and the
-active_uk_key triggers are part of the schema's integrity, not decoration.
-Store dumps on encrypted media **off the app disk** (or second NAS on-prem). Retain per school policy (entity-dictionary retention intents: cycle+N / evidence+N).
-
-### 5.2 MySQL — restore
+### 5.1 Running it
 
 ```bash
-# Destructive — confirm environment first
-docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T mysql \
-  mysql -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" < backup-seip-YYYYMMDD.sql
+# manual, from the repo (needs mysqldump + mysql on PATH; mc for objects)
+npm run backup                       # dump + object mirror + verify + prune
+npm run backup -- --no-objects       # database only
+npm run backup -- --retain-days=30
 ```
 
-Then re-run `prisma migrate deploy` if restore is older than current migrations.
+Staging/on-prem runs it automatically — the `backup` service in
+`docker-compose.staging.yml` loops on `BACKUP_INTERVAL_SECONDS` (default daily)
+and logs each run to `docker logs`. A failed run prints `!!! BACKUP FAILED` and
+retries next interval rather than stopping the schedule.
 
-### 5.3 MinIO (evidence objects) — backup
+**Point `BACKUP_HOST_DIR` at storage on a different disk from the app.** The
+default (`./backups`) is a bind mount so it is at least outside the Docker
+volumes it protects, but a backup on the same disk as the database survives
+exactly the failures that do not matter.
 
-Option A — `mc mirror` to a second disk/NAS:
+| variable | default | |
+|---|---|---|
+| `BACKUP_HOST_DIR` | `./backups` | host path for dumps + object mirror |
+| `BACKUP_RETAIN_DAYS` | `14` | older artefacts pruned each run |
+| `BACKUP_INTERVAL_SECONDS` | `86400` | schedule |
+
+### 5.2 What it actually does
+
+1. `mysqldump --single-transaction --routines --triggers --events` to
+   `<dir>/seip-<timestamp>.sql.gz`, mode 0600, directory 0700 — dumps contain
+   every evaluation score and every teacher's evidence metadata (PDPA at rest).
+2. **Restores that dump into a scratch database and compares table counts**, then
+   drops it. Fails the run if the restore errors or the counts differ.
+3. `mc mirror` of the evidence bucket (without `--remove`: a mirror that deletes
+   local copies of missing objects would faithfully replicate an accidental
+   bucket wipe).
+4. Prunes artefacts older than the retention window.
+
+The password reaches `mysqldump` through `MYSQL_PWD`, never `-p` on the command
+line, because argv is readable by every local user via `ps`.
+
+### 5.3 Restoring
 
 ```bash
-mc alias set staging http://127.0.0.1:9000 "$S3_ACCESS_KEY" "$S3_SECRET_KEY"   # only if port published for backup window
-mc mirror --overwrite staging/seip-evidence /backup/seip-evidence/
+# drill: restore into a scratch database, report, drop it (the default)
+npm run restore -- --from=backups/seip-2026-07-20-05-41-20.sql.gz --dry-run
+
+# into a named database
+npm run restore -- --from=<file> --into=seip_recovered
+
+# over the live database — deliberately awkward
+npm run restore -- --from=<file> --into=seip --i-understand-this-overwrites
 ```
 
-Option B — filesystem snapshot of the Docker volume `seip_staging_minio` while MinIO is **stopped** (consistent snapshot).
+The drill reports `tables / triggers / evidence / users` and **fails if the
+restored database has no triggers**, because a restore that quietly lost them
+gives you a database that accepts `DELETE` on `audit_event`.
 
-### 5.4 MinIO — restore
+Objects: `mc mirror --overwrite <dir>/objects-<timestamp>/ <alias>/seip-evidence/`.
+After restoring a dump older than the current code, run `npm run db:migrate`.
 
-```bash
-mc mirror --overwrite /backup/seip-evidence/ staging/seip-evidence/
-```
+### 5.4 Why the dump format matters (a real incident)
 
-Or restore the volume snapshot, then start MinIO.
+The first real run of `backup.mjs` **failed its own verify**, and the cause was a
+schema bug nobody had noticed:
+
+Three of the four triggers stored a trailing `;` inside their body. `mysqldump`
+wraps a trigger body in `/*!50003 TRIGGER ... <body> */`, so a `;` at the end of
+`<body>` terminated the statement before the closing `*/` and the restore died
+with `syntax error near '*/'`. **Every backup this project had ever taken could
+not restore its audit-immutability triggers** — and nothing would have said so.
+
+Root cause: Prisma's migration runner passes each statement to the server *with*
+its terminator, except a file's last. Fixed by migrations
+`20260720060000`–`20260720060003`, which is why there is one `CREATE TRIGGER` per
+migration file — merging them back would silently reintroduce the bug in every
+trigger but the last.
+
+The lesson is the one this section is built on: a backup that has never been
+restored is a hypothesis, and the verify step is what turns it into a backup.
 
 ### 5.5 Backup/restore test (QUALITY-GATES release gate)
 
-Before first production go-live, and before each release that touches storage or schema:
+Before first production go-live, and before each release touching storage or schema:
 
-1. Take Postgres dump + MinIO mirror on staging.
-2. Restore into a **throwaway** compose project name.
-3. Confirm: login works; an evidence row’s object is GET-able via presigned flow; mapping/score rows intact.
-4. Record date + operator in the release notes.
-
----
+1. `npm run backup` on staging — it self-verifies, so a green run is step 1 and 2.
+2. `npm run restore -- --from=<latest> --dry-run` and check the reported counts
+   against production expectations.
+3. Restore objects into a throwaway bucket; confirm an evidence object is
+   downloadable through the presigned flow.
+4. Confirm login works against the restored database, and that
+   `SELECT COUNT(*) FROM information_schema.triggers` is 4.
+5. Record date + operator in the release notes.
 
 ## 6. Disk growth and retention
 

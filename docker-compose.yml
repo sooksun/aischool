@@ -39,6 +39,30 @@ services:
       echo 'bucket seip-evidence ready (private)'
       "
 
+  # Malware scanning (ADR-0009). Opt-in locally because the image pulls ~250 MB of
+  # signatures and holds ~1 GB resident — most local work does not need it:
+  #   docker compose --profile scan up -d clamav
+  # then set SCAN_PROVIDER=clamav in .env. Without it, SCAN_PROVIDER stays `none`
+  # and files are honestly reported `unscanned`, which is what they are.
+  clamav:
+    profiles: ["scan"]
+    image: clamav/clamav:1.4
+    container_name: seip-clamav
+    ports:
+      - "3310:3310"
+    volumes:
+      # Persist the signature database so a restart does not re-download it.
+      - seip-clamav:/var/lib/clamav
+    healthcheck:
+      # Not just "is the port open": clamd accepts connections well before the
+      # signature database is loaded, and a PING that early returns nothing.
+      test: ["CMD-SHELL", "clamdcheck.sh || exit 1"]
+      interval: 15s
+      timeout: 10s
+      # ~2 minutes: first boot has to load the full signature set.
+      retries: 12
+      start_period: 120s
+
   # SEIP-WORKER-001 — host: npm run dev:worker (same .env DATABASE_URL/S3_*).
   # Optional container (build monorepo; prefer host during local dev):
   #   docker compose --profile worker up -d worker
@@ -71,3 +95,4 @@ services:
 
 volumes:
   seip-minio:
+  seip-clamav:

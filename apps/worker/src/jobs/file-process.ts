@@ -1,8 +1,7 @@
 // Handles file.process jobs enqueued when completeFileUpload succeeds.
-// 1) HEAD object in MinIO (must exist)
-// 2) Virus-scan stub (deterministic rules for tests + safe default clean)
-// 3) Duration probe for video when duration_seconds is null
-// 4) Emit evidence.file.scan_completed outbox + mark registered outbox published
+// 1) HEAD object in MinIO — must exist and be the size that was declared
+// 2) Malware scan via clamd when SCAN_PROVIDER=clamav (ADR-0009)
+// 3) Emit evidence.file.scan_completed outbox + mark registered outbox published
 import type { S3Client } from '@aws-sdk/client-s3';
 import {
   getEvidenceFileById,
@@ -11,7 +10,8 @@ import {
   markOutboxPublished,
   prisma,
 } from '@seip/database';
-import { headObject } from '../s3.js';
+import { headObject, getObjectStream } from '../s3.js';
+import { scanStream } from '../clamav.js';
 import type { Env } from '../env.js';
 
 export interface FileProcessPayload {
@@ -22,20 +22,62 @@ export interface FileProcessPayload {
 }
 
 /**
- * There is no malware scanner wired in, so this job reports `unscanned` and the
- * platform makes no claim about file contents (CCR-012).
+ * Malware scanning (ADR-0009), the wiring the comment that used to live here
+ * described as future work.
  *
- * What used to be here matched "eicar"/"virus" against the FILENAME and returned
- * `clean` for everything else — no bytes were ever read. That verdict drove the
- * UI badge ("ปลอดภัย"), the scan_completed event, and the UPL-006 download gate,
- * so the platform asserted a clean bill of health it had never earned on a
- * PDPA-scoped evidence store. A stub that produces a verdict is worse than no
- * stub: it is indistinguishable from a real result downstream.
+ * What was here before CCR-012 matched "eicar"/"virus" against the FILENAME and
+ * returned `clean` for everything else, having read no bytes. That verdict drove
+ * the UI badge ("ปลอดภัย"), the scan_completed event and the UPL-006 download
+ * gate, so the platform asserted a clean bill of health it had never earned. CCR-012
+ * deleted it in favour of `unscanned`, on the principle that a stub producing a
+ * verdict is worse than no stub — downstream it is indistinguishable from a real
+ * result.
  *
- * Wiring ClamAV means streaming the object to `clamd` (INSTREAM) here and mapping
- * OK → 'clean', FOUND → 'blocked'. Until then `unscanned` is the honest answer,
- * and its presence in production is the signal that the scanner is missing.
+ * The rule that principle becomes, now that a real scanner exists: **the only
+ * path that writes `clean` is one where clamd returned OK.** Every failure mode —
+ * clamd down, timed out, refusing the file as too large — throws, leaving the
+ * file `pending` for the worker's existing retry. Unavailable is not safe.
  */
+async function scanIfEnabled(
+  env: Env,
+  s3: S3Client,
+  file: { id: string; storageUri: string; byteSize: bigint },
+): Promise<'clean' | 'blocked' | 'unscanned'> {
+  // Keyed on `!== 'clamav'`, not `=== 'none'`: scanning is opt-in positively, so
+  // an absent or unexpected value behaves exactly like the schema's own default
+  // (`none`) instead of falling into the scan path. zod rejects bad values at
+  // boot, so this only matters for callers that build an Env by hand — which is
+  // what every worker test does, and what made three of them fail when this was
+  // first written the other way round.
+  if (env.SCAN_PROVIDER !== 'clamav') {
+    // Honest, and visible: `unscanned` is disclosed in the UI and is the signal
+    // that this deployment has no scanner (ADR-0009 §3).
+    return 'unscanned';
+  }
+
+  // Too big for clamd to stream. Quarantine rather than pass — "could not be
+  // checked" is not a clean result (ADR-0009 §4).
+  if (file.byteSize > BigInt(env.CLAMAV_MAX_BYTES)) {
+    console.warn(
+      `[file.process] file ${file.id} is ${file.byteSize} bytes, above CLAMAV_MAX_BYTES `
+      + `(${env.CLAMAV_MAX_BYTES}); marking blocked rather than serving it unscanned`,
+    );
+    return 'blocked';
+  }
+
+  const body = await getObjectStream(s3, env.S3_BUCKET, file.storageUri);
+  const verdict = await scanStream(body, {
+    host: env.CLAMAV_HOST,
+    port: env.CLAMAV_PORT,
+    timeoutMs: env.CLAMAV_TIMEOUT_MS,
+  });
+
+  if (verdict.status === 'infected') {
+    console.warn(`[file.process] file ${file.id} BLOCKED — ${verdict.signature}`);
+    return 'blocked';
+  }
+  return 'clean';
+}
 
 /**
  * There is deliberately NO duration probe here.
@@ -76,9 +118,12 @@ export async function processFileJob(
   const storedSize = head.ContentLength;
   const sizeMismatch = storedSize != null && BigInt(storedSize) !== file.byteSize;
 
-  // 'blocked' stays reachable without a scanner: a stored object that is not the
-  // size it was declared to be is quarantined regardless of its contents.
-  const scanStatus = sizeMismatch ? 'blocked' : 'unscanned';
+  // A stored object that is not the size it was declared to be is quarantined
+  // regardless of its contents — and short-circuits the scan, because there is
+  // nothing to learn from scanning a file we already refuse to serve.
+  const scanStatus = sizeMismatch
+    ? 'blocked'
+    : await scanIfEnabled(env, s3, { id: file.id, storageUri: file.storageUri, byteSize: file.byteSize });
   await setFileScanStatus(file.id, scanStatus);
 
   await enqueueOutboxEvent({

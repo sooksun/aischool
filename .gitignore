@@ -47,3 +47,7 @@ blob-report/
 /PA2_s-*.pdf
 /e2e-*.pdf
 
+
+# Backup artefacts (ops-runbook §5). Dumps contain every evaluation score and
+# every teacher-uploaded file: PDPA data. They must never reach git.
+backups/

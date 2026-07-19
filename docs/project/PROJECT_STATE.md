@@ -8,7 +8,7 @@ School Evidence Intelligence Platform (SEIP)
 
 > ✅ **All three audit blockers closed** (2026-07-19/20): B-1 onboarding (CCR-014, openapi 2.9.0), B-2 agreements + ประเด็นท้าทาย (CCR-015, **3.0.0** breaking), B-3 report approval (CCR-016, 3.1.0). The วPA flow now runs end to end through the API: invite → accept → PA1 + ประเด็นท้าทาย → evidence → mapping → cycles/rounds → 3-evaluator scoring with the challenge visible → report → **director approves**.
 >
-> **This is not the same as "ready to deploy."** What remains is listed under "Known gaps at blocker-close" below — the largest are that evidence gets **no malware scan**, backups are a **manual** procedure, and nothing consumes the outbox. Removing the blocker banner means the product is complete enough to evaluate a teacher; it does not mean it is safe to put a school's PDPA data on it unattended.
+> **This is not the same as "ready to deploy."** What remains is listed under "Known gaps at blocker-close" below. The two items previously flagged as not-safe-to-defer — **no malware scanning** and **manual backups** — were both closed 2026-07-20 (ADR-0009; `npm run backup`/`restore` + a scheduled staging service). The largest gap left is that nothing consumes the outbox, which makes notification-shaped features no-ops rather than hazards.
 
 ## Development Model
 Claude Code is the sole developer (architect + backend + frontend + QA); the user is the final approver. The multi-AI team model (Codex/Antigravity/Grok) was retired by ADR-0004 — its docs remain with SUPERSEDED banners.
@@ -30,7 +30,7 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 6. ~~SEIP-OPS-002~~ **DONE** — develop CI fix (556958c)
 7. ~~SEIP-API-002~~ **DONE** — cycles + committee scoring (remaining 11 ops); all 27 contract operations implemented *(contract has since grown to 35 ops; all 35 are implemented)*
 8. Contracts at **v2.8.0** (was v2.1.0 at CCR-005; CCR-010 lazy download_url → 2.5.0, CCR-011 ReportPayloadV1 → 2.6.0, CCR-012 `unscanned` → 2.7.0, CCR-013 rubric text → 2.8.0)
-9. ~~SEIP-WORKER-001~~ **DONE** — outbox + file.process + storage GC. **Superseded in part by CCR-012:** the virus-scan stub and the duration probe were *deleted*, not fixed — `file.process` now only verifies stored size against declared size. There is no scanner. See "Audit correction" below.
+9. ~~SEIP-WORKER-001~~ **DONE** — outbox + file.process + storage GC. CCR-012 *deleted* the virus-scan stub and the duration probe rather than fixing them; **ADR-0009 (2026-07-20) replaced the scanner for real** with on-prem ClamAV that fails closed. The duration probe is still absent by design — `duration_seconds` stays null unless the client declares it, because an estimate is not a measurement.
 10. ~~SEIP-UI-002~~ **DONE** — director/admin UI for cycles, rounds, committee assignment; handoff `.ai-team/handoffs/SEIP-UI-002.md`
 11. ~~SEIP-OPS-003~~ **DONE** — staging compose + TLS/backup runbook + worker (`6b8b66c` on develop)
 12. ~~Wave D+E reports/AI~~ **DONE** (`f014cf8`) — ARCH-003/API-003/WORKER-002/UI-004 + ARCH-005/API-004/UI-005
@@ -50,13 +50,14 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
     - ~~**B-1 Onboarding path**~~ (`SEIP-BLOCK-001`, CCR-014) — **DONE 2026-07-19.** `listPersonnel` / `listMembers` / `inviteMember` / `endMembership` + unauthenticated `acceptInvite` (openapi 2.9.0). The first admin and school provisioning ship as operator CLIs (`npm run provision:school`, `npm run bootstrap:admin`) because no role may write across schools and inventing a `system_admin` would rewrite all 31 matrix rows. Proven by an e2e spec that onboards a teacher through the browser with no Prisma write in the path.
     - ~~**B-2 PerformanceAgreement + AgreementChallenge**~~ (`SEIP-BLOCK-002`, CCR-015) — **DONE 2026-07-19.** 6 operations (list/get/create/update/submit/acknowledge) + `AssignmentDetail.challenge`, so the committee now reads the method and targets that C.1/C.2.1/C.2.2 rate instead of scoring 40% blind. `AssignmentCreate.agreement_id` removed (**breaking → openapi 3.0.0**) — the server derives it from (cycle, evaluatee), and an unvalidated client value was letting one person's workload gate read another's row. Both raw `performanceAgreement.create` fixtures deleted: the suite can no longer be green while scoring is unreachable.
     - ~~**B-3 Approval**~~ (`SEIP-BLOCK-003`, CCR-016) — **DONE 2026-07-20.** `approveReport` / `returnReport` / `listReportApprovals` + `ReportDetail.approvals`, and `report.approved` left the `events.yaml` `deferred:` block. Approval requires the round **closed** (RPT-003): nothing checked round state before a report was generated, and scores stay mutable until close (SCORE-002), so signing earlier produced a document its own data could contradict. Nobody may approve their own report. The PDF now states whether it has been endorsed. `rejected` / `issued` / `superseded` stay deliberately unreachable — reasons in the CCR.
-26. **Sprint 2+ remaining** — multi-instance Redis rate limits *only if* no trusted edge; pixel-perfect official paper plates (Protected Artifact); real file scanning to replace the deleted stub (CCR-012).
+26. ~~Malware scanning + automated backups~~ **DONE 2026-07-20** — ADR-0009 (ClamAV on-prem, fail-closed) and `scripts/ops/backup.mjs` + `restore.mjs` with a scheduled staging service. The backup verifies each dump by restoring it, which immediately exposed a schema bug that had made every prior backup unable to restore its audit triggers (migrations `20260720060000`–`3`, runbook §5.4).
+27. **Sprint 2+ remaining** — outbox consumers (nothing reacts to any event); multi-instance Redis rate limits *only if* no trusted edge; pixel-perfect official paper plates (Protected Artifact); a real video duration probe; re-scan of files uploaded before ADR-0009.
 
 ## Audit correction — 2026-07-19
 
 A full evidence-based code audit was run against `feat/cleanup-L2-e2e-depth` (`42173e0`). **It contradicted this document.** The previous wording of this section claimed the product slice "works" end-to-end; that is true only because `tests/e2e/global-setup.mjs:196` and `apps/api/test/scoring-flow.test.mjs:114` write bootstrap rows **straight into Prisma, bypassing the API**. Corrected statement:
 
-**Product slice, as reachable through the API today** (updated 2026-07-19 after CCR-015): onboarding (invite → accept → login) → **PA1 agreement + ประเด็นท้าทาย (write → submit → director acknowledges)** → evidence upload → MinIO → `file.process` size check (no scan) → mapping (+ local AI suggest) → cycles/rounds → committee assignment → **3-evaluator scoring with the challenge visible** → report JSON + section refs → on-demand PDF.
+**Product slice, as reachable through the API today** (updated 2026-07-20): onboarding (invite → accept → login) → **PA1 agreement + ประเด็นท้าทาย (write → submit → director acknowledges)** → evidence upload → MinIO → `file.process` size check **+ ClamAV scan (ADR-0009)** → mapping (+ local AI suggest) → cycles/rounds → committee assignment → **3-evaluator scoring with the challenge visible** → report JSON + section refs → on-demand PDF.
 Creating the very first admin and provisioning schools are operator CLIs by design, not gaps (CCR-014 decisions 1 and 2).
 
 ## Known gaps at blocker-close — 2026-07-20
@@ -67,8 +68,8 @@ closed" is never read as "done".
 
 | Gap | Why it matters |
 |---|---|
-| **No malware scanning.** CCR-012 deleted the filename-matching stub rather than replacing it; `file.process` only compares stored size to declared size, files land `unscanned` and are still served | A PDPA-scoped evidence store with no file inspection. The UI discloses `unscanned` honestly, which is the mitigation, not a fix |
-| **Backups are manual.** `ops-runbook.md` gives `mysqldump` and `mc mirror` as copy-paste commands; no cron, no script, no sidecar | The runbook itself calls evidence irreplaceable. Highest-unbounded-downside item on this list |
+| ~~**No malware scanning**~~ — **CLOSED 2026-07-20 (ADR-0009)** | ClamAV on-prem (never a cloud AV — same PDPA reasoning as ADR-0007). Fails closed: if the scanner is unreachable the file stays `pending` and undownloadable, never `clean`. `SCAN_PROVIDER=none` keeps the honest `unscanned` and is the only way to opt out — there is no silent fallback. `scan_status = clean` is reachable for the first time |
+| ~~**Backups are manual**~~ — **CLOSED 2026-07-20** | `npm run backup` / `npm run restore`, plus a scheduled `backup` service in staging compose. Each dump is **restored into a scratch database and row-counted before being called a backup** — which is how it immediately caught a schema bug that made every prior backup unable to restore its audit triggers (runbook §5.4) |
 | **The outbox delivers to nobody.** `outbox.dispatch` marks events published and returns; 6 of 14 declared events have a producer and none has a consumer | Every notification-shaped feature is a no-op. `report.approved` is durably recorded and read by nothing |
 | **No deploy automation.** One CI workflow, no image build/push, no registry, no rollback path. Containers run as root | Deployment is a human following a runbook |
 | **`ReportStatus` is 3-of-5 reachable.** `issued` and `superseded` have no operation, by design (CCR-016) | Stop describing the report lifecycle as complete |
@@ -76,8 +77,14 @@ closed" is never read as "done".
 | **The report page dumps `payload` as raw JSON** | A developer view serving as a director's primary content |
 | **No test-coverage measurement anywhere** | 190+ tests with no denominator |
 
-Before a real school's data goes on this: malware scanning and automated backups
-are the two that should not wait.
+**Both items flagged as not-safe-to-defer are now closed** (2026-07-20). What is
+left on this list is real but none of it silently loses or exposes data. The
+largest remaining is that the outbox delivers to nobody, which makes every
+notification-shaped feature a no-op rather than a hazard.
+
+One thing the backup work surfaced that is worth carrying forward: the trigger
+bug had existed since 2026-07-18 and no test, gate or review found it. It was
+found by a script that verified its own output. Prefer that shape.
 
 Audited completeness ≈ **70%** weighted. Quality of what exists is high — 35/35 contract operations implemented with zero stubs or TODOs, `permission-guard.ts` reads `permissions.yaml` at runtime and fails closed, zero raw SQL, 180 verbatim ก.ค.ศ. paragraphs seeded, migration drift verified zero, `npm run typecheck` clean across all 6 workspaces, 164 real test cases. **The gap is missing scope, not rot** — closing it is a sprint of new contract operations, not bug-fixing.
 
@@ -114,4 +121,4 @@ See `.ai-team/task-board.yaml` (single tracker).
 - Video storage can grow quickly (mitigated by ADR-0005 MinIO on-prem + retention policy)
 - Solo-agent risk (replaces multi-agent drift risk): no independent reviewer — mitigate with CI gates + user review before contract lock
 - **Green CI is compatible with an undeployable system.** The e2e and scoring suites seed `PerformanceAgreement` and all identity rows directly through Prisma, so they prove the scoring *logic* while saying nothing about whether the flow is *reachable*. This masked B-1/B-2 until the 2026-07-19 audit. Any future fixture shortcut that bypasses the API must be recorded in `docs/qa/QUALITY-GATES.md` as a coverage caveat.
-- **Evidence store has no malware scanning.** CCR-012 deleted the filename-matching stub rather than replacing it; `unscanned` is disclosed in the UI but files are still served (`apps/api/src/routes/evidence.ts:376`). Accepted knowingly — revisit before any multi-school deployment.
+- ~~Evidence store has no malware scanning~~ — **CLOSED 2026-07-20 by ADR-0009.** ClamAV on-prem, fail-closed. Residual risk worth carrying: a deployment may still set `SCAN_PROVIDER=none`, in which case files read `unscanned` and are served — disclosed, not gated. And files uploaded **before** ADR-0009 were never scanned; any deployment predating it should re-scan its store once, which no operation currently does.

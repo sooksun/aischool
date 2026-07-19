@@ -20,6 +20,9 @@ const env = {
   NODE_ENV: 'test',
   WORKER_POLL_MS: 100,
   WORKER_GC_AFTER_DAYS: 0, // GC immediately for soft-deleted in tests
+  // Explicit rather than relying on the absent-value fallback: these tests assert
+  // the no-scanner behaviour, so they should say so (ADR-0009).
+  SCAN_PROVIDER: 'none',
 };
 
 const s3 = new S3Client({
@@ -181,3 +184,58 @@ test('a filename that looks like malware is NOT treated as a scan result', async
   assert.equal(updated.scanStatus, 'unscanned');
 });
 
+
+// ── malware scanning through the real job (ADR-0009) ──
+//
+// The unit tests in clamav-scan.test.mjs cover the protocol. These cover the
+// thing that actually protects a reviewer: what processFileJob writes to
+// scan_status, which is what the UPL-006 download gate reads.
+
+test('SCAN_PROVIDER=none leaves the honest `unscanned` — it does not invent a verdict', async () => {
+  const { file, school, evidence } = await fixture('plain.pdf');
+  await runOnce({ ...env, SCAN_PROVIDER: 'none' }, s3, { scheduleGc: false });
+  const after = await prisma.evidenceFile.findUnique({ where: { id: file.id } });
+  assert.equal(after.scanStatus, 'unscanned');
+  assert.equal(school.id.length, 36);
+  assert.ok(evidence.id);
+});
+
+test('a file above CLAMAV_MAX_BYTES is blocked, not waved through', async () => {
+  // "Too big for the scanner to read" is not "safe" (ADR-0009 §4). The previous
+  // generation of this code would have called it clean.
+  const { file } = await fixture('big.pdf');
+  await runOnce(
+    { ...env, SCAN_PROVIDER: 'clamav', CLAMAV_MAX_BYTES: 1, CLAMAV_HOST: '127.0.0.1', CLAMAV_PORT: 3310, CLAMAV_TIMEOUT_MS: 5_000 },
+    s3,
+    { scheduleGc: false },
+  );
+  const after = await prisma.evidenceFile.findUnique({ where: { id: file.id } });
+  assert.equal(after.scanStatus, 'blocked');
+});
+
+test('an unreachable scanner leaves the file pending — never clean', async () => {
+  // THE test. The file must remain undownloadable (UPL-006 refuses `pending`)
+  // rather than acquiring a verdict nobody earned.
+  //
+  // Asserted on scan_status, not on runOnce throwing: runOnce deliberately
+  // isolates per-job errors so one bad job cannot stop the loop, so the throw
+  // never reaches the caller. What a reviewer is protected by is the column.
+  const { file } = await fixture('unreachable.pdf');
+  await runOnce(
+    { ...env, SCAN_PROVIDER: 'clamav', CLAMAV_HOST: '127.0.0.1', CLAMAV_PORT: 1, CLAMAV_TIMEOUT_MS: 2_000 },
+    s3,
+    { scheduleGc: false },
+  );
+
+  const after = await prisma.evidenceFile.findUnique({ where: { id: file.id } });
+  assert.equal(after.scanStatus, 'pending', 'a file whose scan failed must stay pending, not become clean');
+
+  // Clean up the job this test deliberately made unsatisfiable. Left behind it
+  // retries forever against a port nothing listens on, and — because every test
+  // file shares one worker_job queue — the next runOnce anywhere claims it
+  // instead of its own. That is what broke three sibling tests the first time
+  // this was written (see the caveat in docs/qa/QUALITY-GATES.md).
+  await prisma.workerJob.deleteMany({
+    where: { jobType: 'file.process', payload: { path: '$.file_id', equals: file.id } },
+  });
+});
