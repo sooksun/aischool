@@ -869,11 +869,25 @@ tasks:
     notes: >
       prisma.approval has zero references in apps/ and packages/. report.generate
       flips draft -> pending_approval and nothing can move it further, so every
-      generated report is terminal. Note reports.ts:241 already carries the comment
+      generated report is terminal. reports.ts:241 already carries the comment
       "approval workflow is later" — this is that task.
+      CCR-016 (drafted 2026-07-20) found a second problem that a naive approve
+      endpoint would have made worse: NOTHING checks round state when a report is
+      created or generated, and scores only freeze when a round closes
+      (SCORE-002). Approving a report built on still-mutable scores produces a
+      signed document that its own data can later contradict. Hence the
+      round-must-be-closed rule, not just the missing endpoints.
+      Also decided there: `rejected` and `issued`/`superseded` stay unreachable on
+      purpose — see the CCR for why inventing semantics for them is worse than
+      leaving them unused.
     acceptance_criteria:
-      - CCR-016 written and approved by the user before merge
-      - Approve / reject operations with an explicit report state machine
-      - Approval recorded with actor + timestamp; AuditEvent written
-      - Emits the report approval event declared in events.yaml
-      - Test proves a report leaves pending_approval through the API
+      - CCR-016 approved by the user before merge (drafted 2026-07-20)
+      - "openapi 3.0.0 -> 3.1.0 (additive); permissions 1.7.0; error-codes 1.6.0 (RPT-003); events 1.2.0"
+      - "approveReport / returnReport / listReportApprovals, as a compare-and-swap state machine"
+      - "Approval blocked while the report's round is still open — signing mutable scores is the real defect"
+      - Self-approval refused (a director is an evaluatee under ว10 — matrix cannot express it)
+      - "report.approved moves OUT of the events.yaml deferred: block and gains a producer"
+      - AUDIT_ALLOWLIST gains Approval, excluding `comment` (free text about a named person)
+      - PDF states whether the report has been approved
+      - Test proves a report leaves pending_approval through the API alone
+      - "PROJECT_STATE loses its not-releasable banner — this is the last of the three audit blockers"
