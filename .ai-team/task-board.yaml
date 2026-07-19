@@ -775,7 +775,11 @@ tasks:
   # These are B-1/B-2/B-3 in docs/project/PROJECT_STATE.md ("Audit correction").
   # Each is a missing contract surface, not a bug: the models exist in
   # prisma/schema.prisma but have zero references in apps/ and packages/.
-  # None can merge without a CCR + major bump + user approval (CLAUDE.md).
+  # None can merge without a CCR + version bump + user approval (CLAUDE.md).
+  # Major vs minor is decided per CCR, not assumed: an earlier version of this
+  # comment claimed all three need a MAJOR bump. CCR-014 disproved that — adding
+  # operations is additive under contract-policy.md, so BLOCK-001 is 2.8.0->2.9.0.
+  # The CCR is still required because it adds a second unauthenticated write.
 
   - id: SEIP-BLOCK-001
     title: "B-1 — onboarding path: no way to create the first login"
@@ -797,8 +801,10 @@ tasks:
       Decide during the CCR whether first-admin bootstrap is a seeded row, a CLI, or
       a contract operation — the three have very different authz consequences.
     acceptance_criteria:
-      - CCR-014 written and approved by the user before merge
-      - openapi major bump; permissions.yaml rule for every new operationId
+      - CCR-014 approved by the user before merge (drafted 2026-07-19)
+      - "openapi 2.8.0 -> 2.9.0 (additive); permissions 1.4.0 -> 1.5.0; rule for every new operationId"
+      - Bootstrap admin + school provisioning ship as operator CLI, not API (CCR-014 decisions 1 and 2)
+      - listPersonnel replaces the raw UUIDs in the 4 director/evaluator screens
       - School / UserAccount / SchoolMembership / PersonnelProfile creatable
       - hashPassword has a real (non-test) caller
       - "db:reset && db:migrate && db:seed then login succeeds — proven by a test, no direct Prisma writes"
