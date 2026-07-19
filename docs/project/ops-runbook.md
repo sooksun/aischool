@@ -282,6 +282,14 @@ restored is a hypothesis, and the verify step is what turns it into a backup.
 Before first production go-live, and before each release touching storage or schema:
 
 1. `npm run backup` on staging — it self-verifies, so a green run is step 1 and 2.
+   **On staging, not on a dev box.** The MySQL half needs `mysqldump`/`mysql` on
+   PATH (Laragon ships them under `bin/mysql/*/bin`, which is not on PATH by
+   default) and the object half needs `mc`, which the `backup` image installs but
+   a Windows dev machine generally does not have. Verified 2026-07-20: on this
+   dev machine the database dump verifies at 32 tables and the object mirror then
+   exits 1 with `mc alias failed`, so **every local run to date has backed up the
+   database only**. The script is right to fail loudly rather than report a
+   partial backup as success — but a green *database* run is not a green backup.
 2. `npm run restore -- --from=<latest> --dry-run` and check the reported counts
    against production expectations.
 3. Restore objects into a throwaway bucket; confirm an evidence object is
@@ -289,6 +297,101 @@ Before first production go-live, and before each release touching storage or sch
 4. Confirm login works against the restored database, and that
    `SELECT COUNT(*) FROM information_schema.triggers` is 4.
 5. Record date + operator in the release notes.
+
+## 5b. Malware scanning and the re-scan sweep (ADR-0009)
+
+### 5b.1 Running the scanner
+
+`clamav` is a first-class service in `docker-compose.staging.yml` and is **required**
+whenever `SCAN_PROVIDER=clamav`. Two operational facts ADR-0009 promised were
+documented here and were not, until this section existed:
+
+- **Memory.** clamd holds the signature database resident — budget ~1 GB, plus
+  headroom during a `freshclam` reload when both copies are briefly live. A host
+  sized for API + worker alone will OOM the container, and an OOM-killed clamd
+  means uploads stay `pending` (fail-closed), not that they pass.
+- **Signatures.** The `clamav/clamav` image runs `freshclam` on a timer. Stale
+  signatures are the silent failure mode: everything looks green while detection
+  degrades. Check `docker compose logs clamav | grep -i "database updated"`.
+
+Verify reachability without scanning anything — the worker also does this at boot
+and logs a loud warning rather than exiting (killing the worker would stop report
+generation and GC too):
+
+```bash
+docker compose -f docker-compose.staging.yml exec clamav clamdscan --version
+```
+
+### 5b.2 Why old files need a sweep at all
+
+Enabling the scanner only covers **new** uploads. Two populations of existing rows
+are left behind, and the dangerous one is not the obvious one:
+
+| Population | `scan_status` | Downloadable? | Reality |
+|---|---|---|---|
+| Pre-CCR-012 uploads | `clean` | yes, badged ปลอดภัย | **Never scanned.** The old `file.process` matched "eicar"/"virus" against the *filename*, read no bytes, and called everything else clean. |
+| `SCAN_PROVIDER=none` period | `unscanned` | yes, badged honestly | Never scanned, and says so. |
+
+The first row is the reason the sweep cannot select on `scan_status`: `clean` is
+precisely the value that lies. It selects on **`evidence_file.scanned_at IS NULL`**
+— a receipt written only when clamd actually returned a verdict. Migration
+`20260718220000` declined to backfill those rows because it "cannot distinguish
+those rows from ones a real scanner might have cleared"; `scanned_at` is that
+distinction made durable.
+
+`scanned_at` stays null for anything refused *without being read* — oversize,
+size-mismatch, scanner down — so "could not be checked" remains re-checkable
+instead of hardening into a permanent verdict.
+
+### 5b.3 Running the sweep
+
+```bash
+# 1. census first — changes nothing, and tells you the size of the problem
+npm run rescan:files -- --report
+
+# 2. see what would be queued
+npm run rescan:files -- --dry-run
+
+# 3. queue a batch (default 500, oldest upload first)
+SCAN_PROVIDER=clamav npm run rescan:files -- --limit=500
+
+# 4. watch it drain; re-run step 3 until --report shows no gap
+npm run rescan:files -- --report
+```
+
+The script **never scans and never writes a verdict** — it enqueues `file.process`
+jobs and stops. The worker does the work through the same path an upload takes, so
+there is one implementation of "what is this file" and one fail-closed policy over
+it. **The worker must be running** or nothing happens.
+
+| Flag | Effect |
+|---|---|
+| `--report` | Coverage census + queue state. Read-only. |
+| `--dry-run` | Select and print, queue nothing. The only mode that runs without a scanner. |
+| `--limit=N` | Batch size (default 500). Re-running is safe — already-queued files are skipped. |
+| `--school=<id>` | Scope to one school. |
+| `--include-blocked` | Also re-scan `blocked`. Opt-in because it can *widen* access: a file blocked only for exceeding `CLAMAV_MAX_BYTES` becomes downloadable if clamd now clears it. Use after raising `StreamMaxLength`. |
+| `--scanned-before=<date>` | Also re-scan genuine but stale verdicts — how a signature update gets swept in. |
+
+It refuses to run when `SCAN_PROVIDER != clamav`: every job would re-derive
+`unscanned`, write no receipt, and re-emit `scan_completed` — the whole store
+pushed through the queue to change nothing.
+
+### 5b.4 Expected outcomes, including the alarming ones
+
+- **Files ending `blocked` is the sweep working.** A file that was serving as
+  `clean` for months and now blocks is the finding, not a regression. Tell the
+  affected teacher before they discover it as a broken download.
+- **Files staying `pending`** mean the scan could not be completed — clamd down,
+  timed out. They are undownloadable until it succeeds. That is fail-closed.
+- **`object missing from storage for file <id> (bucket=… key=…)`** in
+  `--report` means a metadata row outlived its bytes. The sweep is usually the
+  first thing to notice; these rows need a separate data decision (restore the
+  object, or delete the row), not a scanner fix.
+- A failed job **leaves its file exactly as it was**. No verdict is ever invented
+  for a file the scanner could not read.
+
+---
 
 ## 6. Disk growth and retention
 
@@ -305,7 +408,7 @@ Staging runs `worker` as a first-class compose service (`infra/docker/Dockerfile
 
 | Job type | Role |
 |---|---|
-| `file.process` | Virus-scan stub + optional video duration probe; updates `scan_status` |
+| `file.process` | Size/integrity check + ClamAV scan (ADR-0009); writes `scan_status` and, only on a real verdict, `scanned_at`. Also the sweep's unit of work (§5b). |
 | `storage.gc` | Removes orphaned/soft-deleted objects after `WORKER_GC_AFTER_DAYS` |
 | outbox dispatch | Publishes transactional outbox rows (domain events) |
 | future | `report.generate`, AI mapping — same process, new job types |

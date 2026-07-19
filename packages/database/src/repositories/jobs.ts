@@ -57,6 +57,67 @@ export async function claimPendingJobs(limit = 10) {
   return claimed;
 }
 
+/**
+ * file_ids that already have a `file.process` job waiting or in flight.
+ *
+ * The re-scan sweep is expected to be run more than once — an operator batches it
+ * with `--limit`, or re-runs it after fixing whatever made clamd unreachable.
+ * Without this, each run would pile a second job onto files the first run already
+ * queued, multiplying clamd's work and emitting a duplicate `scan_completed`
+ * event per copy.
+ *
+ * Read into a Set rather than filtered per file in SQL: the pending queue is
+ * small by design (the worker drains 10 per poll), and Prisma's MySQL JSON
+ * filters take a single `'$.file_id'` path equality (ADR-0008), so a batch
+ * membership test would mean one query per candidate.
+ */
+export async function listQueuedFileProcessTargets(): Promise<Set<string>> {
+  const rows = await prisma.workerJob.findMany({
+    where: { jobType: 'file.process', status: { in: ['pending', 'running'] } },
+    select: { payload: true },
+  });
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const fileId = (row.payload as { file_id?: unknown } | null)?.file_id;
+    if (typeof fileId === 'string') ids.add(fileId);
+  }
+  return ids;
+}
+
+/**
+ * Progress and, more importantly, stalls for the re-scan sweep.
+ *
+ * Groups terminal failures by message because the interesting case is a repeated
+ * one — "object missing from storage" ×37 is a story about the store, where 37
+ * separate lines are noise.
+ */
+export async function summariseRescanJobs(): Promise<{
+  queued: number;
+  failed: number;
+  errors: [string, number][];
+}> {
+  const [queued, failedRows] = await Promise.all([
+    prisma.workerJob.count({
+      where: { jobType: 'file.process', status: { in: ['pending', 'running'] } },
+    }),
+    prisma.workerJob.findMany({
+      where: { jobType: 'file.process', status: 'failed' },
+      select: { lastError: true },
+      take: 1000,
+    }),
+  ]);
+  const counts = new Map<string, number>();
+  for (const row of failedRows) {
+    const key = (row.lastError ?? 'unknown error').split('(')[0].trim();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return {
+    queued,
+    failed: failedRows.length,
+    errors: [...counts].sort((a, b) => b[1] - a[1]),
+  };
+}
+
 export async function markJobDone(id: string) {
   return prisma.workerJob.update({
     where: { id },

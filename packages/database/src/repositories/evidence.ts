@@ -246,8 +246,27 @@ export async function getEvidenceFileById(schoolId: string, fileId: string) {
   });
 }
 
-export async function setFileScanStatus(fileId: string, status: 'clean' | 'unscanned' | 'blocked') {
-  return prisma.evidenceFile.update({ where: { id: fileId }, data: { scanStatus: status } });
+/**
+ * `scanned` is the receipt, and it is NOT implied by the status (ADR-0009).
+ *
+ * Pass true only when clamd actually read the bytes and returned a verdict. Every
+ * other path leaves `scannedAt` null, which is what makes the file selectable by a
+ * later sweep: `unscanned` never had a scanner, and a file blocked on size or on a
+ * size mismatch was refused *without being read*, so "could not be checked" must
+ * stay re-checkable instead of hardening into a permanent answer.
+ *
+ * Setting scannedAt for those would be the same class of lie as the filename stub
+ * CCR-012 deleted — a record of a check that never happened.
+ */
+export async function setFileScanStatus(
+  fileId: string,
+  status: 'clean' | 'unscanned' | 'blocked',
+  opts: { scanned: boolean },
+) {
+  return prisma.evidenceFile.update({
+    where: { id: fileId },
+    data: { scanStatus: status, ...(opts.scanned ? { scannedAt: new Date() } : {}) },
+  });
 }
 
 export async function setFileDurationSeconds(fileId: string, durationSeconds: number) {
@@ -270,4 +289,84 @@ export async function listFilesForStorageGc(cutoff: Date, limit = 50) {
 
 export async function deleteEvidenceFileRow(fileId: string) {
   return prisma.evidenceFile.delete({ where: { id: fileId } });
+}
+
+// ─────────────────── re-scan sweep (ADR-0009) ───────────────────
+
+export interface RescanSelection {
+  /** Only files in these scan states. `blocked` is excluded by default — see the CLI. */
+  statuses: ('pending' | 'clean' | 'unscanned' | 'blocked')[];
+  /** Null → "never scanned by a real scanner". A date → also re-scan verdicts
+   * older than it, which is how a signature update gets swept in. */
+  scannedBefore?: Date | null;
+  schoolId?: string;
+  limit: number;
+}
+
+function rescanWhere(sel: RescanSelection) {
+  return {
+    scanStatus: { in: sel.statuses },
+    // The whole point of the sweep. `null` covers stub-`clean` rows, `unscanned`
+    // rows, and anything refused without being read; `scannedBefore` additionally
+    // catches genuine but stale verdicts.
+    ...(sel.scannedBefore
+      ? { OR: [{ scannedAt: null }, { scannedAt: { lt: sel.scannedBefore } }] }
+      : { scannedAt: null }),
+    evidence: {
+      // Soft-deleted evidence is on its way to storage GC, which will delete the
+      // object out from under any job queued for it — the scan would fail on a
+      // missing object, burn its 8 retries and land in `failed`, making a clean
+      // sweep look broken. Skipping them is not laziness about coverage: these
+      // files are already unreachable through the API.
+      deletedAt: null,
+      ...(sel.schoolId ? { schoolId: sel.schoolId } : {}),
+    },
+  };
+}
+
+/** Files a re-scan should cover, oldest upload first so the longest-unverified
+ * evidence is dealt with before anything recent. */
+export async function listFilesForRescan(sel: RescanSelection) {
+  return prisma.evidenceFile.findMany({
+    where: rescanWhere(sel),
+    orderBy: { uploadedAt: 'asc' },
+    take: sel.limit,
+    select: {
+      id: true,
+      evidenceId: true,
+      byteSize: true,
+      scanStatus: true,
+      uploadedAt: true,
+      evidence: { select: { schoolId: true } },
+    },
+  });
+}
+
+export async function countFilesForRescan(sel: Omit<RescanSelection, 'limit'>): Promise<number> {
+  return prisma.evidenceFile.count({ where: rescanWhere({ ...sel, limit: 0 }) });
+}
+
+/**
+ * Scan-coverage census: how many files are in each state, and how many of those
+ * carry a real verdict. The two numbers disagreeing is the finding — 81 rows
+ * reading `clean` with 0 receipts is what prompted this whole sweep.
+ */
+export async function scanCoverageCensus(schoolId?: string): Promise<
+  { scanStatus: string; total: number; verified: number }[]
+> {
+  const where = schoolId ? { evidence: { schoolId } } : {};
+  const [totals, verified] = await Promise.all([
+    prisma.evidenceFile.groupBy({ by: ['scanStatus'], where, _count: { _all: true } }),
+    prisma.evidenceFile.groupBy({
+      by: ['scanStatus'],
+      where: { ...where, scannedAt: { not: null } },
+      _count: { _all: true },
+    }),
+  ]);
+  const verifiedBy = new Map(verified.map((r) => [r.scanStatus, r._count._all]));
+  return totals.map((r) => ({
+    scanStatus: r.scanStatus,
+    total: r._count._all,
+    verified: verifiedBy.get(r.scanStatus) ?? 0,
+  }));
 }

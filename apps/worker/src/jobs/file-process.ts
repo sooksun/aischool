@@ -19,6 +19,19 @@ export interface FileProcessPayload {
   evidence_id: string;
   school_id: string;
   outbox_event_id?: string;
+  /** Set by the re-scan sweep (`scripts/ops/rescan-files.mjs`) so a queue full of
+   * these is legible in `worker_job` and distinguishable from upload traffic when
+   * something goes wrong mid-sweep. Nothing branches on it. */
+  reason?: 'rescan';
+}
+
+/** A verdict, plus whether a scanner actually produced it (ADR-0009). */
+interface ScanOutcome {
+  status: 'clean' | 'blocked' | 'unscanned';
+  /** True only when clamd read the bytes and answered. Drives `scanned_at`, which
+   * is what a future sweep selects on — so getting this wrong either re-scans
+   * everything forever or hides a file that was never checked. */
+  scanned: boolean;
 }
 
 /**
@@ -42,7 +55,7 @@ async function scanIfEnabled(
   env: Env,
   s3: S3Client,
   file: { id: string; storageUri: string; byteSize: bigint },
-): Promise<'clean' | 'blocked' | 'unscanned'> {
+): Promise<ScanOutcome> {
   // Keyed on `!== 'clamav'`, not `=== 'none'`: scanning is opt-in positively, so
   // an absent or unexpected value behaves exactly like the schema's own default
   // (`none`) instead of falling into the scan path. zod rejects bad values at
@@ -51,8 +64,9 @@ async function scanIfEnabled(
   // first written the other way round.
   if (env.SCAN_PROVIDER !== 'clamav') {
     // Honest, and visible: `unscanned` is disclosed in the UI and is the signal
-    // that this deployment has no scanner (ADR-0009 §3).
-    return 'unscanned';
+    // that this deployment has no scanner (ADR-0009 §3). No receipt — these are
+    // precisely the files a sweep must pick up once a scanner is switched on.
+    return { status: 'unscanned', scanned: false };
   }
 
   // Too big for clamd to stream. Quarantine rather than pass — "could not be
@@ -62,7 +76,10 @@ async function scanIfEnabled(
       `[file.process] file ${file.id} is ${file.byteSize} bytes, above CLAMAV_MAX_BYTES `
       + `(${env.CLAMAV_MAX_BYTES}); marking blocked rather than serving it unscanned`,
     );
-    return 'blocked';
+    // Blocked, but NOT scanned: nothing read these bytes. Leaving the receipt off
+    // keeps the file re-checkable, so raising clamd's StreamMaxLength and running
+    // the sweep again can legitimately clear it (ADR-0009 §4).
+    return { status: 'blocked', scanned: false };
   }
 
   const body = await getObjectStream(s3, env.S3_BUCKET, file.storageUri);
@@ -72,11 +89,13 @@ async function scanIfEnabled(
     timeoutMs: env.CLAMAV_TIMEOUT_MS,
   });
 
+  // Past this line clamd has read every byte and answered, so both outcomes earn
+  // the receipt. These are the only two `scanned: true` returns in the codebase.
   if (verdict.status === 'infected') {
     console.warn(`[file.process] file ${file.id} BLOCKED — ${verdict.signature}`);
-    return 'blocked';
+    return { status: 'blocked', scanned: true };
   }
-  return 'clean';
+  return { status: 'clean', scanned: true };
 }
 
 /**
@@ -114,17 +133,41 @@ export async function processFileJob(
   // other way, and the point where the HeadObject result stops being discarded
   // (2026-07-18 audit). A file that is not what it said it was is never served:
   // 'blocked' is the state getEvidenceFileDownloadUrl already refuses (UPL-006).
-  const head = await headObject(s3, env.S3_BUCKET, file.storageUri);
+  //
+  // The catch is not cosmetic. S3 HEAD returns no response body, so the SDK has
+  // nothing to build a message from and surfaces a bare `UnknownError` — which is
+  // what lands in worker_job.last_error, eight times, before the job dies. During
+  // normal uploads this is unreachable (the object was just PUT). The re-scan
+  // sweep is the first thing to touch old rows in bulk, and it turned three
+  // orphaned metadata rows into three identical `UnknownError`s with nothing
+  // naming the file or the cause. An operator watching a sweep stall deserves the
+  // actual sentence.
+  let head;
+  try {
+    head = await headObject(s3, env.S3_BUCKET, file.storageUri);
+  } catch (e) {
+    const status = (e as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+    if (status === 404 || (e as { name?: string })?.name === 'NotFound') {
+      throw new Error(
+        `object missing from storage for file ${file.id} (bucket=${env.S3_BUCKET} `
+        + `key=${file.storageUri}) — the metadata row outlived its bytes`,
+      );
+    }
+    throw e;
+  }
   const storedSize = head.ContentLength;
   const sizeMismatch = storedSize != null && BigInt(storedSize) !== file.byteSize;
 
   // A stored object that is not the size it was declared to be is quarantined
   // regardless of its contents — and short-circuits the scan, because there is
   // nothing to learn from scanning a file we already refuse to serve.
-  const scanStatus = sizeMismatch
-    ? 'blocked'
+  const outcome: ScanOutcome = sizeMismatch
+    // Refused on metadata alone — no scanner involved, so no receipt, and a
+    // re-scan will make the same judgement from the same evidence.
+    ? { status: 'blocked', scanned: false }
     : await scanIfEnabled(env, s3, { id: file.id, storageUri: file.storageUri, byteSize: file.byteSize });
-  await setFileScanStatus(file.id, scanStatus);
+  await setFileScanStatus(file.id, outcome.status, { scanned: outcome.scanned });
+  const scanStatus = outcome.status;
 
   await enqueueOutboxEvent({
     eventType: 'evidence.file.scan_completed',

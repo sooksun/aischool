@@ -605,12 +605,23 @@ model EvidenceFile {
   durationSeconds  Int?            @map("duration_seconds") // null until the worker probes (CCR-002)
   originalFilename String          @map("original_filename") @db.VarChar(255)
   scanStatus       ScanStatus      @default(pending) @map("scan_status")
+  /// Receipt for a REAL scan: set only when clamd returned a verdict (ADR-0009).
+  /// Null therefore means "no scanner has ever read these bytes" — which is true
+  /// of `unscanned` rows, of files blocked for size without being read, and of
+  /// every `clean` row written by the filename stub CCR-012 deleted. Without this
+  /// column those stub rows are indistinguishable from a genuine pass, which is
+  /// exactly why migration 20260718220000 could not safely backfill them.
+  /// Also dates the verdict, so a signature-update sweep can target `scanned_at
+  /// < <date>`. Deliberately internal: not in openapi, so this stays additive.
+  scannedAt        DateTime?       @map("scanned_at")
   uploadedAt       DateTime        @default(now()) @map("uploaded_at")
 
   evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
 
   @@index([evidenceId])
   @@index([scanStatus])
+  /// The rescan sweep's query: "never really scanned", oldest first.
+  @@index([scannedAt])
   @@map("evidence_file")
 }
 

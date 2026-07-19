@@ -891,3 +891,49 @@ tasks:
       - PDF states whether the report has been approved
       - Test proves a report leaves pending_approval through the API alone
       - "PROJECT_STATE loses its not-releasable banner — this is the last of the three audit blockers"
+
+  - id: SEIP-OPS-005
+    title: Re-scan evidence uploaded before ADR-0009 (the sweep)
+    status: done                # 2026-07-20 — claude; no contract change (scanned_at is internal)
+    sprint: 2
+    dependencies: [SEIP-BLOCK-003]
+    primary_paths:
+      - scripts/ops/rescan-files.mjs
+      - prisma/migrations/20260721060000_evidence_file_scanned_at/migration.sql
+      - packages/database/src/repositories/evidence.ts
+      - packages/database/src/repositories/jobs.ts
+      - apps/worker/src/jobs/file-process.ts
+      - docs/decisions/ADR-0009-malware-scanning.md
+      - docs/project/ops-runbook.md
+    notes: >
+      ADR-0009 named this as its own blind spot under Consequences. Building it
+      corrected how the gap had been described everywhere, including in this
+      board: the population needing a re-scan is NOT the `unscanned` files, it is
+      the `clean` ones. Those were written by the pre-CCR-012 filename stub, which
+      matched "eicar"/"virus" against the FILENAME, read no bytes, and called
+      everything else clean — they are downloadable, badged ปลอดภัย, and were
+      never scanned. This database held 81 of them against 180 `unscanned`.
+      So the sweep cannot select on scan_status: `clean` is precisely the value
+      that lies, and nothing distinguished a stub verdict from a genuine one.
+      Migration 20260718220000 hit this and refused to backfill for exactly that
+      reason. Hence evidence_file.scanned_at — a receipt written ONLY when clamd
+      read the bytes and answered, so "never really scanned" becomes queryable.
+      Deliberately null for anything refused unread (oversize, size mismatch,
+      scanner down), which keeps "could not be checked" re-checkable instead of
+      letting it harden into a permanent verdict.
+      The script enqueues file.process jobs and never writes a verdict, so there
+      stays exactly one scanner and one fail-closed policy.
+      Two things the first real sweep run exposed, both fixed here: a missing S3
+      object surfaced as a bare `UnknownError` eight times over (S3 HEAD has no
+      response body to parse), and a stalled sweep was indistinguishable from a
+      running one. Also wrote the ClamAV memory/freshclam runbook section that
+      ADR-0009 had claimed already existed.
+    acceptance_criteria:
+      - "scanned_at set only on a real clamd verdict — asserted for unscanned, oversize, size-mismatch and scanner-down"   # DONE
+      - "A stub-written `clean` row is selected despite its status, and drops out once verified"                            # DONE — real clamd
+      - Soft-deleted evidence and already-queued files are skipped                                                          # DONE
+      - Refuses to run under SCAN_PROVIDER != clamav, since it would change nothing                                         # DONE
+      - "`blocked` re-scan is opt-in — it can widen access after a CLAMAV_MAX_BYTES raise"                                   # DONE
+      - Missing storage objects fail with a message naming the file                                                         # DONE
+      - "--report shows the receipt gap and any stalled queue"                                                              # DONE
+      - Sweep run for real against the dev store, not only unit-tested                                                      # DONE — 23 files verified, 2 blocked
