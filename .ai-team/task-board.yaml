@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-19T05:47:11+07:00
+updated_at: 2026-07-20T05:10:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -855,7 +855,7 @@ tasks:
 
   - id: SEIP-BLOCK-003
     title: "B-3 — Approval is schema-only; reports stall at pending_approval"
-    status: ready
+    status: done                # 2026-07-20 — CCR-016 APPLIED; openapi 3.1.0, permissions 1.7.0, error-codes 1.6.0, events 1.3.0
     sprint: 2
     ccr: CCR-016
     dependencies: [SEIP-BLOCK-002]

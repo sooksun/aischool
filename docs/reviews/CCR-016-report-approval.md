@@ -1,7 +1,59 @@
 # CCR-016: every generated report is terminal at `pending_approval`
 
-Status: **DRAFT — awaiting user approval**
+Status: **APPLIED 2026-07-20** (approved by the user the same day)
 Blocker: `SEIP-BLOCK-003` (the last one) · Depends on: CCR-015 · Blocks: nothing
+Shipped: openapi **3.1.0** · permissions **1.7.0** · error-codes **1.6.0** · events **1.3.0**
+
+## What changed between draft and implementation
+
+1. **`Approval.decided_at` is nullable in the API, not required-and-present.** The
+   draft assumed a timestamp. The column is nullable because it must accommodate
+   a `pending` row; nothing writes one, so in practice it is always set — but
+   asserting a guarantee the schema does not make would have been a small lie in
+   the contract. Typed `[string, 'null']` with a note.
+
+2. **`events.yaml`'s `version:` field was wrong before this change.** It read
+   `1.1.0` while its own comment log recorded a `1.2.0` bump for CCR-012 — that
+   bump was written in the log and never applied to the field, so the two had been
+   out of step since 2026-07-18. Corrected to **1.3.0** here. This is the
+   hand-maintained-version-header gap the 2026-07-19 audit flagged: unlike
+   `openapi.yaml`, whose bump the oasdiff gate checks, nothing asserts these match.
+   Worth a gate of its own.
+
+3. **`AGR-001`/`AGR-002` were sitting under the `--- RES ---` header** in
+   `error-codes.yaml` from CCR-015. Moved under their own heading while adding
+   `RPT-003`.
+
+## Verified
+
+- `apps/api/test/report-approval.test.mjs` — **12 tests**, led by the two that
+  matter: *"a report cannot be approved while its round is still open"* and
+  *"once the round closes, the same report approves"*. Plus self-approval refused,
+  teacher denied both actions, return requires a reason and lands in `draft`, a
+  returned report can be regenerated and approved with **both** decisions kept in
+  the trail, concurrent approve loses the compare-and-swap (exactly one 200, one
+  422, one Approval row), draft is not approvable, the subject can read their own
+  trail, `report.approved` reaches the outbox, and the PDF differs once approved.
+- Whole suite green: **78 API integration**, 19 backend, 38 web unit, 23 package
+  unit, 6 security (**258 sweep assertions across 43 of 44 matrix rows**),
+  16 database, 8 worker, 12 e2e. `typecheck` and `lint` clean across 6 workspaces.
+- `oasdiff`: no breaking changes, 3.0.0 → 3.1.0.
+- Driven in the browser: a director opened a `pending_approval` report, saw the
+  panel with the round rule explained up front, approved it with a Thai comment,
+  and the page moved to `อนุมัติแล้ว` with the decision, timestamp and comment in
+  the trail. The subject then read that trail through `listReportApprovals`.
+
+## Known limitations shipped knowingly
+
+- **`issued` and `superseded` remain unreachable**, as designed. After this CCR
+  the project should stop describing `ReportStatus` as fully implemented — three
+  of five values are reachable, and that is the honest count.
+- **`report.approved` is emitted into an outbox nothing consumes.**
+  `outbox.dispatch` is still an acknowledged no-op, so the event is durably
+  recorded and delivered nowhere. Known and separate; not fixed here.
+- **The report detail page still dumps `payload` as raw JSON** — the audit flagged
+  it, and rendering it properly belongs with the PA report layout work rather than
+  being smuggled into an approval change. Left visible and labelled.
 
 ## Request
 

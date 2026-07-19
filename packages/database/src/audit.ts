@@ -31,6 +31,13 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   // out of the audit log (same reason Evidence omits title/description above).
   // Who submitted what, and when, is answerable from id + status + personnelId.
   PerformanceAgreement: ['id', 'schoolId', 'cycleId', 'personnelId', 'status'],
+  // CCR-016. `comment` excluded: on a return it is free text about a named
+  // person's performance, which is the same learner-adjacent content SEC-PDPA-2
+  // keeps out of the trail (see Evidence and PerformanceAgreement above). Who
+  // decided what, and when, is fully answerable from the fields kept — the
+  // comment lives on the Approval row itself, readable by anyone who may read the
+  // report, without being duplicated into an append-only log.
+  Approval: ['id', 'reportId', 'approverUserId', 'stepCode', 'decision'],
 };
 
 function allowlist(entityType: string, obj: Record<string, unknown> | undefined): Snapshot | undefined {

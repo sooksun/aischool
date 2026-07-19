@@ -6,6 +6,7 @@
 # version: 1.4.0 — CCR-014 (additive): AUTH-005 invite token not usable;
 #   RES-003 duplicate membership.
 # version: 1.5.0 — CCR-015 (additive): AGR-001, AGR-002 performance agreements.
+# version: 1.6.0 — CCR-016 (additive): RPT-003 report approval transitions.
 # Protected contract (contract-policy.md): changes require an approved CCR.
 # Codes are a stable API surface — clients map them to localized text. Adding a
 # code is additive (1.x); changing the meaning or HTTP status of an existing code,
@@ -20,7 +21,7 @@
 #   }
 # HTTP status is authoritative for transport semantics; `code` for business semantics.
 
-version: 1.5.0
+version: 1.6.0
 status: locked
 locked_at: 2026-07-17
 error_shape:
@@ -91,15 +92,20 @@ codes:
   # --- RPT (reports) ---
   RPT-001: { http: 422, meaning: Invalid report request — unknown template, cycle/round/subject mismatch, or generation preconditions not met }
   RPT-002: { http: 422, meaning: Report PDF not ready — still draft or generation_status pending }
+  # One code covers three refusals that share a cause — the report is not in a
+  # state where this decision is meaningful (CCR-016). Includes the round-still-open
+  # case: scores freeze on close (SCORE-002), so signing earlier would timestamp an
+  # endorsement of numbers that can still change.
+  RPT-003: { http: 422, meaning: Approval not permitted — report not pending_approval, round not yet closed, or approver is the report subject }
 
   # --- AI (mapping suggest) ---
   AI-001: { http: 422, meaning: Mapping suggest rejected — evidence not eligible, framework unknown, or provider unavailable }
 
-  # --- RES ---
-  # agreements (CCR-015)
+  # --- AGR (performance agreements, CCR-015) ---
   AGR-001: { http: 409, meaning: An agreement already exists for this (cycle, personnel) — one per cycle }
   AGR-002: { http: 422, meaning: Agreement not in a state that allows this — content freezes on submit, and submitting requires a challenge }
 
+  # --- RES ---
   RES-001: { http: 404, meaning: Resource not found (or hidden by tenancy — indistinguishable by design) }
   RES-002: { http: 409, meaning: Concurrent modification (stale version/etag) }
   # Distinct from RES-002: nothing was concurrently modified and retrying will not

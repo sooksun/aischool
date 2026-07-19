@@ -267,6 +267,15 @@ const OPERATIONS = () => ({
   getReport: { method: 'GET', url: `/api/v1/reports/${randomUUID()}` },
   // Missing report → RES-001 for granted roles after PERM check.
   getReportPdf: { method: 'GET', url: `/api/v1/reports/${randomUUID()}/pdf` },
+
+  // approvals (CCR-016). Random report id → RES-001 for granted roles, never
+  // PERM-001. approveReport/returnReport are NOT own-sensitive in this fixture's
+  // sense: their `own`-style rule is the inverse ("you may NOT act on your own
+  // report"), and it lives in the route rather than the matrix, so it is covered
+  // directly by apps/api/test/report-approval.test.mjs instead.
+  listReportApprovals: { method: 'GET', url: `/api/v1/reports/${randomUUID()}/approvals` },
+  approveReport: { method: 'POST', url: `/api/v1/reports/${randomUUID()}/approve`, payload: {} },
+  returnReport: { method: 'POST', url: `/api/v1/reports/${randomUUID()}/return`, payload: { comment: 'sweep' } },
 });
 
 // The fixture evidence/mapping above is owned by 'teacher', who is ALSO the
@@ -355,11 +364,11 @@ test('every implemented operation x every role matches its permissions.yaml disp
     }
   }
 
-  // 40 of the 41 matrix rows. The one exclusion is getAssignmentResults, whose
+  // 43 of the 44 matrix rows. The one exclusion is getAssignmentResults, whose
   // temporal rule is explained and separately covered above. Raise this number
   // whenever a row is added — a sweep that silently covers less than the matrix
   // is how completeFileUpload and getEvidenceFileDownloadUrl went unswept.
-  assert.ok(assertions >= 40 * 6, `sweep should cover at least 40 operations x 6 roles, got ${assertions} assertions`);
+  assert.ok(assertions >= 43 * 6, `sweep should cover at least 43 operations x 6 roles, got ${assertions} assertions`);
   assert.deepEqual(failures, [], `${failures.length} mismatch(es) between permissions.yaml and enforcement:\n${failures.join('\n')}`);
 });
 

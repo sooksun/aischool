@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, unwrap, downloadAuthorized } from '../../api/client';
 import { ApiError, thaiMessageFor } from '../../api/errors';
+import { useAuth } from '../../hooks/useAuth';
 import type { components } from '../../api/schema.generated';
 import {
   REPORT_PDF_DOWNLOAD_BUSY,
@@ -22,11 +23,22 @@ function isPayloadReady(p: ReportPayload): boolean {
 
 export function ReportDetailPage() {
   const { reportId } = useParams<{ reportId: string }>();
+  // createReports is the closest existing flag: permissions.yaml grants
+  // approveReport/returnReport to exactly the roles it covers (director,
+  // school_admin), so a separate capability would be the same set under a second
+  // name. The API remains the gate — the route rule that you may not decide on
+  // your OWN report is not expressible here at all.
+  const { capabilities } = useAuth();
+  const canDecide = capabilities.createReports;
   const [report, setReport] = useState<ReportDetail | null>(null);
   const [error, setError] = useState(false);
   const [polling, setPolling] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  // Bumped after a decision to re-run the load effect. A counter rather than a
+  // callback ref because the effect already owns cancellation and the polling
+  // timer — re-entering it is simpler than duplicating that teardown.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!reportId) return;
@@ -58,7 +70,7 @@ export function ReportDetailPage() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [reportId]);
+  }, [reportId, reloadKey]);
 
   if (error) {
     return (
@@ -106,6 +118,12 @@ export function ReportDetailPage() {
         สถานะ: {statusLabel(report.status)}
         {polling && ' · กำลังจัดทำ payload…'}
       </p>
+
+      <ApprovalPanel
+        report={report}
+        canDecide={canDecide}
+        onDecided={() => setReloadKey((k) => k + 1)}
+      />
 
       <div style={{ margin: '12px 0' }}>
         <button
@@ -159,6 +177,11 @@ export function ReportDetailPage() {
       </ul>
 
       <h2>ข้อมูลโครงสร้าง (payload)</h2>
+      {/* Still a raw dump — the 2026-07-19 audit flagged this as a developer view
+          shipped as the report's primary content. Rendering the payload properly
+          is real work and belongs with the PA report layout task, not smuggled
+          into an approval CCR; left visible and labelled rather than quietly
+          removed. */}
       <pre
         style={{
           background: 'var(--surface-2, #f4f4f5)',
@@ -184,4 +207,125 @@ function statusLabel(status: string): string {
     case 'superseded': return 'ถูกแทนที่';
     default: return status;
   }
+}
+
+/**
+ * Approval state, the decision trail, and the approve/return actions (CCR-016).
+ *
+ * Before this, a generated report reached `pending_approval` and stopped there
+ * forever — the document existed but nobody could sign it. The panel is shown to
+ * everyone who can read the report, not only to those who can decide: the subject
+ * of a PA report has a direct interest in knowing whether it has been endorsed
+ * and by whom.
+ */
+function ApprovalPanel({ report, canDecide, onDecided }: {
+  report: ReportDetail;
+  canDecide: boolean;
+  onDecided: () => void;
+}) {
+  const [comment, setComment] = useState('');
+  const [busy, setBusy] = useState<null | 'approve' | 'return'>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [returning, setReturning] = useState(false);
+
+  const approvals = report.approvals ?? [];
+  const awaiting = report.status === 'pending_approval';
+
+  function decide(kind: 'approve' | 'return') {
+    setError(null);
+    if (kind === 'return' && !comment.trim()) {
+      return setError('ระบุเหตุผลที่ส่งกลับ เพื่อให้ผู้จัดทำทราบว่าต้องแก้ไขอะไร');
+    }
+    setBusy(kind);
+    const req = kind === 'approve'
+      ? api.POST('/reports/{reportId}/approve', {
+          params: { path: { reportId: report.id } },
+          body: { comment: comment.trim() || null },
+        })
+      : api.POST('/reports/{reportId}/return', {
+          params: { path: { reportId: report.id } },
+          body: { comment: comment.trim() },
+        });
+
+    req
+      .then((res) => { unwrap(res); setComment(''); setReturning(false); onDecided(); })
+      .catch((e) => setError(e instanceof ApiError ? thaiMessageFor(e) : 'บันทึกผลการพิจารณาไม่สำเร็จ'))
+      .finally(() => setBusy(null));
+  }
+
+  return (
+    <section
+      aria-labelledby="approval-heading"
+      style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: 16, margin: '12px 0' }}
+    >
+      <h2 id="approval-heading" style={{ marginTop: 0 }}>การอนุมัติ</h2>
+
+      {report.status === 'approved' ? (
+        <div className="alert alert-success" role="status">
+          <span>รายงานนี้ผ่านการอนุมัติแล้ว</span>
+        </div>
+      ) : (
+        <div className="alert alert-info" role="note">
+          <span aria-hidden="true">ℹ</span>
+          <span>
+            {awaiting
+              ? 'รอการพิจารณาจากผู้อำนวยการ — เอกสารนี้ยังไม่มีผลรับรอง'
+              : 'ยังไม่เข้าสู่ขั้นตอนอนุมัติ (รายงานต้องจัดทำเสร็จก่อน)'}
+          </span>
+        </div>
+      )}
+
+      {approvals.length > 0 && (
+        <ul style={{ listStyle: 'none', padding: 0, margin: '12px 0 0' }}>
+          {approvals.map((a) => (
+            <li key={a.id} className="field-hint" style={{ marginBottom: 6 }}>
+              {a.decision === 'approved' ? '✓ อนุมัติ' : '↩ ส่งกลับให้แก้ไข'}
+              {a.decided_at && ` · ${new Date(a.decided_at).toLocaleString('th-TH')}`}
+              {a.comment && (
+                <span style={{ display: 'block', whiteSpace: 'pre-wrap' }}>{a.comment}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canDecide && awaiting && (
+        <div style={{ marginTop: 12 }}>
+          <div className="field">
+            <label htmlFor="approval-comment">
+              ความเห็น{returning ? '' : ' (ไม่บังคับ)'}
+            </label>
+            <textarea
+              id="approval-comment" rows={3} maxLength={2000}
+              value={comment} onChange={(e) => setComment(e.target.value)}
+            />
+          </div>
+
+          {error && <div className="field-error" role="alert">{error}</div>}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button" className="btn btn-primary"
+              onClick={() => decide('approve')} disabled={busy !== null}
+            >
+              {busy === 'approve' ? 'กำลังบันทึก…' : 'อนุมัติ'}
+            </button>
+            <button
+              type="button" className="btn btn-secondary"
+              onClick={() => { setReturning(true); decide('return'); }}
+              disabled={busy !== null}
+            >
+              {busy === 'return' ? 'กำลังบันทึก…' : 'ส่งกลับให้แก้ไข'}
+            </button>
+          </div>
+          {/* The round rule is a server decision (RPT-003) and the UI cannot know
+              the round's status from this response, so it is explained up front
+              rather than surfaced only as a rejection. */}
+          <p className="field-hint" style={{ marginTop: 8 }}>
+            อนุมัติได้เมื่อปิดรอบการประเมินแล้วเท่านั้น เพราะคะแนนยังแก้ไขได้จนกว่ารอบจะปิด
+          </p>
+        </div>
+      )}
+    </section>
+  );
 }

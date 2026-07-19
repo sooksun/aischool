@@ -6,7 +6,9 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Sprint 1 — First production features** (opened 2026-07-17 when the ARCH-002 merge went green on develop, run `b5c6d6a`). Single-agent mode per ADR-0004.
 
-> ⚠️ **Not releasable.** ~~Three~~ ~~Two~~ **One** blocker remains: **B-3** — `Approval` is schema-only, so every generated report stalls at `pending_approval`. Closed 2026-07-19: **B-1** (onboarding, CCR-014 → openapi 2.9.0) and **B-2** (agreements + ประเด็นท้าทาย, CCR-015 → openapi **3.0.0**, breaking). Scoring now works end to end through the API, and the committee can see the challenge text it is scoring. See "Audit correction — 2026-07-19".
+> ✅ **All three audit blockers closed** (2026-07-19/20): B-1 onboarding (CCR-014, openapi 2.9.0), B-2 agreements + ประเด็นท้าทาย (CCR-015, **3.0.0** breaking), B-3 report approval (CCR-016, 3.1.0). The วPA flow now runs end to end through the API: invite → accept → PA1 + ประเด็นท้าทาย → evidence → mapping → cycles/rounds → 3-evaluator scoring with the challenge visible → report → **director approves**.
+>
+> **This is not the same as "ready to deploy."** What remains is listed under "Known gaps at blocker-close" below — the largest are that evidence gets **no malware scan**, backups are a **manual** procedure, and nothing consumes the outbox. Removing the blocker banner means the product is complete enough to evaluate a teacher; it does not mean it is safe to put a school's PDPA data on it unattended.
 
 ## Development Model
 Claude Code is the sole developer (architect + backend + frontend + QA); the user is the final approver. The multi-AI team model (Codex/Antigravity/Grok) was retired by ADR-0004 — its docs remain with SUPERSEDED banners.
@@ -47,7 +49,7 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 25. **Sprint 2 — BLOCKERS (must precede any release; each needs a CCR + a version bump — major vs minor decided per CCR, not assumed).** Tracked as `SEIP-BLOCK-001/002/003` on `.ai-team/task-board.yaml` (CCR-014/015/016). **CCR-014 drafted 2026-07-19, awaiting approval** — it lands additive (openapi 2.8.0 → 2.9.0), correcting this entry's original claim that all three require a major bump:
     - ~~**B-1 Onboarding path**~~ (`SEIP-BLOCK-001`, CCR-014) — **DONE 2026-07-19.** `listPersonnel` / `listMembers` / `inviteMember` / `endMembership` + unauthenticated `acceptInvite` (openapi 2.9.0). The first admin and school provisioning ship as operator CLIs (`npm run provision:school`, `npm run bootstrap:admin`) because no role may write across schools and inventing a `system_admin` would rewrite all 31 matrix rows. Proven by an e2e spec that onboards a teacher through the browser with no Prisma write in the path.
     - ~~**B-2 PerformanceAgreement + AgreementChallenge**~~ (`SEIP-BLOCK-002`, CCR-015) — **DONE 2026-07-19.** 6 operations (list/get/create/update/submit/acknowledge) + `AssignmentDetail.challenge`, so the committee now reads the method and targets that C.1/C.2.1/C.2.2 rate instead of scoring 40% blind. `AssignmentCreate.agreement_id` removed (**breaking → openapi 3.0.0**) — the server derives it from (cycle, evaluatee), and an unvalidated client value was letting one person's workload gate read another's row. Both raw `performanceAgreement.create` fixtures deleted: the suite can no longer be green while scoring is unreachable.
-    - **B-3 Approval** (`SEIP-BLOCK-003`, CCR-016 drafted 2026-07-20)**.** Schema-only. Reports reach `pending_approval` and stall permanently — 3 of the 5 `ReportStatus` values are unreachable, and `report.approved` sits in the `events.yaml` `deferred:` block. CCR-016 additionally found that **nothing checks round state before a report is generated**, so approving one built on still-mutable scores would produce a signed document its own data could later contradict; approval will require the round closed (RPT-003). `rejected` / `issued` / `superseded` stay deliberately unreachable — reasons in the CCR.
+    - ~~**B-3 Approval**~~ (`SEIP-BLOCK-003`, CCR-016) — **DONE 2026-07-20.** `approveReport` / `returnReport` / `listReportApprovals` + `ReportDetail.approvals`, and `report.approved` left the `events.yaml` `deferred:` block. Approval requires the round **closed** (RPT-003): nothing checked round state before a report was generated, and scores stay mutable until close (SCORE-002), so signing earlier produced a document its own data could contradict. Nobody may approve their own report. The PDF now states whether it has been endorsed. `rejected` / `issued` / `superseded` stay deliberately unreachable — reasons in the CCR.
 26. **Sprint 2+ remaining** — multi-instance Redis rate limits *only if* no trusted edge; pixel-perfect official paper plates (Protected Artifact); real file scanning to replace the deleted stub (CCR-012).
 
 ## Audit correction — 2026-07-19
@@ -55,7 +57,27 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 A full evidence-based code audit was run against `feat/cleanup-L2-e2e-depth` (`42173e0`). **It contradicted this document.** The previous wording of this section claimed the product slice "works" end-to-end; that is true only because `tests/e2e/global-setup.mjs:196` and `apps/api/test/scoring-flow.test.mjs:114` write bootstrap rows **straight into Prisma, bypassing the API**. Corrected statement:
 
 **Product slice, as reachable through the API today** (updated 2026-07-19 after CCR-015): onboarding (invite → accept → login) → **PA1 agreement + ประเด็นท้าทาย (write → submit → director acknowledges)** → evidence upload → MinIO → `file.process` size check (no scan) → mapping (+ local AI suggest) → cycles/rounds → committee assignment → **3-evaluator scoring with the challenge visible** → report JSON + section refs → on-demand PDF.
-**Not reachable through the API:** approving a report (B-3) — every report is terminal at `pending_approval`. Creating the very first admin and provisioning schools are operator CLIs by design, not gaps (CCR-014 decisions 1 and 2).
+Creating the very first admin and provisioning schools are operator CLIs by design, not gaps (CCR-014 decisions 1 and 2).
+
+## Known gaps at blocker-close — 2026-07-20
+
+The three blockers are closed; these are not, and none of them is a blocker only
+because none of them stops the วPA flow from completing. Listed so "all blockers
+closed" is never read as "done".
+
+| Gap | Why it matters |
+|---|---|
+| **No malware scanning.** CCR-012 deleted the filename-matching stub rather than replacing it; `file.process` only compares stored size to declared size, files land `unscanned` and are still served | A PDPA-scoped evidence store with no file inspection. The UI discloses `unscanned` honestly, which is the mitigation, not a fix |
+| **Backups are manual.** `ops-runbook.md` gives `mysqldump` and `mc mirror` as copy-paste commands; no cron, no script, no sidecar | The runbook itself calls evidence irreplaceable. Highest-unbounded-downside item on this list |
+| **The outbox delivers to nobody.** `outbox.dispatch` marks events published and returns; 6 of 14 declared events have a producer and none has a consumer | Every notification-shaped feature is a no-op. `report.approved` is durably recorded and read by nothing |
+| **No deploy automation.** One CI workflow, no image build/push, no registry, no rollback path. Containers run as root | Deployment is a human following a runbook |
+| **`ReportStatus` is 3-of-5 reachable.** `issued` and `superseded` have no operation, by design (CCR-016) | Stop describing the report lifecycle as complete |
+| **Committee seats are still raw UUIDs**, and rank codes display as codes | Documented in CCR-015; needs a contract addition each |
+| **The report page dumps `payload` as raw JSON** | A developer view serving as a director's primary content |
+| **No test-coverage measurement anywhere** | 190+ tests with no denominator |
+
+Before a real school's data goes on this: malware scanning and automated backups
+are the two that should not wait.
 
 Audited completeness ≈ **70%** weighted. Quality of what exists is high — 35/35 contract operations implemented with zero stubs or TODOs, `permission-guard.ts` reads `permissions.yaml` at runtime and fails closed, zero raw SQL, 180 verbatim ก.ค.ศ. paragraphs seeded, migration drift verified zero, `npm run typecheck` clean across all 6 workspaces, 164 real test cases. **The gap is missing scope, not rot** — closing it is a sprint of new contract operations, not bug-fixing.
 

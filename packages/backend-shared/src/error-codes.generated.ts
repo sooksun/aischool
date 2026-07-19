@@ -3,7 +3,7 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const ERROR_CODES_VERSION = '1.5.0';
+export const ERROR_CODES_VERSION = '1.6.0';
 
 export type ErrorCode =
   | 'AUTH-001'
@@ -38,6 +38,7 @@ export type ErrorCode =
   | 'CYCLE-003'
   | 'RPT-001'
   | 'RPT-002'
+  | 'RPT-003'
   | 'AI-001'
   | 'AGR-001'
   | 'AGR-002'
@@ -80,6 +81,7 @@ export const ERROR_CODE_TABLE: Record<ErrorCode, { http: number; meaning: string
   'CYCLE-003': { http: 422, meaning: "Round period outside cycle bounds" },
   'RPT-001': { http: 422, meaning: "Invalid report request — unknown template" },
   'RPT-002': { http: 422, meaning: "Report PDF not ready — still draft or generation_status pending" },
+  'RPT-003': { http: 422, meaning: "Approval not permitted — report not pending_approval" },
   'AI-001': { http: 422, meaning: "Mapping suggest rejected — evidence not eligible" },
   'AGR-001': { http: 409, meaning: "An agreement already exists for this (cycle" },
   'AGR-002': { http: 422, meaning: "Agreement not in a state that allows this — content freezes on submit" },

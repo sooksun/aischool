@@ -61,6 +61,24 @@ openapi: 3.1.0
 #   rated: the committee scored 40% of a teacher's result without ever being shown
 #   the method and targets that teacher had committed to. AssignmentDetail.challenge
 #   is the fix; the rest of this version is what makes a challenge exist at all.
+# version 3.1.0 — CCR-016 (additive): report approval. Adds approveReport,
+#   returnReport, listReportApprovals and ReportDetail.approvals. Before this,
+#   report.generate flipped a report draft → pending_approval and nothing moved it
+#   again: three of the five ReportStatus values were unreachable, the whole
+#   ApprovalDecision enum was unused, and report.approved sat in events.yaml's
+#   deferred: block. SEIP could evaluate a teacher end to end and produce the
+#   document, but nobody could sign it.
+#
+#   Approval REQUIRES the report's round to be closed (RPT-003). Nothing checked
+#   round state at report creation or generation, and scores only freeze on close
+#   (SCORE-002) — so approving earlier would stamp a signature on scores that can
+#   still change, producing a document its own data later contradicts.
+#
+#   `Report.status` gains no new values: `approved` was always in the enum and in
+#   the generated types, so no client breaks. This only makes it reachable.
+#   `rejected`, `issued` and `superseded` remain deliberately unreachable — see
+#   CCR-016 decisions 2 and the deferred list for why inventing semantics for them
+#   would be worse than leaving them unused.
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -69,10 +87,15 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 3.0.0
-  summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation + reports/AI + PDF)
+  version: 3.1.0
+  summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation + reports/approval/AI + PDF)
   description: |
-    Contract v3.0 (CCR-015) — performance agreements (แบบ PA1) and ประเด็นท้าทาย.
+    Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
+    report, or returns it with a reason so it can be regenerated. Approval is only
+    permitted once the round is closed, because scores stay mutable until then and
+    a signature on mutable scores is a document that can contradict itself.
+
+    v3.0 (CCR-015) — performance agreements (แบบ PA1) and ประเด็นท้าทาย.
     A teacher writes their own agreement, states the challenge they are taking on
     with its method and quantitative/qualitative targets, submits it, and the
     director acknowledges it. The committee then sees that text while scoring the
@@ -1180,6 +1203,105 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /reports/{reportId}/approvals:
+    get:
+      operationId: listReportApprovals
+      summary: The decision trail for a report (CCR-016)
+      description: |
+        Grants match `getReport` rather than the narrower write grants: a subject
+        who can read their own result but not who endorsed it would be a strange
+        kind of transparency.
+
+        Append-only — there is no operation that edits or removes a decision, and
+        that is what makes the signature mean anything.
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: Decisions, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Approval' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reports/{reportId}/approve:
+    post:
+      operationId: approveReport
+      summary: Endorse a generated report (ผอ. ลงนาม)
+      description: |
+        `pending_approval` → `approved`, recording an Approval row with the actor
+        and timestamp.
+
+        **Requires the report's round to be closed** (RPT-003). Scores only freeze
+        when a round closes (SCORE-002), so approving earlier would timestamp a
+        signature against numbers that can still change — the document would later
+        contradict its own data with nothing to show for it. Reports with
+        `round_id = null` are cycle-level and skip the check; there is no round to
+        freeze.
+
+        The evaluatee may never approve their own report, even where their role
+        holds the grant — a director is an evaluatee too under ว10, and
+        `permissions.yaml` cannot express "any grant except over yourself".
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalDecisionInput' }
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /reports/{reportId}/return:
+    post:
+      operationId: returnReport
+      summary: Return a report for rework (ส่งกลับให้แก้ไข)
+      description: |
+        `pending_approval` → `draft`, so the report can be regenerated once
+        whatever was wrong is fixed.
+
+        `comment` is REQUIRED here, unlike on approve: sending a result back with
+        no stated reason gives the person who has to fix it nothing to act on.
+
+        Note there is no "reject". A report renders scores that already exist, so
+        marking one rejected while that data stands unchanged would be a
+        contradiction rather than a state — if the result itself is wrong, the
+        remedy is to reopen the round and rescore. `ApprovalDecision.rejected`
+        stays unused on purpose (CCR-016 decision 2).
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalReturnInput' }
+      responses:
+        '200':
+          description: Returned to draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportDetail' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
   /reports/{reportId}/pdf:
     get:
       operationId: getReportPdf
@@ -2205,6 +2327,59 @@ components:
             section_refs:
               type: array
               items: { $ref: '#/components/schemas/ReportSectionRef' }
+            approvals:
+              description: |
+                Decision trail, oldest first (CCR-016). Empty until someone acts.
+                Present on the detail response so a client does not need a second
+                call just to render "who signed this and when".
+              type: array
+              items: { $ref: '#/components/schemas/Approval' }
+
+    Approval:
+      type: object
+      description: One recorded decision on a report. Append-only.
+      required: [id, report_id, approver_user_id, step_code, decision, decided_at]
+      properties:
+        id: { type: string, format: uuid }
+        report_id: { type: string, format: uuid }
+        approver_user_id: { type: string, format: uuid }
+        step_code:
+          type: string
+          description: |
+            Which step in the approval sequence this decision belongs to. Always
+            `director` today — SEIP has one step, and a configurable chain would be
+            a workflow engine built for a workflow that does not exist yet
+            (CCR-016 decision 1). A second step later is additive: a new value here
+            and a rule about ordering, no migration.
+          examples: [director]
+        decision:
+          type: string
+          description: |
+            `rejected` is absent by design, not by omission — see returnReport.
+            `pending` is not emitted either: a row is only written when a decision
+            is actually taken.
+          enum: [approved, returned]
+        comment: { type: [string, 'null'] }
+        decided_at:
+          description: |
+            Nullable because the column must accommodate a `pending` row. Nothing
+            writes one — a row is only created when a decision is actually taken —
+            so in practice this is always set. Typed honestly rather than asserting
+            a timestamp the schema does not guarantee.
+          type: [string, 'null']
+          format: date-time
+
+    ApprovalDecisionInput:
+      type: object
+      properties:
+        comment: { type: [string, 'null'], maxLength: 2000 }
+
+    ApprovalReturnInput:
+      type: object
+      description: Unlike approve, a reason is required — see returnReport.
+      required: [comment]
+      properties:
+        comment: { type: string, minLength: 1, maxLength: 2000 }
 
     # Mirrors packages/backend-shared ReportPayloadV1 (cleanup M2 / CCR-011).
     # generation_status=pending: only base fields; ready: full nested structure.

@@ -14,6 +14,10 @@
 #   performance agreements + ประเด็นท้าทาย. Note the asymmetry in the rows below —
 #   an evaluatee WRITES their own agreement but may never acknowledge it, and an
 #   evaluator READS it (to score the 40% it backs) but may never write it.
+# version: 1.7.0 — CCR-016 (additive): report approval. Same asymmetry once more —
+#   the subject READS the decision trail on their own report (listReportApprovals
+#   matches getReport) but only director/school_admin may decide, and neither may
+#   decide on their own report (route rule, not expressible here).
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 #
 # The api module is the sole enforcement point (module-boundaries.md).
@@ -22,7 +26,7 @@
 # This file is also a TEST FIXTURE (SECURITY-BASELINE SEC-TEN-5): permission tests
 # generate their cases from this matrix, so contract and enforcement cannot drift.
 
-version: 1.6.0
+version: 1.7.0
 status: locked
 locked_at: 2026-07-17
 
@@ -163,6 +167,13 @@ matrix:
   createReport:            { director: school, school_admin: school }
   getReport:               { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
   getReportPdf:            { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
+  # Trail is readable by everyone who can read the report itself — a subject who
+  # can see their score but not who endorsed it would be a strange transparency.
+  listReportApprovals:     { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
+  # Deciding is director/school_admin only. evaluator is absent: they score, the
+  # chair endorses. area_admin is absent per SEC-TEN-3 (read-only).
+  approveReport:           { director: school, school_admin: school }
+  returnReport:            { director: school, school_admin: school }
 
 notes:
   - teacher:own on listEvidence means the default filter is owner=self and other owners are rejected.

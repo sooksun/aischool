@@ -4,6 +4,16 @@
 # version: 1.2.0 — CCR-012 (additive): evidence.file.scan_completed payload gains
 #   scan_status=unscanned, emitted when no scanner ran (the previous stub reported
 #   `clean` for everything it did not recognise by filename).
+# version: 1.3.0 — CCR-016 (additive): report.approved moves OUT of `deferred:`
+#   and gains a producer — the approval workflow now exists.
+#
+#   NOTE (CCR-016): the `version:` field below still read 1.1.0 when this change
+#   was made. CCR-012 added its line to this log but never bumped the field, so
+#   the two had been out of step since 2026-07-18. Corrected here to 1.3.0 (the
+#   log is the record of what actually shipped). The 2026-07-19 audit called this
+#   out as a real gap: these version headers are hand-maintained comments and
+#   nothing asserts they match the field — unlike openapi.yaml, whose bump the
+#   oasdiff gate checks. Worth a gate of its own.
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 # Adding an event or an optional payload field is additive (1.x); removing or
 # retyping a field, or changing an event name, is breaking (2.0).
@@ -13,7 +23,7 @@
 # change; a dispatcher relays to consumers (notification, projections).
 # No dual-writes inside request handlers.
 
-version: 1.1.0
+version: 1.3.0
 status: locked
 locked_at: 2026-07-17
 
@@ -94,6 +104,20 @@ events:
     consumers: [notification, audit-projection]
     note: Batch summary after suggestMappings; individual rows also emit evidence.mapping.suggested.
 
+  report.approved:
+    payload: { report_id: uuid, cycle_id: uuid, subject_personnel_id: uuid, approver_user_id: uuid, step_code: string }
+    consumers: [notification, audit-projection]
+    note: >
+      CCR-016. Emitted when a report transitions pending_approval → approved, in
+      the same transaction as the status change and the Approval row. Carries the
+      approver so a notification can name who signed.
+
+      Only `approved` is an event. Returning a report for rework is deliberately
+      NOT one: it is an internal step in a document's drafting, not something the
+      rest of the system needs to react to, and every event declared without a
+      consumer is a promise nobody keeps. NOTE that today outbox.dispatch is an
+      acknowledged no-op, so this event is durably recorded and consumed by
+      nothing — a known, separate gap, not something CCR-016 fixes.
+
 deferred:
-  report.approved: approval workflow UI not yet shipped
   notification.delivered: channel choice pending

@@ -735,6 +735,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports/{reportId}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The decision trail for a report (CCR-016)
+         * @description Grants match `getReport` rather than the narrower write grants: a subject
+         *     who can read their own result but not who endorsed it would be a strange
+         *     kind of transparency.
+         *
+         *     Append-only — there is no operation that edits or removes a decision, and
+         *     that is what makes the signature mean anything.
+         */
+        get: operations["listReportApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/{reportId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Endorse a generated report (ผอ. ลงนาม)
+         * @description `pending_approval` → `approved`, recording an Approval row with the actor
+         *     and timestamp.
+         *
+         *     **Requires the report's round to be closed** (RPT-003). Scores only freeze
+         *     when a round closes (SCORE-002), so approving earlier would timestamp a
+         *     signature against numbers that can still change — the document would later
+         *     contradict its own data with nothing to show for it. Reports with
+         *     `round_id = null` are cycle-level and skip the check; there is no round to
+         *     freeze.
+         *
+         *     The evaluatee may never approve their own report, even where their role
+         *     holds the grant — a director is an evaluatee too under ว10, and
+         *     `permissions.yaml` cannot express "any grant except over yourself".
+         */
+        post: operations["approveReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/{reportId}/return": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Return a report for rework (ส่งกลับให้แก้ไข)
+         * @description `pending_approval` → `draft`, so the report can be regenerated once
+         *     whatever was wrong is fixed.
+         *
+         *     `comment` is REQUIRED here, unlike on approve: sending a result back with
+         *     no stated reason gives the person who has to fix it nothing to act on.
+         *
+         *     Note there is no "reject". A report renders scores that already exist, so
+         *     marking one rejected while that data stands unchanged would be a
+         *     contradiction rather than a state — if the result itself is wrong, the
+         *     remedy is to reopen the round and rescore. `ApprovalDecision.rejected`
+         *     stays unused on purpose (CCR-016 decision 2).
+         */
+        post: operations["returnReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reports/{reportId}/pdf": {
         parameters: {
             query?: never;
@@ -1523,6 +1610,53 @@ export interface components {
         ReportDetail: components["schemas"]["Report"] & {
             payload: components["schemas"]["ReportPayload"];
             section_refs: components["schemas"]["ReportSectionRef"][];
+            /**
+             * @description Decision trail, oldest first (CCR-016). Empty until someone acts.
+             *     Present on the detail response so a client does not need a second
+             *     call just to render "who signed this and when".
+             */
+            approvals?: components["schemas"]["Approval"][];
+        };
+        /** @description One recorded decision on a report. Append-only. */
+        Approval: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            report_id: string;
+            /** Format: uuid */
+            approver_user_id: string;
+            /**
+             * @description Which step in the approval sequence this decision belongs to. Always
+             *     `director` today — SEIP has one step, and a configurable chain would be
+             *     a workflow engine built for a workflow that does not exist yet
+             *     (CCR-016 decision 1). A second step later is additive: a new value here
+             *     and a rule about ordering, no migration.
+             * @example director
+             */
+            step_code: string;
+            /**
+             * @description `rejected` is absent by design, not by omission — see returnReport.
+             *     `pending` is not emitted either: a row is only written when a decision
+             *     is actually taken.
+             * @enum {string}
+             */
+            decision: "approved" | "returned";
+            comment?: string | null;
+            /**
+             * Format: date-time
+             * @description Nullable because the column must accommodate a `pending` row. Nothing
+             *     writes one — a row is only created when a decision is actually taken —
+             *     so in practice this is always set. Typed honestly rather than asserting
+             *     a timestamp the schema does not guarantee.
+             */
+            decided_at: string | null;
+        };
+        ApprovalDecisionInput: {
+            comment?: string | null;
+        };
+        /** @description Unlike approve, a reason is required — see returnReport. */
+        ApprovalReturnInput: {
+            comment: string;
         };
         ReportPayload: {
             /**
@@ -2893,6 +3027,92 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listReportApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Decisions, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    approveReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ApprovalDecisionInput"];
+            };
+        };
+        responses: {
+            /** @description Approved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    returnReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalReturnInput"];
+            };
+        };
+        responses: {
+            /** @description Returned to draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     getReportPdf: {
