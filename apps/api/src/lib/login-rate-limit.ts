@@ -49,6 +49,7 @@ const DEFAULTS: LoginRateLimitOptions = {
 };
 
 const GLOBAL_KEY = '__seipLoginRateLimiter' as const;
+const INVITE_GLOBAL_KEY = '__seipInviteRateLimiter' as const;
 
 interface GlobalSlot {
   limiter: LoginRateLimiter;
@@ -60,6 +61,14 @@ function globalSlot(): GlobalSlot {
     g[GLOBAL_KEY] = { limiter: new LoginRateLimiter() };
   }
   return g[GLOBAL_KEY];
+}
+
+function inviteGlobalSlot(): GlobalSlot {
+  const g = globalThis as typeof globalThis & { [INVITE_GLOBAL_KEY]?: GlobalSlot };
+  if (!g[INVITE_GLOBAL_KEY]) {
+    g[INVITE_GLOBAL_KEY] = { limiter: new LoginRateLimiter() };
+  }
+  return g[INVITE_GLOBAL_KEY];
 }
 
 export class LoginRateLimiter {
@@ -119,6 +128,35 @@ export function getLoginRateLimiter(): LoginRateLimiter {
 }
 
 /**
+ * Separate bucket for acceptInvite (CCR-014).
+ *
+ * Deliberately NOT the login limiter, even though both throttle a public
+ * credential-bearing endpoint. A Thai school reaches the API from one NAT'd
+ * public IP, so with a shared bucket an admin onboarding a batch of teachers
+ * (invite + accept + their first login, each consuming the same per-IP budget)
+ * would throttle logins for the entire staff. Found exactly that way: the e2e
+ * suite exhausted AUTH-004 for every other spec once the onboarding spec ran
+ * alongside it.
+ *
+ * Same limits, independent counters — an onboarding session and a Monday-morning
+ * login rush no longer starve each other.
+ */
+export function getInviteRateLimiter(): LoginRateLimiter {
+  return inviteGlobalSlot().limiter;
+}
+
+/** Boot: install env-derived limits for the invite bucket too. */
+export function configureInviteRateLimiterFromEnv(env: {
+  LOGIN_RATE_WINDOW_MS?: string;
+  LOGIN_RATE_MAX_PER_IP?: string;
+  LOGIN_RATE_MAX_PER_EMAIL?: string;
+} = process.env): LoginRateLimiter {
+  const limiter = loginRateLimiterFromEnv(env);
+  inviteGlobalSlot().limiter = limiter;
+  return limiter;
+}
+
+/**
  * Replace the process-global instance (boot + tests).
  * Prefer `configureLoginRateLimiterFromEnv` at server start and
  * `installLoginRateLimiterForTests` in tests so restore is explicit.
@@ -151,6 +189,7 @@ export function installLoginRateLimiterForTests(limiter: LoginRateLimiter): () =
 /** Test helper — clear counters on the *current* singleton without replacing it. */
 export function resetLoginRateLimiterState(): void {
   getLoginRateLimiter().reset();
+  getInviteRateLimiter().reset();
 }
 
 /** Build a limiter from env-ish numbers; invalid values fall back to defaults. */

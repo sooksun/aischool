@@ -10,6 +10,7 @@ import {
   type ScoreRowInput,
 } from '../../components/scoring/validateScoreForm';
 import { levelTextFor, hasLevelText } from '../../lib/rubricLevels';
+import { usePersonnel } from '../../lib/usePersonnel';
 import type { components } from '../../api/schema.generated';
 
 type AssignmentDetail = components['schemas']['AssignmentDetail'];
@@ -21,6 +22,7 @@ type ScoreSubmission = components['schemas']['ScoreSubmission'];
 
 export function AssignmentScorePage() {
   const { assignmentId } = useParams<{ assignmentId: string }>();
+  const { nameFor } = usePersonnel();
   // Router state may still pass frameworkVersionId; API framework_version_id is source of truth (CCR-009).
   const location = useLocation();
   const navFrameworkId = (location.state as { frameworkVersionId?: string } | null)?.frameworkVersionId;
@@ -168,7 +170,7 @@ export function AssignmentScorePage() {
     <main className="page">
       <Link to="/evaluator" className="field-hint">← งานกรรมการ</Link>
       <h1>ให้คะแนนการประเมิน</h1>
-      <p className="field-hint">ผู้รับการประเมิน: {detail.evaluatee_personnel_id}</p>
+      <p className="field-hint">ผู้รับการประเมิน: {nameFor(detail.evaluatee_personnel_id)}</p>
       <p className="field-hint">
         สถานะการส่งของฉัน:{' '}
         {detail.my_submission_state === 'submitted'

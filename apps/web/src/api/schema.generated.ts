@@ -45,6 +45,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/accept-invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the initial password for an invited account (CCR-014)
+         * @description The invite token in the body IS the credential — the invitee has no
+         *     password yet and therefore cannot hold a bearer token. Single-use: the
+         *     token is cleared in the same transaction that stores the password hash,
+         *     and the account moves `invited` → `active`.
+         *
+         *     Deliberately does NOT return a token pair. The caller logs in normally
+         *     afterwards, so SEC-AUTH-3 (`invited` accounts cannot authenticate) stays
+         *     enforced in exactly one place — `login`.
+         *
+         *     Unknown, expired and already-used tokens are indistinguishable (AUTH-005),
+         *     and the endpoint is throttled on the same limiter as login (SEC-AUTH-5),
+         *     because the token is guessable in principle.
+         */
+        post: operations["acceptInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -79,6 +110,98 @@ export interface paths {
         get: operations["getCurrentUser"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/personnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Personnel of the caller's school (CCR-014)
+         * @description Resolves personnel UUIDs to names. Readable by `evaluator` as well as
+         *     `director`/`school_admin` because a committee member must be able to see
+         *     who they are scoring — before v2.9 four screens rendered raw UUIDs as
+         *     primary user-facing text.
+         *
+         *     Returns identity needed to pick and display a person, not their evaluation
+         *     record — no scores, no agreements, no evidence.
+         */
+        get: operations["listPersonnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Accounts holding a membership in the caller's school (school admin) */
+        get: operations["listMembers"];
+        put?: never;
+        /**
+         * Invite a person into the caller's school (school admin)
+         * @description Creates the `UserAccount` (status `invited`, no password), the
+         *     `SchoolMembership`, and — when `personnel` is present — the
+         *     `PersonnelProfile`, in one transaction.
+         *
+         *     The school is taken from the caller's own membership and is NOT a body
+         *     field. Accepting a client-supplied school id here would make this
+         *     operation a cross-tenant account factory.
+         *
+         *     `personnel` is optional because an external committee `evaluator` belongs
+         *     to the school without being evaluated by it — the same reason
+         *     `CurrentUser.personnel` is nullable (CCR-002).
+         *
+         *     The returned `invite_token` is shown **once** and is not retrievable
+         *     afterwards; the admin passes it to the invitee out of band. There is no
+         *     email dependency by design: an on-prem deployment (ADR-0005) may have no
+         *     SMTP relay at all.
+         *
+         *     Inviting an email that already holds a current membership in this school
+         *     is a conflict (RES-002), not a second membership.
+         */
+        post: operations["inviteMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/members/{membershipId}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a membership, revoking access to this school (school admin)
+         * @description Sets `effective_to` to today. Offboarding, not deletion — evaluation
+         *     history stays intact and attributable.
+         *
+         *     There is deliberately no way to backdate: `effective_to` records when
+         *     access was actually revoked, and a past date would assert access ended
+         *     earlier than it did.
+         *
+         *     Idempotent — ending an already-ended membership returns it unchanged.
+         */
+        post: operations["endMembership"];
         delete?: never;
         options?: never;
         head?: never;
@@ -554,6 +677,12 @@ export interface components {
         RoleFamily: "teacher" | "administrator";
         /** @enum {string} */
         Role: "teacher" | "director" | "deputy" | "evaluator" | "school_admin" | "area_admin";
+        /**
+         * @description `invited` — created but has never set a password; cannot authenticate
+         *     (SEC-AUTH-3). `disabled` — deactivated; also cannot authenticate.
+         * @enum {string}
+         */
+        UserStatus: "active" | "disabled" | "invited";
         /** @enum {string} */
         EvaluationKind: "pa" | "dpa";
         /** @enum {string} */
@@ -635,6 +764,97 @@ export interface components {
                 /** Format: uuid */
                 area_id?: string | null;
             }[];
+        };
+        /** @description Enough to identify and display a person; not their evaluation record. */
+        PersonnelSummary: {
+            /** Format: uuid */
+            id: string;
+            full_name: string;
+            employee_code?: string | null;
+            position_role: components["schemas"]["RoleFamily"];
+            /**
+             * @description วิทยฐานะ tier code — same vocabulary as CurrentUser.personnel.rank_level_code
+             * @example teacher_kru
+             * @example teacher_chamnankan
+             */
+            rank_level_code: string;
+            /** @enum {string} */
+            status: "active" | "inactive";
+        };
+        /** @description One person's membership in the caller's school, with their account state. */
+        Member: {
+            /** Format: uuid */
+            membership_id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** Format: email */
+            email: string;
+            display_name: string;
+            role: components["schemas"]["Role"];
+            user_status: components["schemas"]["UserStatus"];
+            /** Format: date */
+            effective_from: string;
+            /**
+             * Format: date
+             * @description Null while the membership is current. Set by endMembership.
+             */
+            effective_to?: string | null;
+            /** @description Present when this member is also evaluatee-capable personnel. Null for an external evaluator (CCR-002 shape). */
+            personnel?: null | components["schemas"]["PersonnelSummary"];
+        };
+        /**
+         * @description No `school_id` — the school is the caller's own. A body-supplied school
+         *     would turn this into a cross-tenant account factory, so the field does
+         *     not exist rather than being validated away.
+         */
+        MemberInvite: {
+            /**
+             * Format: email
+             * @description Stored lowercase; the server lowercases before insert (a CHECK constraint compares the value against its own lowercase form as BINARY).
+             */
+            email: string;
+            display_name: string;
+            role: components["schemas"]["Role"];
+            /**
+             * @description Omit for a member who is not evaluated by this school (an external
+             *     committee `evaluator`). When present, `rank_level_code` must belong to
+             *     the same role family as `position_role` — a mismatch selects the wrong
+             *     framework's rubric and is rejected with VAL-003.
+             */
+            personnel?: {
+                full_name: string;
+                employee_code?: string | null;
+                position_role: components["schemas"]["RoleFamily"];
+                rank_level_code: string;
+            };
+        };
+        /** @description The invite token appears here and nowhere else, ever. */
+        MemberInviteResult: {
+            member: components["schemas"]["Member"];
+            /**
+             * @description Single-use secret. Only its hash is stored, so this value cannot be
+             *     recovered after this response — re-invite if it is lost. Deliver it
+             *     out of band; never log it (SEC-AUTH-1 applies to any credential).
+             *
+             *     **Null when the invited email already belongs to an account that has
+             *     a password.** That case is a real one — a teacher moving schools, or
+             *     an external evaluator serving two — and it grants the new membership
+             *     without issuing a credential. Issuing one would let any school_admin
+             *     take over any account in the system by "inviting" its email: an
+             *     admin-triggered password reset wearing an onboarding hat. The person
+             *     simply logs in with the password they already have.
+             */
+            invite_token: string | null;
+            /**
+             * Format: date-time
+             * @description Null exactly when `invite_token` is null.
+             */
+            invite_expires_at: string | null;
+        };
+        AcceptInviteRequest: {
+            invite_token: string;
+            /** @description Chosen by the invitee. The inviting admin never sees or sets it. */
+            password: string;
         };
         Framework: {
             /** Format: uuid */
@@ -1243,6 +1463,7 @@ export interface components {
         EvidenceId: string;
         AssignmentId: string;
         ReportId: string;
+        MembershipId: string;
         Page: number;
         PageSize: number;
     };
@@ -1304,6 +1525,39 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    acceptInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Password set; the account is now active and may log in */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description AUTH-004 — too many attempts (SEC-AUTH-5) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -1346,6 +1600,112 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listPersonnel: {
+        parameters: {
+            query?: {
+                /** @description Defaults to active only; pass `all` to include former personnel. */
+                status?: "active" | "inactive" | "all";
+                /** @description Filter to one framework family (ว9 teacher vs ว10 administrator). */
+                position_role?: components["schemas"]["RoleFamily"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Personnel of the caller's school */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonnelSummary"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listMembers: {
+        parameters: {
+            query?: {
+                /** @description Defaults to current memberships (no effective_to in the past). */
+                status?: "current" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Members */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    inviteMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberInvite"];
+            };
+        };
+        responses: {
+            /** @description Invited — `invite_token` is returned exactly once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberInviteResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    endMembership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                membershipId: components["parameters"]["MembershipId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Membership ended */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     listFrameworks: {

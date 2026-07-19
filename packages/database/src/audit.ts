@@ -20,6 +20,10 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   Report: ['id', 'schoolId', 'cycleId', 'subjectPersonnelId', 'templateCode', 'status'],
   UserAccount: ['id', 'status'], // email/displayName excluded: direct PII
   SchoolMembership: ['id', 'userId', 'schoolId', 'role', 'status'],
+  // CCR-014. fullName and employeeCode excluded: both directly identify a person,
+  // same reason UserAccount omits email/displayName above. Who was onboarded is
+  // answerable from userId without copying their name into the audit trail.
+  PersonnelProfile: ['id', 'schoolId', 'userId', 'positionRole', 'rankLevelCode', 'status'],
 };
 
 function allowlist(entityType: string, obj: Record<string, unknown> | undefined): Snapshot | undefined {

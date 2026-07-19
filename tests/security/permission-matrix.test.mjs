@@ -134,6 +134,20 @@ after(async () => {
 // from apps/api's own route table on purpose: this is the test's independent
 // understanding of the contract's shape, not a re-export of the implementation's.
 const OPERATIONS = () => ({
+  // members / personnel (CCR-014).
+  listPersonnel: { method: 'GET', url: '/api/v1/personnel' },
+  listMembers: { method: 'GET', url: '/api/v1/members' },
+  // A fresh random email per call: a granted role must not fail on RES-002 from
+  // a previous role's successful invite in the same sweep.
+  inviteMember: { method: 'POST', url: '/api/v1/members', payload: { email: `sweep-${randomUUID()}@x.io`, display_name: 'sweep', role: 'teacher' } },
+  // Random membership id → RES-001 for granted roles (never PERM-001), same
+  // philosophy as getReport below.
+  endMembership: { method: 'POST', url: `/api/v1/members/${randomUUID()}/end` },
+  // acceptInvite is NOT swept: permissions.yaml lists it under `unauthenticated:`,
+  // so it has no matrix row and no role dimension to sweep. Its security
+  // properties — single-use, no-oracle AUTH-005, rate limiting — are covered
+  // directly by apps/api/test/onboarding-flow.test.mjs.
+
   listFrameworks: { method: 'GET', url: '/api/v1/frameworks' },
   getFramework: { method: 'GET', url: `/api/v1/frameworks/${frameworkId}` },
   listEvidenceCategories: { method: 'GET', url: '/api/v1/evidence-categories' },
@@ -148,6 +162,14 @@ const OPERATIONS = () => ({
   // role's check (see the sweep's DELETABLE handling).
   deleteEvidence: { method: 'DELETE', url: null },
   initiateFileUpload: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/files/initiate`, payload: { content_type: 'application/pdf', byte_size: 10, checksum_sha256: 'a'.repeat(64), original_filename: 'x.pdf' } },
+  // completeFileUpload and getEvidenceFileDownloadUrl were both absent from this
+  // sweep until 2026-07-19 with no justification comment — the audit flagged
+  // them as the only unswept matrix rows besides the deliberately-excluded
+  // getAssignmentResults, and both sit on the PDPA upload/download surface.
+  // A random fileId yields RES-001 for granted roles, never PERM-001, which is
+  // all this sweep needs (same philosophy as createMapping/getReport).
+  completeFileUpload: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/files/${randomUUID()}/complete`, payload: { content_type: 'application/pdf', byte_size: 10, checksum_sha256: 'a'.repeat(64), original_filename: 'x.pdf' } },
+  getEvidenceFileDownloadUrl: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/files/${randomUUID()}/download-url` },
   listEvidenceMappings: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/mappings` },
   createMapping: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, payload: { indicator_id: randomUUID() } }, // random indicator: expected to fail VAL-002 for granted roles, never PERM-001
   // Missing framework/cycle → AI-001 for granted roles (not PERM-001).
@@ -224,6 +246,13 @@ const OPERATIONS = () => ({
 const OWNER_ROLE = 'teacher';
 const OWN_SENSITIVE_OPS = new Set([
   'getEvidence', 'updateEvidence', 'deleteEvidence', 'initiateFileUpload',
+  // Added 2026-07-19 with the sweep coverage itself. completeFileUpload carries
+  // the IDENTICAL matrix row to initiateFileUpload above (teacher/deputy/director
+  // all 'own'), and getEvidenceFileDownloadUrl gives deputy 'own' — so for every
+  // non-owner holding those grants, PERM-001 is the ownership boundary working,
+  // not a matrix mismatch. Enforcement was already correct; only the sweep's
+  // knowledge of it was missing, which is precisely what going unswept means.
+  'completeFileUpload', 'getEvidenceFileDownloadUrl',
   'listEvidenceMappings', 'createMapping', 'suggestMappings', 'actOnMapping', 'getAssignment',
 ]);
 
@@ -283,7 +312,11 @@ test('every implemented operation x every role matches its permissions.yaml disp
     }
   }
 
-  assert.ok(assertions >= 28 * 6, `sweep should cover at least 28 operations x 6 roles, got ${assertions} assertions`);
+  // 34 of the 35 matrix rows. The one exclusion is getAssignmentResults, whose
+  // temporal rule is explained and separately covered above. Raise this number
+  // whenever a row is added — a sweep that silently covers less than the matrix
+  // is how completeFileUpload and getEvidenceFileDownloadUrl went unswept.
+  assert.ok(assertions >= 34 * 6, `sweep should cover at least 34 operations x 6 roles, got ${assertions} assertions`);
   assert.deepEqual(failures, [], `${failures.length} mismatch(es) between permissions.yaml and enforcement:\n${failures.join('\n')}`);
 });
 

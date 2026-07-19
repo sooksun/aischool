@@ -14,6 +14,8 @@ import { EvaluatorHomePage } from './pages/evaluator/EvaluatorHomePage';
 import { EvaluatorCyclePage } from './pages/evaluator/EvaluatorCyclePage';
 import { EvaluatorRoundPage } from './pages/evaluator/EvaluatorRoundPage';
 import { AssignmentScorePage } from './pages/evaluator/AssignmentScorePage';
+import { MembersPage } from './pages/admin/MembersPage';
+import { AcceptInvitePage } from './pages/AcceptInvitePage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -46,8 +48,8 @@ function AppNav() {
   const location = useLocation();
   if (!user || location.pathname === '/login') return null;
 
-  const { manageCycles, scoreAsCommittee, viewReports, submitEvidence } = capabilities;
-  if (!manageCycles && !scoreAsCommittee && !viewReports && !submitEvidence) return null;
+  const { manageCycles, scoreAsCommittee, viewReports, submitEvidence, manageMembers } = capabilities;
+  if (!manageCycles && !scoreAsCommittee && !viewReports && !submitEvidence && !manageMembers) return null;
 
   return (
     <nav className="app-nav" aria-label="เมนูหลัก">
@@ -64,6 +66,11 @@ function AppNav() {
       {manageCycles && (
         <Link to="/director/cycles" className={location.pathname.startsWith('/director') ? 'active' : ''}>
           จัดการรอบการประเมิน
+        </Link>
+      )}
+      {manageMembers && (
+        <Link to="/admin/members" className={location.pathname.startsWith('/admin') ? 'active' : ''}>
+          บุคลากร
         </Link>
       )}
       {scoreAsCommittee && (
@@ -86,8 +93,16 @@ export function App() {
       <AppNav />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        {/* Unauthenticated by contract: the invitee has no password yet, so they
+            cannot be behind RequireAuth. Mirrors permissions.yaml's
+            `unauthenticated: acceptInvite`. */}
+        <Route path="/accept-invite" element={<AcceptInvitePage />} />
         <Route path="/" element={<RequireAuth><EvidenceListPage /></RequireAuth>} />
-        <Route path="/evidence/new" element={<RequireAuth><EvidenceSubmitPage /></RequireAuth>} />
+        {/* Gated, unlike before: an evaluator typing this URL used to get the
+            full 5-step form and only discovered the dead end at POST /evidence. */}
+        <Route path="/evidence/new" element={
+          <RequireCapability capability="submitEvidence"><EvidenceSubmitPage /></RequireCapability>
+        } />
         <Route path="/evidence/:evidenceId" element={<RequireAuth><EvidenceDetailPage /></RequireAuth>} />
 
         <Route path="/director/cycles" element={
@@ -98,6 +113,10 @@ export function App() {
         } />
         <Route path="/director/rounds/:roundId/assignments" element={
           <RequireCapability capability="manageCycles"><RoundAssignmentsPage /></RequireCapability>
+        } />
+
+        <Route path="/admin/members" element={
+          <RequireCapability capability="manageMembers"><MembersPage /></RequireCapability>
         } />
 
         <Route path="/reports" element={

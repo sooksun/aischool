@@ -30,6 +30,18 @@ openapi: 3.1.0
 #   Required so a scoring client can select the right IndicatorLevel rows; without
 #   it the level text seeded per (indicator, rank, rubric_level) is unusable and
 #   the UI falls back to four generic phrases, contradicting ADR-0003.
+# version 2.9.0 — CCR-014 (additive): onboarding. Before this, no operation
+#   created a UserAccount, SchoolMembership or PersonnelProfile, and prisma/seed.mjs
+#   created none either — a fresh install seeded the whole ว9/ว10 framework and
+#   nobody who could log in. Adds listPersonnel, listMembers, inviteMember,
+#   endMembership (school_admin, school-scoped) and acceptInvite (unauthenticated:
+#   the invite token IS the credential, like refreshToken). Bootstrap of the FIRST
+#   admin and provisioning of schools/areas deliberately stay OUT of this contract
+#   and ship as operator CLIs — no existing role may write across schools
+#   (area_admin is read-only by contract) and inventing a system_admin role to
+#   allow it would rewrite all 31 permission-matrix rows. See CCR-014 decisions
+#   1 and 2. listPersonnel additionally retires the raw evaluatee UUIDs the
+#   2026-07-19 audit found rendered as primary UI text in four screens.
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -38,10 +50,17 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.8.0
-  summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI + PDF)
+  version: 2.9.0
+  summary: School Evidence Intelligence Platform — core API (onboarding + evidence workflow + PA evaluation + reports/AI + PDF)
   description: |
-    Contract v2.8 (CCR-013) — AssignmentDetail carries the evaluatee's rank so
+    Contract v2.9 (CCR-014) — onboarding: a school_admin can invite people into
+    their school and an invitee can set their own password. Until v2.9 the API
+    could evaluate a teacher but could not create one. Note what is *not* here by
+    design: creating the first admin, and creating schools/areas. Both need
+    authority no role holds (area_admin is read-only across its area) and both
+    ship as operator CLIs instead — CCR-014 decisions 1 and 2.
+
+    v2.8 (CCR-013) — AssignmentDetail carries the evaluatee's rank so
     scoring can show the seeded per-rank expected-practice text. v2.7 ScanStatus
     gains `unscanned`: a deployment with no malware scanner now says so instead of
     claiming `clean`. v2.6 typed
@@ -83,6 +102,8 @@ security:
 tags:
   - name: auth
     description: Authentication and session identity
+  - name: members
+    description: School membership, personnel and invitations (school admin). School-scoped like every other resource — there is no cross-school write anywhere in this contract.
   - name: taxonomy
     description: Read-only versioned indicator taxonomy (ADR-0003) and evidence categories
   - name: cycles
@@ -143,6 +164,41 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '400': { $ref: '#/components/responses/ValidationError' }
 
+  /auth/accept-invite:
+    post:
+      operationId: acceptInvite
+      summary: Set the initial password for an invited account (CCR-014)
+      description: |
+        The invite token in the body IS the credential — the invitee has no
+        password yet and therefore cannot hold a bearer token. Single-use: the
+        token is cleared in the same transaction that stores the password hash,
+        and the account moves `invited` → `active`.
+
+        Deliberately does NOT return a token pair. The caller logs in normally
+        afterwards, so SEC-AUTH-3 (`invited` accounts cannot authenticate) stays
+        enforced in exactly one place — `login`.
+
+        Unknown, expired and already-used tokens are indistinguishable (AUTH-005),
+        and the endpoint is throttled on the same limiter as login (SEC-AUTH-5),
+        because the token is guessable in principle.
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptInviteRequest' }
+      responses:
+        '204':
+          description: Password set; the account is now active and may log in
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429':
+          description: AUTH-004 — too many attempts (SEC-AUTH-5)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /auth/logout:
     post:
       operationId: logout
@@ -175,6 +231,126 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CurrentUser' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /personnel:
+    get:
+      operationId: listPersonnel
+      summary: Personnel of the caller's school (CCR-014)
+      description: |
+        Resolves personnel UUIDs to names. Readable by `evaluator` as well as
+        `director`/`school_admin` because a committee member must be able to see
+        who they are scoring — before v2.9 four screens rendered raw UUIDs as
+        primary user-facing text.
+
+        Returns identity needed to pick and display a person, not their evaluation
+        record — no scores, no agreements, no evidence.
+      tags: [members]
+      parameters:
+        - name: status
+          in: query
+          description: Defaults to active only; pass `all` to include former personnel.
+          schema: { type: string, enum: [active, inactive, all], default: active }
+        - name: position_role
+          in: query
+          description: Filter to one framework family (ว9 teacher vs ว10 administrator).
+          schema: { $ref: '#/components/schemas/RoleFamily' }
+      responses:
+        '200':
+          description: Personnel of the caller's school
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PersonnelSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /members:
+    get:
+      operationId: listMembers
+      summary: Accounts holding a membership in the caller's school (school admin)
+      tags: [members]
+      parameters:
+        - name: status
+          in: query
+          description: Defaults to current memberships (no effective_to in the past).
+          schema: { type: string, enum: [current, all], default: current }
+      responses:
+        '200':
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Member' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: inviteMember
+      summary: Invite a person into the caller's school (school admin)
+      description: |
+        Creates the `UserAccount` (status `invited`, no password), the
+        `SchoolMembership`, and — when `personnel` is present — the
+        `PersonnelProfile`, in one transaction.
+
+        The school is taken from the caller's own membership and is NOT a body
+        field. Accepting a client-supplied school id here would make this
+        operation a cross-tenant account factory.
+
+        `personnel` is optional because an external committee `evaluator` belongs
+        to the school without being evaluated by it — the same reason
+        `CurrentUser.personnel` is nullable (CCR-002).
+
+        The returned `invite_token` is shown **once** and is not retrievable
+        afterwards; the admin passes it to the invitee out of band. There is no
+        email dependency by design: an on-prem deployment (ADR-0005) may have no
+        SMTP relay at all.
+
+        Inviting an email that already holds a current membership in this school
+        is a conflict (RES-002), not a second membership.
+      tags: [members]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberInvite' }
+      responses:
+        '201':
+          description: Invited — `invite_token` is returned exactly once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberInviteResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /members/{membershipId}/end:
+    post:
+      operationId: endMembership
+      summary: End a membership, revoking access to this school (school admin)
+      description: |
+        Sets `effective_to` to today. Offboarding, not deletion — evaluation
+        history stays intact and attributable.
+
+        There is deliberately no way to backdate: `effective_to` records when
+        access was actually revoked, and a past date would assert access ended
+        earlier than it did.
+
+        Idempotent — ending an already-ended membership returns it unchanged.
+      tags: [members]
+      parameters:
+        - $ref: '#/components/parameters/MembershipId'
+      responses:
+        '200':
+          description: Membership ended
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
   /frameworks:
     get:
@@ -897,6 +1073,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    MembershipId:
+      name: membershipId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     Page:
       name: page
       in: query
@@ -961,6 +1142,12 @@ components:
     Role:
       type: string
       enum: [teacher, director, deputy, evaluator, school_admin, area_admin]
+    UserStatus:
+      type: string
+      description: |
+        `invited` — created but has never set a password; cannot authenticate
+        (SEC-AUTH-3). `disabled` — deactivated; also cannot authenticate.
+      enum: [active, disabled, invited]
     EvaluationKind:
       type: string
       enum: [pa, dpa]
@@ -1064,6 +1251,109 @@ components:
               membership_scope: { type: string, enum: [school, area] }
               school_id: { type: [string, 'null'], format: uuid }
               area_id: { type: [string, 'null'], format: uuid }
+
+    PersonnelSummary:
+      type: object
+      description: Enough to identify and display a person; not their evaluation record.
+      required: [id, full_name, position_role, rank_level_code, status]
+      properties:
+        id: { type: string, format: uuid }
+        full_name: { type: string }
+        employee_code: { type: [string, 'null'] }
+        position_role:
+          $ref: '#/components/schemas/RoleFamily'
+        rank_level_code:
+          type: string
+          description: วิทยฐานะ tier code — same vocabulary as CurrentUser.personnel.rank_level_code
+          examples: [teacher_kru, teacher_chamnankan]
+        status: { type: string, enum: [active, inactive] }
+
+    Member:
+      type: object
+      description: One person's membership in the caller's school, with their account state.
+      required: [membership_id, user_id, email, display_name, role, user_status, effective_from]
+      properties:
+        membership_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        user_status: { $ref: '#/components/schemas/UserStatus' }
+        effective_from: { type: string, format: date }
+        effective_to:
+          description: Null while the membership is current. Set by endMembership.
+          type: [string, 'null']
+          format: date
+        personnel:
+          description: Present when this member is also evaluatee-capable personnel. Null for an external evaluator (CCR-002 shape).
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/PersonnelSummary'
+
+    MemberInvite:
+      type: object
+      description: |
+        No `school_id` — the school is the caller's own. A body-supplied school
+        would turn this into a cross-tenant account factory, so the field does
+        not exist rather than being validated away.
+      required: [email, display_name, role]
+      properties:
+        email:
+          type: string
+          format: email
+          description: Stored lowercase; the server lowercases before insert (a CHECK constraint compares the value against its own lowercase form as BINARY).
+          maxLength: 320
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        role: { $ref: '#/components/schemas/Role' }
+        personnel:
+          description: |
+            Omit for a member who is not evaluated by this school (an external
+            committee `evaluator`). When present, `rank_level_code` must belong to
+            the same role family as `position_role` — a mismatch selects the wrong
+            framework's rubric and is rejected with VAL-003.
+          type: object
+          required: [full_name, position_role, rank_level_code]
+          properties:
+            full_name: { type: string, minLength: 1, maxLength: 200 }
+            employee_code: { type: [string, 'null'], maxLength: 50 }
+            position_role: { $ref: '#/components/schemas/RoleFamily' }
+            rank_level_code: { type: string }
+
+    MemberInviteResult:
+      type: object
+      description: The invite token appears here and nowhere else, ever.
+      required: [member, invite_token, invite_expires_at]
+      properties:
+        member: { $ref: '#/components/schemas/Member' }
+        invite_token:
+          description: |
+            Single-use secret. Only its hash is stored, so this value cannot be
+            recovered after this response — re-invite if it is lost. Deliver it
+            out of band; never log it (SEC-AUTH-1 applies to any credential).
+
+            **Null when the invited email already belongs to an account that has
+            a password.** That case is a real one — a teacher moving schools, or
+            an external evaluator serving two — and it grants the new membership
+            without issuing a credential. Issuing one would let any school_admin
+            take over any account in the system by "inviting" its email: an
+            admin-triggered password reset wearing an onboarding hat. The person
+            simply logs in with the password they already have.
+          type: [string, 'null']
+        invite_expires_at:
+          description: Null exactly when `invite_token` is null.
+          type: [string, 'null']
+          format: date-time
+
+    AcceptInviteRequest:
+      type: object
+      required: [invite_token, password]
+      properties:
+        invite_token: { type: string }
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          description: Chosen by the invitee. The inviting admin never sees or sets it.
 
     Framework:
       type: object

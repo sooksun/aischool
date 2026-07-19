@@ -783,7 +783,7 @@ tasks:
 
   - id: SEIP-BLOCK-001
     title: "B-1 — onboarding path: no way to create the first login"
-    status: ready
+    status: done                # 2026-07-19 — CCR-014 APPLIED; openapi 2.9.0, permissions 1.5.0, error-codes 1.4.0
     sprint: 2
     ccr: CCR-014
     primary_paths:
@@ -801,10 +801,13 @@ tasks:
       Decide during the CCR whether first-admin bootstrap is a seeded row, a CLI, or
       a contract operation — the three have very different authz consequences.
     acceptance_criteria:
-      - CCR-014 approved by the user before merge (drafted 2026-07-19)
-      - "openapi 2.8.0 -> 2.9.0 (additive); permissions 1.4.0 -> 1.5.0; rule for every new operationId"
-      - Bootstrap admin + school provisioning ship as operator CLI, not API (CCR-014 decisions 1 and 2)
-      - listPersonnel replaces the raw UUIDs in the 4 director/evaluator screens
+      - CCR-014 approved by the user before merge (drafted + approved 2026-07-19)   # DONE
+      - "openapi 2.8.0 -> 2.9.0 (additive); permissions 1.4.0 -> 1.5.0; rule for every new operationId"  # DONE — oasdiff confirms non-breaking
+      - Bootstrap admin + school provisioning ship as operator CLI, not API (CCR-014 decisions 1 and 2)  # DONE — scripts/ops/*.mjs
+      - listPersonnel replaces the raw UUIDs in the 4 director/evaluator screens    # DONE (committee seats still uuid — documented limitation)
+      - hashPassword has a real (non-test) caller                                   # DONE — bootstrap-admin.mjs
+      - "db:reset then seed then bootstrap then login works, proven with no direct Prisma writes"  # DONE — tests/e2e/onboarding.spec.ts
+      - tests/security permission sweep extended to the new operations              # DONE — 34/35 rows, 204 assertions
       - School / UserAccount / SchoolMembership / PersonnelProfile creatable
       - hashPassword has a real (non-test) caller
       - "db:reset && db:migrate && db:seed then login succeeds — proven by a test, no direct Prisma writes"

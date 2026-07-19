@@ -1,7 +1,72 @@
 # CCR-014: Onboarding — there is no way to create a user, and no way to log in for the first time
 
-Status: **DRAFT — awaiting user approval**
+Status: **APPLIED 2026-07-19** (approved by the user the same day)
 Blocker: `SEIP-BLOCK-001` · Audit: 2026-07-19 · Depends on: nothing · Blocks: `SEIP-BLOCK-002`
+Shipped: openapi **2.9.0** · permissions **1.5.0** · error-codes **1.4.0**
+
+## What changed between draft and implementation
+
+Three things the design did not survive contact with. Recorded here rather than
+silently folded in, because each was a defect in the approved plan.
+
+1. **`invite_token` had to become nullable.** The draft made it required. But if
+   `inviteMember` always issued a token, any school_admin could "invite" an
+   existing account's email and receive a credential that resets *that account's*
+   password — an admin-triggered password reset for any user in the system,
+   wearing an onboarding hat. Now: an account that already has a password gets
+   the membership and **no token**. Regression test: *"inviting an email that
+   already has a password does NOT issue a token"*.
+
+2. **`RES-002` was the wrong code for a duplicate membership.** Its contract
+   meaning is *"concurrent modification (stale version/etag)"*, which tells a
+   client to retry — retrying a duplicate invite will never succeed. Added
+   `RES-003` instead.
+
+3. **`acceptInvite` must not share the login rate-limit bucket.** The draft said
+   "throttled on the same limiter as login". Running the e2e suite proved that
+   wrong: onboarding traffic exhausted AUTH-004 for every other spec. A Thai
+   school reaches the API from one NAT'd IP, so a shared bucket means an admin
+   onboarding a batch of teachers throttles logins for the entire staff. Now two
+   independent buckets with identical limits. Regression test: *"accepting
+   invites does not consume the login rate-limit budget"*.
+
+Also found while implementing, and fixed in passing:
+- `schema.prisma:74` claims `no-overlapping-active-membership` is a DB constraint.
+  **It is not** — that partial unique index did not survive the Postgres → MySQL
+  move (ADR-0008); only `membership_scope_ids` exists. The invariant is now
+  enforced in the repository, inside the transaction, with the comment saying so.
+- The permission sweep gained `completeFileUpload` and `getEvidenceFileDownloadUrl`
+  (the two undocumented gaps the audit flagged) and immediately reported 3
+  mismatches — all three were the sweep not knowing those ops are ownership-gated,
+  not enforcement bugs. Sweep now covers 34 of 35 matrix rows.
+- The report-create e2e assertion, which the audit called too soft, now asserts
+  the report list actually grew rather than that the form closed.
+
+## Verified
+
+- `apps/api/test/onboarding-flow.test.mjs` — **17 tests**, including the
+  account-takeover vector, tenancy (body `school_id` ignored, cross-school
+  RES-001), AUTH-005 no-oracle, single-use token, and the rate-limit separation.
+- `tests/e2e/onboarding.spec.ts` — **2 specs** driving the real browser:
+  admin invites → invitee sets their own password → invitee logs in, with no
+  Prisma write anywhere in the path.
+- Full suite green: 53 API integration, 19 backend, 38 web unit, 19 auth/package
+  unit, 6 security (204 sweep assertions), 12 e2e. `npm run typecheck` clean
+  across all 6 workspaces. `oasdiff` confirms no breaking change.
+- Manually driven in the browser end to end, including the invite panel's
+  show-once token and the Thai expiry date.
+
+## Known limitations shipped knowingly
+
+- **Committee seats are still raw UUID inputs.** They key on
+  `evaluator_user_id` (a UserAccount id), which `listPersonnel` does not return,
+  and the operation that maps users to names — `listMembers` — is `school_admin`
+  only while that screen is `manageCycles` (director + school_admin). Widening it
+  would be a permissions change beyond this CCR. External evaluators have no
+  `PersonnelProfile` at all, so `listPersonnel` could never cover them.
+- **Rank codes display as codes** (`apply_adapt`), not Thai labels. `RankLevel`
+  has `labelTh` but `IndicatorLevel` does not expose it, so showing it needs its
+  own additive change.
 
 ## Request
 

@@ -96,11 +96,20 @@ test.describe('depth: create report + PDF', () => {
       .first()
       .getAttribute('value');
     await cycleSelect.selectOption(cycleValue!);
-    await page.locator('input[placeholder="personnel profile uuid"]').fill(creds.teacherPersonnelId!);
+
+    // A name picker since CCR-014, not a uuid text box (listPersonnel).
+    const subjectSelect = page.locator('select').nth(1);
+    await expect(subjectSelect.locator('option')).not.toHaveCount(1); // more than the placeholder
+    await subjectSelect.selectOption(creds.teacherPersonnelId!);
+
+    const countBefore = await page.locator('main li').count();
     await page.getByRole('button', { name: 'สร้างและจัดทำรายงาน' }).click();
 
-    // Form closes; list reloads (new draft may appear)
+    // The form closing proves only that the form closed — the 2026-07-19 audit
+    // flagged the previous version of this assertion for passing on a silently
+    // failing create. Assert the list actually grew by one instead.
     await expect(page.getByRole('button', { name: '+ สร้างรายงาน' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('main li')).toHaveCount(countBefore + 1, { timeout: 15_000 });
   });
 
   test('director downloads draft/review PDF for ready report', async ({ page }) => {

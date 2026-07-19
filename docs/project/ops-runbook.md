@@ -142,6 +142,54 @@ Tests may replace the process singleton via `installLoginRateLimiterForTests` an
 
 ---
 
+## 4c. First-run bootstrap (CCR-014)
+
+A freshly migrated + seeded database has the complete ว9/ว10 framework and **no
+people at all**. Two operator commands turn it into something that can be logged
+into. Both are CLIs on purpose, not API endpoints:
+
+- **Nothing may create a school through the API.** All six roles in
+  `permissions.yaml` are school- or area-scoped, and `area_admin` is read-only by
+  contract (PERM-004, SEC-TEN-3), so no role can legitimately write across
+  schools. Adding a `system_admin` to allow it would rewrite all 31 matrix rows.
+- **The first admin cannot invite themselves.** A public bootstrap endpoint whose
+  safety depends on a runtime "are there zero users?" check is wrong in exactly
+  the cases that matter — a restore that left the DB empty, a freshly provisioned
+  tenant. Running these needs DB access, which already implies more authority
+  than they grant.
+
+```bash
+# 1. the school (idempotent; re-running with the same --code is a no-op)
+node --env-file-if-exists=.env scripts/ops/provision-school.mjs \
+  --code=SCH-001 --name="โรงเรียนตัวอย่าง" \
+  --area-code=AREA-1 --area-name="สพป. เขต 1"     # area is optional
+
+# 2. the first school_admin
+#    Password comes from the environment, never a flag: argv is visible to every
+#    process on the box via `ps` and lands in shell history. Omit it and one is
+#    generated and printed ONCE.
+SEIP_ADMIN_PASSWORD='choose-something-long' \
+node --env-file-if-exists=.env scripts/ops/bootstrap-admin.mjs \
+  --email=admin@school.ac.th --name="ผู้ดูแลระบบ" --school=SCH-001
+```
+
+Also available as `npm run provision:school -- …` / `npm run bootstrap:admin -- …`
+(these build the workspace libs first). On Windows, npm mangles quoted arguments
+containing spaces — call `node` directly as above when a name contains a space.
+
+`bootstrap-admin` **refuses** to touch an account that already has a password. It
+creates the first admin; it is not a password-reset tool. Recovery is a separate,
+deliberate act.
+
+Everything after this happens in the app: the admin opens **บุคลากร**, invites
+people, and hands each person a single-use invite code. The invitee sets their own
+password at `/accept-invite` — the admin never learns it. Codes expire in 14 days
+and are shown exactly once (only a SHA-256 of each is stored), so a lost code
+means re-inviting, not recovering.
+
+There is no email dependency anywhere in that flow, deliberately: an on-prem
+school server (ADR-0005) may have no SMTP relay.
+
 ## 5. Backup and restore (release gate subject)
 
 Evidence videos and evaluation rows are **irreplaceable**. Backup **both** MySQL and MinIO on the same schedule (or document RPO/RTO if staggered).

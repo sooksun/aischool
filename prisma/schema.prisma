@@ -208,6 +208,13 @@ model UserAccount {
   passwordHash String?    @map("password_hash")
   status       UserStatus @default(invited)
   createdAt    DateTime   @default(now()) @map("created_at")
+  /// CCR-014 onboarding. SHA-256 of a single-use invite secret — never the
+  /// secret itself, same handling as RefreshToken.tokenHash. Both columns are
+  /// cleared in the transaction that sets passwordHash, so a non-null
+  /// inviteTokenHash means "invited and not yet accepted". No separate table:
+  /// an invite is 1:1 with the account it creates.
+  inviteTokenHash String?   @unique @map("invite_token_hash")
+  inviteExpiresAt DateTime? @map("invite_expires_at")
 
   memberships       SchoolMembership[]
   personnelProfiles PersonnelProfile[]

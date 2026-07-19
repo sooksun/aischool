@@ -6,7 +6,7 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Sprint 1 — First production features** (opened 2026-07-17 when the ARCH-002 merge went green on develop, run `b5c6d6a`). Single-agent mode per ADR-0004.
 
-> ⚠️ **Not releasable.** Three blockers (B-1/B-2/B-3 under Current Objectives) mean a fresh install cannot create a login and no score can be submitted through the API. See "Audit correction — 2026-07-19".
+> ⚠️ **Not releasable.** ~~Three~~ **Two** blockers remain (B-2/B-3 under Current Objectives): no score can be submitted through the API, and reports stall at `pending_approval`. **B-1 (onboarding) was closed 2026-07-19 by CCR-014** — a fresh install can now be bootstrapped with an operator CLI and every subsequent account is created through the API. See "Audit correction — 2026-07-19".
 
 ## Development Model
 Claude Code is the sole developer (architect + backend + frontend + QA); the user is the final approver. The multi-AI team model (Codex/Antigravity/Grok) was retired by ADR-0004 — its docs remain with SUPERSEDED banners.
@@ -45,7 +45,7 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 23. ~~DB engine migration~~ **DONE 2026-07-18** — PostgreSQL → MySQL 8 per ADR-0008 (Laragon localhost dev; staging/CI containers swapped; migrations rebaselined; full suite + e2e green on MySQL).
 24. ~~Cleanup L2-a~~ **DONE 2026-07-19** — `.category-card` selected-state CSS matched `aria-pressed` while the markup renders `role="radio" aria-checked`; the rule never applied, so picking an evidence category gave sighted users no visual confirmation. Verified fixed against the real stylesheet on the dev server.
 25. **Sprint 2 — BLOCKERS (must precede any release; each needs a CCR + a version bump — major vs minor decided per CCR, not assumed).** Tracked as `SEIP-BLOCK-001/002/003` on `.ai-team/task-board.yaml` (CCR-014/015/016). **CCR-014 drafted 2026-07-19, awaiting approval** — it lands additive (openapi 2.8.0 → 2.9.0), correcting this entry's original claim that all three require a major bump:
-    - **B-1 Onboarding path** (`SEIP-BLOCK-001`, CCR-014)**.** No operation in `openapi.yaml` creates `School` / `UserAccount` / `SchoolMembership` / `PersonnelProfile`, and `prisma/seed.mjs` seeds none of them. `hashPassword` has no caller outside its own test. **A fresh install cannot produce a first login.**
+    - ~~**B-1 Onboarding path**~~ (`SEIP-BLOCK-001`, CCR-014) — **DONE 2026-07-19.** `listPersonnel` / `listMembers` / `inviteMember` / `endMembership` + unauthenticated `acceptInvite` (openapi 2.9.0). The first admin and school provisioning ship as operator CLIs (`npm run provision:school`, `npm run bootstrap:admin`) because no role may write across schools and inventing a `system_admin` would rewrite all 31 matrix rows. Proven by an e2e spec that onboards a teacher through the browser with no Prisma write in the path.
     - **B-2 PerformanceAgreement + AgreementChallenge** (`SEIP-BLOCK-002`, CCR-015)**.** Both models have **zero references** in `apps/` and `packages/`. `submitMyScores` therefore always fails the workload gate (`apps/api/src/routes/scoring.ts:220-227`, VAL-002/SCORE-004). ประเด็นท้าทาย (ส่วนที่ 2) is **40% of the วPA score** and has no code at all.
     - **B-3 Approval** (`SEIP-BLOCK-003`, CCR-016)**.** Schema-only. Reports reach `pending_approval` and stall permanently.
 26. **Sprint 2+ remaining** — multi-instance Redis rate limits *only if* no trusted edge; pixel-perfect official paper plates (Protected Artifact); real file scanning to replace the deleted stub (CCR-012).
@@ -54,8 +54,8 @@ OPS-001 (repo + CI) · ARCH-001 (contracts v0.1) · DB-000 (data model, inherite
 
 A full evidence-based code audit was run against `feat/cleanup-L2-e2e-depth` (`42173e0`). **It contradicted this document.** The previous wording of this section claimed the product slice "works" end-to-end; that is true only because `tests/e2e/global-setup.mjs:196` and `apps/api/test/scoring-flow.test.mjs:114` write bootstrap rows **straight into Prisma, bypassing the API**. Corrected statement:
 
-**Product slice, as reachable through the API today:** login → evidence upload → MinIO → `file.process` size check (no scan) → mapping (+ local AI suggest) → cycles/rounds → committee assignment → report JSON + section refs → on-demand PDF.
-**Not reachable through the API:** creating the first user/school/personnel (B-1); linking a PerformanceAgreement, hence submitting any score (B-2); ประเด็นท้าทาย (B-2); approving a report (B-3).
+**Product slice, as reachable through the API today** (updated 2026-07-19 after CCR-014): **onboarding (invite → accept → login)** → evidence upload → MinIO → `file.process` size check (no scan) → mapping (+ local AI suggest) → cycles/rounds → committee assignment → report JSON + section refs → on-demand PDF.
+**Not reachable through the API:** linking a PerformanceAgreement, hence submitting any score (B-2); ประเด็นท้าทาย (B-2); approving a report (B-3). Creating the very first admin and provisioning schools are operator CLIs by design, not gaps (CCR-014 decisions 1 and 2).
 
 Audited completeness ≈ **70%** weighted. Quality of what exists is high — 35/35 contract operations implemented with zero stubs or TODOs, `permission-guard.ts` reads `permissions.yaml` at runtime and fails closed, zero raw SQL, 180 verbatim ก.ค.ศ. paragraphs seeded, migration drift verified zero, `npm run typecheck` clean across all 6 workspaces, 164 real test cases. **The gap is missing scope, not rot** — closing it is a sprint of new contract operations, not bug-fixing.
 

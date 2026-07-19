@@ -19,6 +19,12 @@ const E2E_EVAL2_EMAIL = process.env.E2E_EVAL2_EMAIL ?? 'e2e-eval2@seip.local';
 const E2E_EVAL2_PASSWORD = process.env.E2E_EVAL2_PASSWORD ?? 'e2e-eval2-password-1234';
 const E2E_EVAL3_EMAIL = process.env.E2E_EVAL3_EMAIL ?? 'e2e-eval3@seip.local';
 const E2E_EVAL3_PASSWORD = process.env.E2E_EVAL3_PASSWORD ?? 'e2e-eval3-password-1234';
+// CCR-014. Stands in for `scripts/ops/bootstrap-admin.mjs` — the one identity
+// that is legitimately created outside the API, because bootstrapping the first
+// admin is a CLI by design (CCR-014 decision 1). Everyone the onboarding spec
+// creates goes through HTTP from here on.
+const E2E_ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'e2e-admin@seip.local';
+const E2E_ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'e2e-admin-password-1234';
 
 async function ensureUser(prisma, {
   email, password, displayName, schoolId, role, withPersonnel, positionRole = 'teacher',
@@ -117,6 +123,15 @@ export default async function globalSetup() {
       role: 'director',
       withPersonnel: true,
       positionRole: 'teacher',
+    });
+
+    await ensureUser(prisma, {
+      email: E2E_ADMIN_EMAIL,
+      password: E2E_ADMIN_PASSWORD,
+      displayName: 'E2E Admin',
+      schoolId: school.id,
+      role: 'school_admin',
+      withPersonnel: false,
     });
 
     const eval2 = await ensureUser(prisma, {
@@ -296,6 +311,7 @@ export default async function globalSetup() {
     writeFileSync(AUTH_STATE, JSON.stringify({
       teacher: { email: E2E_TEACHER_EMAIL, password: E2E_TEACHER_PASSWORD },
       director: { email: E2E_DIRECTOR_EMAIL, password: E2E_DIRECTOR_PASSWORD },
+      admin: { email: E2E_ADMIN_EMAIL, password: E2E_ADMIN_PASSWORD },
       schoolId: school.id,
       teacherPersonnelId: teacher.personnelId,
       cycleId,
