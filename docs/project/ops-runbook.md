@@ -413,6 +413,30 @@ Everything left unverified is accounted for, with nothing unexplained: 50
 gone, and 30 soft-deleted (excluded by design; **re-run the sweep after any
 restore**, since a restored file is served again).
 
+**The 46 orphans were purged the same day**, after each object was re-checked
+against MinIO immediately before deletion rather than trusting the recorded job
+error — all 46 confirmed 404, none had come back. Deleting only the
+`evidence_file` rows was rejected: every one was its evidence's **only** file, so
+that would have left 46 `active` evidence with no files at all, which is
+contract-valid (`scan_status: null`) but less visible than a broken file was.
+Whole `Evidence` rows were deleted instead, cascading 46 files and 11 (already
+revoked) mappings; `report_section_ref` was checked first and cited none of them.
+All were integration-test fixtures (`lifecycle`/`y`/`dup`/`t`, synthetic
+`I-<uuid>` indicators).
+
+**On a real store this decision is not automatic.** A missing object may mean a
+storage incident, not junk — restoring the object is the better repair, and the
+row is the only remaining record that the evidence ever existed. There is
+deliberately **no `--purge` flag** on `rescan-files`: a hard delete of evidence is
+not a tool to leave sitting next to the sweep that reports the orphans. Decide,
+then do it by hand, after a backup.
+
+*(Unrelated but noticed while verifying: 475 `draft` and 27 `active` evidence rows
+have no files. The drafts are the normal "initiated, never completed" state. The
+27 are `tests/security/own-scope-null-personnel.test.mjs` tenancy fixtures written
+straight to `active`, not a product path — evidence only reaches `active` through
+a file registering.)*
+
 Two reporting defects surfaced only at this scale and are fixed:
 `summariseRescanJobs` grouped failures by a key that still contained the file id,
 so 46 identical failures printed as 46 lines instead of one `46×` — the exact
