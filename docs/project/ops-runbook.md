@@ -395,6 +395,14 @@ pushed through the queue to change nothing.
   outage and wrong for a permanently absent object: every future sweep re-queues
   it and burns another 8 attempts. Deal with those rows (restore the object, or
   remove the row) rather than letting them accumulate.
+- **A size-mismatch block is permanent but keeps no receipt, so it is re-checked
+  forever.** The mismatch test runs before the scanner and short-circuits it, so
+  no clamd verdict exists to record — `scanned_at` stays null and the file is
+  selected by every future sweep, which re-derives the same block. Harmless
+  (unlike the orphans it does not fail or retry), and deliberate: replacing the
+  stored object would legitimately change the answer. But it means a store with
+  N mismatched files reports a permanent floor of N unverified `blocked` rows.
+  Do not read that floor as a stalled sweep.
 
 ### 5b.5 First full-store run, 2026-07-20
 
@@ -408,10 +416,24 @@ Recorded because the numbers are the argument for doing this at all.
 | Wall clock | ~7 min, single worker, 10 jobs/poll |
 | Unverified `clean` files being served, before → after | **67 → 0** |
 
-Everything left unverified is accounted for, with nothing unexplained: 50
+Everything left unverified was accounted for, with nothing unexplained: 50
 `blocked` (opt-out, needs `--include-blocked`), 46 orphaned rows whose objects are
 gone, and 30 soft-deleted (excluded by design; **re-run the sweep after any
 restore**, since a restored file is served again).
+
+**The `blocked` set was then swept too** (`--include-blocked`), and it is the
+clearest demonstration of why that flag is opt-in: 54 blocked files became **22
+downloadable and 32 still blocked**. The split is the point —
+
+- 32 `mismatch.pdf` held, because the size-mismatch check runs before the scanner
+  and short-circuits it. A block earned from metadata is not undone by a scan.
+- 22 flipped to `clean`: 11 blocked by a test's artificial `CLAMAV_MAX_BYTES=1`,
+  4 blocked by the old stub for having "eicar" in the *filename*, 7 written
+  straight to `blocked` by API fixtures. **None of those blocks came from reading
+  the file**, which is exactly the population a re-scan should overturn.
+
+Across the whole store clamd found **no malware**: 333 real verdicts, all clean,
+zero `blocked` with a receipt.
 
 **The 46 orphans were purged the same day**, after each object was re-checked
 against MinIO immediately before deletion rather than trusting the recorded job
