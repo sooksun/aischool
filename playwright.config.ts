@@ -24,10 +24,12 @@ export default defineConfig({
     },
   ],
   // When E2E_BASE_URL is set (CI starts servers itself), do not spawn vite.
+  // --host 127.0.0.1: on Windows, vite's default host (localhost) can bind
+  // IPv6-only ([::1]), which the IPv4 baseURL poll above never reaches.
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: 'npm run dev --workspace apps/web',
+        command: 'npm run dev --workspace apps/web -- --host 127.0.0.1',
         url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

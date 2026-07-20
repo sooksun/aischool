@@ -21,7 +21,11 @@ export type UiCapability =
   /** createReport */
   | 'createReports'
   /** actOnMapping school-level confirm/reject (not teacher own-revoke) */
-  | 'governMappings';
+  | 'governMappings'
+  /** createEvidence / initiateFileUpload / completeFileUpload */
+  | 'submitEvidence'
+  /** listMembers / inviteMember / endMembership (CCR-014) */
+  | 'manageMembers';
 
 export type Capabilities = Record<UiCapability, boolean>;
 
@@ -40,6 +44,15 @@ export const CAPABILITY_ROLES: Record<UiCapability, readonly Role[]> = {
   createReports: ['director', 'school_admin'],
   // actOnMapping: director + school_admin (school scope)
   governMappings: ['director', 'school_admin'],
+  // createEvidence, initiateFileUpload, completeFileUpload — every role that owns
+  // evidence. evaluator and area_admin are absent from the matrix row: they read
+  // others' evidence (committee / area-r) but never submit their own.
+  submitEvidence: ['teacher', 'deputy', 'director', 'school_admin'],
+  // listMembers, inviteMember, endMembership — school_admin alone. Deliberately
+  // NOT director: onboarding creates accounts and grants access to PDPA-scoped
+  // evidence, which CCR-014 kept to the one role whose contract description is
+  // "ผู้ดูแลระบบระดับโรงเรียน ... จัดการ ... บุคลากร".
+  manageMembers: ['school_admin'],
 };
 
 const FALSE_CAPS: Capabilities = {
@@ -48,6 +61,8 @@ const FALSE_CAPS: Capabilities = {
   viewReports: false,
   createReports: false,
   governMappings: false,
+  submitEvidence: false,
+  manageMembers: false,
 };
 
 /** Pure: memberships → flags. Call once per user change (memoize in useAuth). */

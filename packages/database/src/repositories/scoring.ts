@@ -2,6 +2,7 @@
 // WorkloadDeclaration. EvaluationAssignment carries schoolId directly
 // (entity-dictionary.md), so unlike rounds it needs no relation hop for tenancy.
 import { prisma } from '../client.js';
+import { writeAuditEvent, type AuditWrite } from '../audit.js';
 import type { Prisma } from '@prisma/client';
 
 export interface ListAssignmentsFilter {
@@ -58,6 +59,28 @@ export async function getAssignmentDetail(assignmentId: string) {
     where: { id: assignmentId },
     include: {
       committee: true,
+      // CCR-013: IndicatorLevelDescription rows are keyed by (rank_level_code,
+      // rubric_level), so a scoring client needs the evaluatee's วิทยฐานะ to pick
+      // the right expected-practice text. There is no personnel lookup operation
+      // for it to resolve this itself.
+      evaluatee: { select: { rankLevelCode: true } },
+      // CCR-015: the evaluatee's ประเด็นท้าทาย, so the scoring screen can show the
+      // method and targets that indicators C.1/C.2.1/C.2.2 actually rate. Without
+      // this join the committee assigns 40% of the result to free text it has
+      // never seen — the defect contract v3.0 exists to close.
+      agreement: {
+        select: {
+          id: true,
+          status: true,
+          challenges: {
+            select: {
+              id: true, indicatorId: true, title: true, methodPlan: true,
+              quantitativeTarget: true, qualitativeTarget: true,
+              targetGroup: true, periodNote: true,
+            },
+          },
+        },
+      },
       round: {
         select: {
           id: true, status: true,
@@ -98,39 +121,51 @@ export async function upsertWorkloadDeclaration(
 
 // ── per-evaluator scores (grain: assignment × indicator × evaluator) ──
 
-/** Full-set replace, not per-row upsert: SCORE-005 requires the complete set on
- * every submission, so there is no partial-update case whose row history is worth
- * preserving. Delete + recreate inside one transaction keeps the (assignment,
- * evaluator) row set atomic even under a resubmit. */
-export async function replaceIndicatorScores(assignmentId: string, evaluatorUserId: string, scores: {
-  indicatorId: string;
-  rubricLevel: number;
-  comment: string | null;
-}[]) {
-  await prisma.$transaction([
-    prisma.indicatorScore.deleteMany({ where: { assignmentId, evaluatorUserId } }),
-    prisma.indicatorScore.createMany({
-      data: scores.map((s) => ({
-        assignmentId, evaluatorUserId, indicatorId: s.indicatorId, rubricLevel: s.rubricLevel, comment: s.comment,
-      })),
-    }),
-  ]);
-}
-
 export async function getIndicatorScores(assignmentId: string, evaluatorUserId: string) {
   return prisma.indicatorScore.findMany({ where: { assignmentId, evaluatorUserId } });
 }
 
-export async function upsertRoundResult(assignmentId: string, evaluatorUserId: string, data: {
-  part1Percent: number;
-  part2Percent: number;
-  totalPercent: number;
-  passedWorkloadGate: boolean;
-}) {
-  return prisma.roundResult.upsert({
-    where: { assignmentId_evaluatorUserId: { assignmentId, evaluatorUserId } },
-    create: { assignmentId, evaluatorUserId, ...data },
-    update: { ...data, computedAt: new Date() },
+/**
+ * One evaluator's submission: scores, the rollup derived from them, and the audit
+ * row — committed together or not at all.
+ *
+ * These used to be three sequential awaits in the route. replaceIndicatorScores
+ * was internally atomic, but a failure after it left the new scores paired with
+ * the PREVIOUS RoundResult. That is not a cosmetic lag: round_result.total_percent
+ * feeds the STORED GENERATED passed_individual_threshold column, so the database's
+ * own pass/fail verdict for that evaluator would disagree with the scores it is
+ * supposedly derived from, silently, until the evaluator happened to resubmit
+ * (2026-07-18 audit).
+ *
+ * The rollup arithmetic stays in the route — it is pure, needs the framework's
+ * weights, and does not belong behind a repository call. Only the writes are here.
+ */
+export async function replaceScoresAndRollup(
+  assignmentId: string,
+  evaluatorUserId: string,
+  scores: { indicatorId: string; rubricLevel: number; comment: string | null }[],
+  rollup: {
+    part1Percent: number;
+    part2Percent: number;
+    totalPercent: number;
+    passedWorkloadGate: boolean;
+  },
+  audit: AuditWrite,
+) {
+  return prisma.$transaction(async (tx) => {
+    await tx.indicatorScore.deleteMany({ where: { assignmentId, evaluatorUserId } });
+    await tx.indicatorScore.createMany({
+      data: scores.map((s) => ({
+        assignmentId, evaluatorUserId, indicatorId: s.indicatorId, rubricLevel: s.rubricLevel, comment: s.comment,
+      })),
+    });
+    const result = await tx.roundResult.upsert({
+      where: { assignmentId_evaluatorUserId: { assignmentId, evaluatorUserId } },
+      create: { assignmentId, evaluatorUserId, ...rollup },
+      update: { ...rollup, computedAt: new Date() },
+    });
+    await writeAuditEvent(audit, tx);
+    return result;
   });
 }
 

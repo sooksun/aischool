@@ -45,6 +45,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/accept-invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the initial password for an invited account (CCR-014)
+         * @description The invite token in the body IS the credential — the invitee has no
+         *     password yet and therefore cannot hold a bearer token. Single-use: the
+         *     token is cleared in the same transaction that stores the password hash,
+         *     and the account moves `invited` → `active`.
+         *
+         *     Deliberately does NOT return a token pair. The caller logs in normally
+         *     afterwards, so SEC-AUTH-3 (`invited` accounts cannot authenticate) stays
+         *     enforced in exactly one place — `login`.
+         *
+         *     Unknown, expired and already-used tokens are indistinguishable (AUTH-005),
+         *     and the endpoint is throttled on the same limiter as login (SEC-AUTH-5),
+         *     because the token is guessable in principle.
+         */
+        post: operations["acceptInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -79,6 +110,98 @@ export interface paths {
         get: operations["getCurrentUser"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/personnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Personnel of the caller's school (CCR-014)
+         * @description Resolves personnel UUIDs to names. Readable by `evaluator` as well as
+         *     `director`/`school_admin` because a committee member must be able to see
+         *     who they are scoring — before v2.9 four screens rendered raw UUIDs as
+         *     primary user-facing text.
+         *
+         *     Returns identity needed to pick and display a person, not their evaluation
+         *     record — no scores, no agreements, no evidence.
+         */
+        get: operations["listPersonnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Accounts holding a membership in the caller's school (school admin) */
+        get: operations["listMembers"];
+        put?: never;
+        /**
+         * Invite a person into the caller's school (school admin)
+         * @description Creates the `UserAccount` (status `invited`, no password), the
+         *     `SchoolMembership`, and — when `personnel` is present — the
+         *     `PersonnelProfile`, in one transaction.
+         *
+         *     The school is taken from the caller's own membership and is NOT a body
+         *     field. Accepting a client-supplied school id here would make this
+         *     operation a cross-tenant account factory.
+         *
+         *     `personnel` is optional because an external committee `evaluator` belongs
+         *     to the school without being evaluated by it — the same reason
+         *     `CurrentUser.personnel` is nullable (CCR-002).
+         *
+         *     The returned `invite_token` is shown **once** and is not retrievable
+         *     afterwards; the admin passes it to the invitee out of band. There is no
+         *     email dependency by design: an on-prem deployment (ADR-0005) may have no
+         *     SMTP relay at all.
+         *
+         *     Inviting an email that already holds a current membership in this school
+         *     is a conflict (RES-002), not a second membership.
+         */
+        post: operations["inviteMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/members/{membershipId}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a membership, revoking access to this school (school admin)
+         * @description Sets `effective_to` to today. Offboarding, not deletion — evaluation
+         *     history stays intact and attributable.
+         *
+         *     There is deliberately no way to backdate: `effective_to` records when
+         *     access was actually revoked, and a past date would assert access ended
+         *     earlier than it did.
+         *
+         *     Idempotent — ending an already-ended membership returns it unchanged.
+         */
+        post: operations["endMembership"];
         delete?: never;
         options?: never;
         head?: never;
@@ -283,7 +406,7 @@ export interface paths {
         put?: never;
         /**
          * Phase 2: confirm bytes uploaded; register file and enqueue virus scan
-         * @description Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served only when scan_status=clean (UPL-006).
+         * @description Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served when scan_status is clean or unscanned; blocked/pending return UPL-006.
          */
         post: operations["completeFileUpload"];
         delete?: never;
@@ -303,8 +426,10 @@ export interface paths {
          * Issue a short-lived download URL for one clean evidence file
          * @description Lazy download (CCR-010 / cleanup H2). Call only when the user intends to
          *     download — `getEvidence` and `completeFileUpload` never presign object
-         *     storage. Requires `scan_status=clean` (UPL-006); pending/blocked return
-         *     UPL-006. Same tenancy grants as `getEvidence`. Never returns `storage_uri`.
+         *     storage. Requires `scan_status` to be `clean` or `unscanned` (CCR-012 —
+         *     unscanned means no scanner ran, which is disclosed rather than blocked);
+         *     `pending`/`blocked` return UPL-006. Same tenancy grants as `getEvidence`.
+         *     Never returns `storage_uri`.
          */
         get: operations["getEvidenceFileDownloadUrl"];
         put?: never;
@@ -387,6 +512,105 @@ export interface paths {
         head?: never;
         /** Confirm, reject, or revoke a mapping (governance action, audited) */
         patch: operations["actOnMapping"];
+        trace?: never;
+    };
+    "/agreements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Performance agreements visible to the caller
+         * @description A teacher sees their own; a director or school_admin sees the school's; an
+         *     evaluator sees those of the people they sit on a committee for.
+         */
+        get: operations["listAgreements"];
+        put?: never;
+        /**
+         * File a performance agreement for a cycle (แบบ PA1)
+         * @description One agreement per (cycle, personnel) — a second attempt is AGR-001, not a
+         *     second row. The challenge is written as part of the agreement rather than
+         *     through its own endpoint: it has no independent lifecycle, and an agreement
+         *     with an orphan challenge is not a state worth modelling.
+         *
+         *     Starts in `draft`. Content stays editable until `submitAgreement`.
+         */
+        post: operations["createAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agreements/{agreementId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One agreement with its ประเด็นท้าทาย */
+        get: operations["getAgreement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a draft agreement and its challenge
+         * @description Draft only. Once submitted, the content is frozen (AGR-002): editing a
+         *     submitted agreement would let an evaluatee rewrite the targets they are
+         *     about to be scored against, and editing an acknowledged one would rewrite
+         *     what the director signed.
+         */
+        patch: operations["updateAgreement"];
+        trace?: never;
+    };
+    "/agreements/{agreementId}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a draft agreement for the director to acknowledge
+         * @description draft → submitted, and the content freezes. Requires a challenge to exist —
+         *     submitting an agreement with no ประเด็นท้าทาย would hand the committee an
+         *     empty 40% to score, which is the defect this whole contract version exists
+         *     to close (AGR-002).
+         */
+        post: operations["submitAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agreements/{agreementId}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Director acknowledges a submitted agreement (ผอ. เห็นชอบ)
+         * @description submitted → acknowledged. Never available to the evaluatee, even though
+         *     they hold `own` on the agreement — acknowledging your own commitments is
+         *     not a signature.
+         */
+        post: operations["acknowledgeAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/rounds/{roundId}/assignments": {
@@ -511,6 +735,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports/{reportId}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The decision trail for a report (CCR-016)
+         * @description Grants match `getReport` rather than the narrower write grants: a subject
+         *     who can read their own result but not who endorsed it would be a strange
+         *     kind of transparency.
+         *
+         *     Append-only — there is no operation that edits or removes a decision, and
+         *     that is what makes the signature mean anything.
+         */
+        get: operations["listReportApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/{reportId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Endorse a generated report (ผอ. ลงนาม)
+         * @description `pending_approval` → `approved`, recording an Approval row with the actor
+         *     and timestamp.
+         *
+         *     **Requires the report's round to be closed** (RPT-003). Scores only freeze
+         *     when a round closes (SCORE-002), so approving earlier would timestamp a
+         *     signature against numbers that can still change — the document would later
+         *     contradict its own data with nothing to show for it. Reports with
+         *     `round_id = null` are cycle-level and skip the check; there is no round to
+         *     freeze.
+         *
+         *     The evaluatee may never approve their own report, even where their role
+         *     holds the grant — a director is an evaluatee too under ว10, and
+         *     `permissions.yaml` cannot express "any grant except over yourself".
+         */
+        post: operations["approveReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/{reportId}/return": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Return a report for rework (ส่งกลับให้แก้ไข)
+         * @description `pending_approval` → `draft`, so the report can be regenerated once
+         *     whatever was wrong is fixed.
+         *
+         *     `comment` is REQUIRED here, unlike on approve: sending a result back with
+         *     no stated reason gives the person who has to fix it nothing to act on.
+         *
+         *     Note there is no "reject". A report renders scores that already exist, so
+         *     marking one rejected while that data stands unchanged would be a
+         *     contradiction rather than a state — if the result itself is wrong, the
+         *     remedy is to reopen the round and rescore. `ApprovalDecision.rejected`
+         *     stays unused on purpose (CCR-016 decision 2).
+         */
+        post: operations["returnReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reports/{reportId}/pdf": {
         parameters: {
             query?: never;
@@ -552,6 +863,12 @@ export interface components {
         RoleFamily: "teacher" | "administrator";
         /** @enum {string} */
         Role: "teacher" | "director" | "deputy" | "evaluator" | "school_admin" | "area_admin";
+        /**
+         * @description `invited` — created but has never set a password; cannot authenticate
+         *     (SEC-AUTH-3). `disabled` — deactivated; also cannot authenticate.
+         * @enum {string}
+         */
+        UserStatus: "active" | "disabled" | "invited";
         /** @enum {string} */
         EvaluationKind: "pa" | "dpa";
         /** @enum {string} */
@@ -574,8 +891,19 @@ export interface components {
          * @enum {string}
          */
         ReportTemplateCode: "PA1_s" | "PA1_bs" | "PA2_s" | "PA2_bs" | "PA3_s" | "PA3_bs";
-        /** @enum {string} */
-        ScanStatus: "pending" | "clean" | "blocked";
+        /**
+         * @description `pending` — queued, the worker has not processed the file yet.
+         *     `clean` — a scanner ran and found nothing.
+         *     `unscanned` — the file was processed but NO scanner ran, so the platform
+         *     makes no claim about its contents (CCR-012). This is the state on any
+         *     deployment without a malware scanner wired in. It is served like `clean`
+         *     — the distinction is disclosure, not restriction — and clients are
+         *     expected to surface it so nobody reads silence as a clean bill of health.
+         *     `blocked` — quarantined: a scanner rejected it, or the stored object did
+         *     not match the declared byte_size. Never served (UPL-006).
+         * @enum {string}
+         */
+        ScanStatus: "pending" | "clean" | "unscanned" | "blocked";
         RubricLevel: number;
         LoginRequest: {
             /** Format: email */
@@ -622,6 +950,97 @@ export interface components {
                 /** Format: uuid */
                 area_id?: string | null;
             }[];
+        };
+        /** @description Enough to identify and display a person; not their evaluation record. */
+        PersonnelSummary: {
+            /** Format: uuid */
+            id: string;
+            full_name: string;
+            employee_code?: string | null;
+            position_role: components["schemas"]["RoleFamily"];
+            /**
+             * @description วิทยฐานะ tier code — same vocabulary as CurrentUser.personnel.rank_level_code
+             * @example teacher_kru
+             * @example teacher_chamnankan
+             */
+            rank_level_code: string;
+            /** @enum {string} */
+            status: "active" | "inactive";
+        };
+        /** @description One person's membership in the caller's school, with their account state. */
+        Member: {
+            /** Format: uuid */
+            membership_id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** Format: email */
+            email: string;
+            display_name: string;
+            role: components["schemas"]["Role"];
+            user_status: components["schemas"]["UserStatus"];
+            /** Format: date */
+            effective_from: string;
+            /**
+             * Format: date
+             * @description Null while the membership is current. Set by endMembership.
+             */
+            effective_to?: string | null;
+            /** @description Present when this member is also evaluatee-capable personnel. Null for an external evaluator (CCR-002 shape). */
+            personnel?: null | components["schemas"]["PersonnelSummary"];
+        };
+        /**
+         * @description No `school_id` — the school is the caller's own. A body-supplied school
+         *     would turn this into a cross-tenant account factory, so the field does
+         *     not exist rather than being validated away.
+         */
+        MemberInvite: {
+            /**
+             * Format: email
+             * @description Stored lowercase; the server lowercases before insert (a CHECK constraint compares the value against its own lowercase form as BINARY).
+             */
+            email: string;
+            display_name: string;
+            role: components["schemas"]["Role"];
+            /**
+             * @description Omit for a member who is not evaluated by this school (an external
+             *     committee `evaluator`). When present, `rank_level_code` must belong to
+             *     the same role family as `position_role` — a mismatch selects the wrong
+             *     framework's rubric and is rejected with VAL-003.
+             */
+            personnel?: {
+                full_name: string;
+                employee_code?: string | null;
+                position_role: components["schemas"]["RoleFamily"];
+                rank_level_code: string;
+            };
+        };
+        /** @description The invite token appears here and nowhere else, ever. */
+        MemberInviteResult: {
+            member: components["schemas"]["Member"];
+            /**
+             * @description Single-use secret. Only its hash is stored, so this value cannot be
+             *     recovered after this response — re-invite if it is lost. Deliver it
+             *     out of band; never log it (SEC-AUTH-1 applies to any credential).
+             *
+             *     **Null when the invited email already belongs to an account that has
+             *     a password.** That case is a real one — a teacher moving schools, or
+             *     an external evaluator serving two — and it grants the new membership
+             *     without issuing a credential. Issuing one would let any school_admin
+             *     take over any account in the system by "inviting" its email: an
+             *     admin-triggered password reset wearing an onboarding hat. The person
+             *     simply logs in with the password they already have.
+             */
+            invite_token: string | null;
+            /**
+             * Format: date-time
+             * @description Null exactly when `invite_token` is null.
+             */
+            invite_expires_at: string | null;
+        };
+        AcceptInviteRequest: {
+            invite_token: string;
+            /** @description Chosen by the invitee. The inviting admin never sees or sets it. */
+            password: string;
         };
         Framework: {
             /** Format: uuid */
@@ -783,7 +1202,7 @@ export interface components {
             created_at: string;
             /**
              * @description Aggregate of attached files (CCR-009). null when there are no files.
-             *     Worst-of order: pending > blocked > clean. Present on list and detail so
+             *     Worst-of order: pending > blocked > unscanned > clean. Present on list and detail so
              *     clients never need N+1 detail fetches for list badges.
              */
             scan_status?: null | components["schemas"]["ScanStatus"];
@@ -964,15 +1383,115 @@ export interface components {
             committee_role: "chair" | "member";
             seat_number: number;
         };
+        /**
+         * @description `draft` — editable by the evaluatee. `submitted` — content frozen, awaiting
+         *     the director. `acknowledged` — ผอ. เห็นชอบ; this is what a committee scores
+         *     against.
+         * @enum {string}
+         */
+        AgreementStatus: "draft" | "submitted" | "acknowledged";
+        /**
+         * @description ประเด็นท้าทาย — one per agreement, matching the single challenge on the PA1
+         *     form. The three text fields are what indicators C.1 / C.2.1 / C.2.2 rate
+         *     (20 / 10 / 10 points), so they are the evidence behind 40% of the result.
+         */
+        AgreementChallenge: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The framework's วิธีดำเนินการ indicator (T-C.1 / A-C.1) — the anchor this challenge is filed under.
+             */
+            indicator_id: string;
+            /** @description ประเด็นท้าทาย เรื่อง … — the subject of the challenge. */
+            title: string;
+            /** @description วิธีดำเนินการ — scored by C.1 (20 points). */
+            method_plan: string;
+            /** @description ผลลัพธ์เชิงปริมาณ — the target C.2.1 is scored against (10 points). */
+            quantitative_target?: string | null;
+            /** @description ผลลัพธ์เชิงคุณภาพ — the target C.2.2 is scored against (10 points). */
+            qualitative_target?: string | null;
+            /** @description กลุ่มเป้าหมาย — not scored. */
+            target_group?: string | null;
+            /** @description ช่วงเวลาดำเนินการ — not scored. */
+            period_note?: string | null;
+        };
+        AgreementChallengeInput: {
+            title: string;
+            method_plan: string;
+            quantitative_target?: string | null;
+            qualitative_target?: string | null;
+            target_group?: string | null;
+            period_note?: string | null;
+        };
+        Agreement: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            school_id: string;
+            /** Format: uuid */
+            cycle_id: string;
+            /** Format: uuid */
+            personnel_id: string;
+            /**
+             * @description /ส for teachers (ว9), /บส for administrators (ว10). Derived from the personnel's position_role, not chosen by the client.
+             * @enum {string}
+             */
+            form_variant: "PA1_s" | "PA1_bs";
+            status: components["schemas"]["AgreementStatus"];
+            /** Format: date-time */
+            submitted_at?: string | null;
+        };
+        AgreementDetail: components["schemas"]["Agreement"] & {
+            /** @description Null while still being drafted; required before the agreement can be submitted. */
+            challenge?: null | components["schemas"]["AgreementChallenge"];
+        };
+        /**
+         * @description No `school_id` and no `form_variant` — both are derived (the school from
+         *     the caller's membership, the variant from the personnel's position_role).
+         *     `personnel_id` is required rather than implied because a school_admin may
+         *     file on behalf of staff, but it is validated against the caller's school
+         *     and against the `own` grant for an evaluatee filing their own.
+         */
+        AgreementCreate: {
+            /** Format: uuid */
+            cycle_id: string;
+            /** Format: uuid */
+            personnel_id: string;
+            /** @description Optional at creation so an agreement can be started and finished later; required by the time it is submitted. */
+            challenge?: components["schemas"]["AgreementChallengeInput"];
+        };
+        /** @description Draft only (AGR-002). Omitted fields are left unchanged. */
+        AgreementPatch: {
+            challenge?: components["schemas"]["AgreementChallengeInput"];
+        };
+        /**
+         * @description No `agreement_id` (removed in 3.0.0, CCR-015). PerformanceAgreement is
+         *     unique per (cycle, personnel) and the assignment knows both, so the server
+         *     derives it. It used to be accepted from the body and passed through
+         *     unvalidated, which let one person's assignment be attached to another
+         *     person's agreement — and since workload_declaration is unique per
+         *     (agreement, round), that made the ภาระงาน gate read and write the wrong
+         *     person's row.
+         */
         AssignmentCreate: {
             /** Format: uuid */
             evaluatee_personnel_id: string;
-            /** Format: uuid */
-            agreement_id?: string | null;
             /** @description Exactly 3 per ว9/ว10 (SCORE-001) — one chair, two members */
             committee: components["schemas"]["CommitteeMember"][];
         };
         AssignmentDetail: components["schemas"]["Assignment"] & {
+            /**
+             * @description The evaluatee's ประเด็นท้าทาย, read-only (CCR-015). This is the
+             *     whole point of contract v3.0: indicators C.1 / C.2.1 / C.2.2 carry
+             *     40% of the result and rate the method and targets recorded here, so
+             *     without it the committee was scoring free text they had never seen.
+             *
+             *     Null when the evaluatee has no agreement for this cycle yet — the
+             *     scoring UI must say so rather than render an empty field, because
+             *     "no challenge filed" and "challenge left blank" are different facts.
+             */
+            challenge?: null | components["schemas"]["AgreementChallenge"];
             workload_gate_declared: boolean;
             workload_met?: boolean | null;
             /**
@@ -986,6 +1505,15 @@ export interface components {
              *     to load taxonomy for scoring — no graph walk over cycles/rounds.
              */
             framework_version_id: string;
+            /**
+             * @description วิทยฐานะ of the person being evaluated (CCR-013). IndicatorLevel rows
+             *     are keyed by (rank_level_code, rubric_level), so without this a client
+             *     cannot tell which rank's expected-practice text applies and is forced
+             *     to invent generic rubric labels — which is what apps/web did. There is
+             *     no personnel lookup operation, so this cannot be resolved client-side.
+             * @example apply_adapt
+             */
+            evaluatee_rank_level_code: string;
         };
         ScoreSubmission: {
             /** @description Chair may declare the workload gate in the same call (SCORE-004) */
@@ -1082,6 +1610,53 @@ export interface components {
         ReportDetail: components["schemas"]["Report"] & {
             payload: components["schemas"]["ReportPayload"];
             section_refs: components["schemas"]["ReportSectionRef"][];
+            /**
+             * @description Decision trail, oldest first (CCR-016). Empty until someone acts.
+             *     Present on the detail response so a client does not need a second
+             *     call just to render "who signed this and when".
+             */
+            approvals?: components["schemas"]["Approval"][];
+        };
+        /** @description One recorded decision on a report. Append-only. */
+        Approval: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            report_id: string;
+            /** Format: uuid */
+            approver_user_id: string;
+            /**
+             * @description Which step in the approval sequence this decision belongs to. Always
+             *     `director` today — SEIP has one step, and a configurable chain would be
+             *     a workflow engine built for a workflow that does not exist yet
+             *     (CCR-016 decision 1). A second step later is additive: a new value here
+             *     and a rule about ordering, no migration.
+             * @example director
+             */
+            step_code: string;
+            /**
+             * @description `rejected` is absent by design, not by omission — see returnReport.
+             *     `pending` is not emitted either: a row is only written when a decision
+             *     is actually taken.
+             * @enum {string}
+             */
+            decision: "approved" | "returned";
+            comment?: string | null;
+            /**
+             * Format: date-time
+             * @description Nullable because the column must accommodate a `pending` row. Nothing
+             *     writes one — a row is only created when a decision is actually taken —
+             *     so in practice this is always set. Typed honestly rather than asserting
+             *     a timestamp the schema does not guarantee.
+             */
+            decided_at: string | null;
+        };
+        ApprovalDecisionInput: {
+            comment?: string | null;
+        };
+        /** @description Unlike approve, a reason is required — see returnReport. */
+        ApprovalReturnInput: {
+            comment: string;
         };
         ReportPayload: {
             /**
@@ -1221,6 +1796,8 @@ export interface components {
         EvidenceId: string;
         AssignmentId: string;
         ReportId: string;
+        MembershipId: string;
+        AgreementId: string;
         Page: number;
         PageSize: number;
     };
@@ -1282,6 +1859,39 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    acceptInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Password set; the account is now active and may log in */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description AUTH-004 — too many attempts (SEC-AUTH-5) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -1324,6 +1934,112 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listPersonnel: {
+        parameters: {
+            query?: {
+                /** @description Defaults to active only; pass `all` to include former personnel. */
+                status?: "active" | "inactive" | "all";
+                /** @description Filter to one framework family (ว9 teacher vs ว10 administrator). */
+                position_role?: components["schemas"]["RoleFamily"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Personnel of the caller's school */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonnelSummary"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listMembers: {
+        parameters: {
+            query?: {
+                /** @description Defaults to current memberships (no effective_to in the past). */
+                status?: "current" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Members */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    inviteMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberInvite"];
+            };
+        };
+        responses: {
+            /** @description Invited — `invite_token` is returned exactly once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberInviteResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    endMembership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                membershipId: components["parameters"]["MembershipId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Membership ended */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     listFrameworks: {
@@ -1936,6 +2652,167 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
+    listAgreements: {
+        parameters: {
+            query?: {
+                cycle_id?: string;
+                status?: components["schemas"]["AgreementStatus"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agreements */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agreement"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgreementCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agreement detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgreementPatch"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    submitAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Submitted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    acknowledgeAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
     listAssignments: {
         parameters: {
             query?: {
@@ -2150,6 +3027,92 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listReportApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Decisions, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    approveReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ApprovalDecisionInput"];
+            };
+        };
+        responses: {
+            /** @description Approved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    returnReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalReturnInput"];
+            };
+        };
+        responses: {
+            /** @description Returned to draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     getReportPdf: {

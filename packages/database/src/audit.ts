@@ -4,6 +4,7 @@
 // never gets duplicated into the audit trail. That allowlist is enforced HERE,
 // structurally — a caller can pass a full entity object and this module strips
 // it down, rather than trusting every call site to remember to.
+import type { Prisma } from '@prisma/client';
 import { prisma } from './client.js';
 
 type Primitive = string | number | boolean | null;
@@ -19,6 +20,24 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   Report: ['id', 'schoolId', 'cycleId', 'subjectPersonnelId', 'templateCode', 'status'],
   UserAccount: ['id', 'status'], // email/displayName excluded: direct PII
   SchoolMembership: ['id', 'userId', 'schoolId', 'role', 'status'],
+  // CCR-014. fullName and employeeCode excluded: both directly identify a person,
+  // same reason UserAccount omits email/displayName above. Who was onboarded is
+  // answerable from userId without copying their name into the audit trail.
+  PersonnelProfile: ['id', 'schoolId', 'userId', 'positionRole', 'rankLevelCode', 'status'],
+  // CCR-015. Submit and acknowledge are the governance acts on a PA1, so they
+  // must leave a trail — but the challenge text itself is excluded: title,
+  // methodPlan and the targets are the evaluatee's own words about their
+  // teaching, which is exactly the learner-adjacent free text SEC-PDPA-2 keeps
+  // out of the audit log (same reason Evidence omits title/description above).
+  // Who submitted what, and when, is answerable from id + status + personnelId.
+  PerformanceAgreement: ['id', 'schoolId', 'cycleId', 'personnelId', 'status'],
+  // CCR-016. `comment` excluded: on a return it is free text about a named
+  // person's performance, which is the same learner-adjacent content SEC-PDPA-2
+  // keeps out of the trail (see Evidence and PerformanceAgreement above). Who
+  // decided what, and when, is fully answerable from the fields kept — the
+  // comment lives on the Approval row itself, readable by anyone who may read the
+  // report, without being duplicated into an append-only log.
+  Approval: ['id', 'reportId', 'approverUserId', 'stepCode', 'decision'],
 };
 
 function allowlist(entityType: string, obj: Record<string, unknown> | undefined): Snapshot | undefined {
@@ -45,8 +64,17 @@ export interface AuditWrite {
   requestId?: string;
 }
 
-export async function writeAuditEvent(w: AuditWrite): Promise<void> {
-  await prisma.auditEvent.create({
+/**
+ * `tx` lets a caller enrol the audit row in a surrounding transaction, matching
+ * enqueueWorkerJob's convention. Worth doing wherever the audited write is
+ * itself transactional: rolling back should un-say "this happened", and a
+ * committed change with no trail is a compliance gap on an append-only log.
+ */
+export async function writeAuditEvent(
+  w: AuditWrite,
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<void> {
+  await tx.auditEvent.create({
     data: {
       schoolId: w.schoolId,
       actorUserId: w.actorUserId,

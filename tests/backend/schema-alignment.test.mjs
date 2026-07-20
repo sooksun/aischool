@@ -1,12 +1,16 @@
-// SEIP-DB-001 — schema vs entity-dictionary checklist.
+// SEIP-DB-001 — schema vs entity-dictionary checklist (MySQL edition, ADR-0008).
 // Asserts the tables that implement the dictionary exist (and ChallengeScore is merged).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import pg from 'pg';
+import mysql from 'mysql2/promise';
 
-const url = process.env.DATABASE_URL
-  ?? 'postgresql://seip:seip_dev_only@localhost:5433/seip?schema=public';
-const client = new pg.Client({ connectionString: url });
+const url = process.env.DATABASE_URL ?? 'mysql://root@localhost:3306/seip';
+let conn;
+
+async function q(sql, params = []) {
+  const [rows] = await conn.query(sql, params);
+  return rows;
+}
 
 /** entity-dictionary.md entities → expected physical table (snake_case @@map). */
 const EXPECTED_TABLES = [
@@ -43,28 +47,29 @@ const EXPECTED_TABLES = [
 const MERGED_AWAY = ['challenge_score'];
 
 before(async () => {
-  await client.connect();
+  conn = await mysql.createConnection(url);
 });
 after(async () => {
-  await client.end();
+  await conn.end();
 });
 
 test('all entity-dictionary tables exist', async () => {
-  const r = await client.query(
-    `SELECT table_name FROM information_schema.tables
-     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`,
+  const r = await q(
+    `SELECT table_name AS table_name FROM information_schema.tables
+     WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'`,
   );
-  const have = new Set(r.rows.map((row) => row.table_name));
+  const have = new Set(r.map((row) => row.table_name));
   for (const t of EXPECTED_TABLES) {
     assert.ok(have.has(t), `missing table ${t} from entity-dictionary`);
   }
 });
 
 test('ChallengeScore has no separate table (merged into indicator_score)', async () => {
-  const r = await client.query(
-    `SELECT to_regclass('public.challenge_score') AS reg`,
+  const r = await q(
+    `SELECT COUNT(*) AS c FROM information_schema.tables
+     WHERE table_schema = DATABASE() AND table_name = 'challenge_score'`,
   );
-  assert.equal(r.rows[0].reg, null);
+  assert.equal(Number(r[0].c), 0);
   for (const t of MERGED_AWAY) {
     assert.ok(!EXPECTED_TABLES.includes(t));
   }
@@ -83,26 +88,22 @@ test('operational tables that need tenancy carry school_id', async () => {
     'approval',
   ];
   for (const table of needSchoolId) {
-    const r = await client.query(
+    const r = await q(
       `SELECT 1 FROM information_schema.columns
-       WHERE table_schema='public' AND table_name=$1 AND column_name='school_id'`,
+       WHERE table_schema = DATABASE() AND table_name = ? AND column_name = 'school_id'`,
       [table],
     );
-    assert.equal(r.rowCount, 1, `${table} must have school_id for tenancy`);
+    assert.equal(r.length, 1, `${table} must have school_id for tenancy`);
   }
 });
 
 test('DB constraint objects from constraints migration are present', async () => {
-  const checks = await client.query(
-    `SELECT conname FROM pg_constraint
-     WHERE contype = 'c'
-       AND conrelid::regclass::text IN (
-         'indicator_level_description','indicator_score','committee_member',
-         'evaluation_round','evaluation_cycle','school_membership','user_account',
-         'indicator','evidence_indicator_mapping','round_result'
-       )`,
+  const checks = await q(
+    `SELECT tc.constraint_name AS constraint_name
+     FROM information_schema.table_constraints tc
+     WHERE tc.constraint_schema = DATABASE() AND tc.constraint_type = 'CHECK'`,
   );
-  const names = new Set(checks.rows.map((r) => r.conname));
+  const names = new Set(checks.map((r) => r.constraint_name));
   for (const need of [
     'ild_rubric_level_range',
     'score_rubric_level_range',
@@ -112,21 +113,37 @@ test('DB constraint objects from constraints migration are present', async () =>
     'user_email_lowercase',
     'workload_gate_not_scored',
     'mapping_confirmed_has_actor',
+    'round_result_percent_range',
   ]) {
     assert.ok(names.has(need), `missing CHECK constraint ${need}`);
   }
 
-  const indexes = await client.query(
-    `SELECT indexname FROM pg_indexes WHERE schemaname='public'`,
+  const indexes = await q(
+    `SELECT DISTINCT index_name AS index_name FROM information_schema.statistics
+     WHERE table_schema = DATABASE()`,
   );
-  const idx = new Set(indexes.rows.map((r) => r.indexname));
+  const idx = new Set(indexes.map((r) => r.index_name));
   assert.ok(idx.has('evidence_indicator_mapping_active_uk'));
   assert.ok(idx.has('evaluation_cycle_pa_uk'));
 
-  const triggers = await client.query(
-    `SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgrelid = 'audit_event'::regclass`,
+  // passed_individual_threshold + pa_uk_key are STORED GENERATED; active_uk_key is
+  // trigger-maintained because InnoDB refuses evidence's ON DELETE CASCADE on a
+  // generated base column (see the constraints migration header).
+  const gen = await q(
+    `SELECT table_name AS table_name, column_name AS column_name FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND extra LIKE '%GENERATED%'`,
   );
-  const tgnames = triggers.rows.map((r) => r.tgname);
+  const genSet = new Set(gen.map((r) => `${r.table_name}.${r.column_name}`));
+  assert.ok(genSet.has('round_result.passed_individual_threshold'), 'passed_individual_threshold must be generated');
+  assert.ok(genSet.has('evaluation_cycle.pa_uk_key'), 'pa_uk_key must be generated');
+
+  const triggers = await q(
+    `SELECT trigger_name AS trigger_name FROM information_schema.triggers
+     WHERE trigger_schema = DATABASE()`,
+  );
+  const tgnames = triggers.map((r) => r.trigger_name);
   assert.ok(tgnames.includes('audit_event_no_update'));
   assert.ok(tgnames.includes('audit_event_no_delete'));
+  assert.ok(tgnames.includes('eim_active_uk_key_ins'), 'active_uk_key insert trigger');
+  assert.ok(tgnames.includes('eim_active_uk_key_upd'), 'active_uk_key update trigger');
 });

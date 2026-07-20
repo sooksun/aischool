@@ -40,8 +40,17 @@ export function readVideoDurationSeconds(file: File): Promise<number | null> {
 }
 
 export function validateDuration(durationSeconds: number | null, category: EvidenceCategory): ValidationResult {
-  if (durationSeconds != null && category.max_duration_seconds && durationSeconds > category.max_duration_seconds) {
-    const min = Math.floor(category.max_duration_seconds / 60);
+  if (!category.max_duration_seconds) return { ok: true };
+  const min = Math.floor(category.max_duration_seconds / 60);
+
+  // An unreadable duration can no longer be waved through: initiate rejects a
+  // capped category with no declared duration (VAL-002), because the server has
+  // no probe of its own to fall back on. Failing here keeps the reason specific —
+  // VAL-002 alone renders as a generic "ข้อมูลไม่ถูกต้องตามเงื่อนไข".
+  if (durationSeconds == null) {
+    return { ok: false, messageTh: `ไม่สามารถอ่านความยาววิดีโอได้ (ต้องไม่เกิน ${min} นาที) — กรุณาแปลงไฟล์เป็น MP4/H.264 แล้วลองใหม่` };
+  }
+  if (durationSeconds > category.max_duration_seconds) {
     return { ok: false, messageTh: `วิดีโอต้องยาวไม่เกิน ${min} นาที` };
   }
   return { ok: true };

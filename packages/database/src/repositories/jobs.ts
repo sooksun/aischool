@@ -57,8 +57,94 @@ export async function claimPendingJobs(limit = 10) {
   return claimed;
 }
 
-export async function markJobDone(id: string) {
-  return prisma.workerJob.update({
+/**
+ * file_ids that already have a `file.process` job waiting or in flight.
+ *
+ * The re-scan sweep is expected to be run more than once — an operator batches it
+ * with `--limit`, or re-runs it after fixing whatever made clamd unreachable.
+ * Without this, each run would pile a second job onto files the first run already
+ * queued, multiplying clamd's work and emitting a duplicate `scan_completed`
+ * event per copy.
+ *
+ * Read into a Set rather than filtered per file in SQL: the pending queue is
+ * small by design (the worker drains 10 per poll), and Prisma's MySQL JSON
+ * filters take a single `'$.file_id'` path equality (ADR-0008), so a batch
+ * membership test would mean one query per candidate.
+ */
+export async function listQueuedFileProcessTargets(): Promise<Set<string>> {
+  const rows = await prisma.workerJob.findMany({
+    where: { jobType: 'file.process', status: { in: ['pending', 'running'] } },
+    select: { payload: true },
+  });
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const fileId = (row.payload as { file_id?: unknown } | null)?.file_id;
+    if (typeof fileId === 'string') ids.add(fileId);
+  }
+  return ids;
+}
+
+/**
+ * Progress and, more importantly, stalls for the re-scan sweep.
+ *
+ * Groups terminal failures by message because the interesting case is a repeated
+ * one — "object missing from storage" ×46 is a story about the store, where 46
+ * separate lines are noise.
+ *
+ * That grouping has to erase the identifiers, which the first version did not:
+ * splitting on `(` left the file id in the key, so the first real full-store
+ * sweep printed 46 lines each reading `1× object missing from storage for file
+ * <uuid>` — precisely the noise this function exists to prevent. Ids are what
+ * make otherwise-identical failures look distinct.
+ */
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+export async function summariseRescanJobs(): Promise<{
+  queued: number;
+  failed: number;
+  errors: [string, number][];
+}> {
+  const [queued, failedRows] = await Promise.all([
+    prisma.workerJob.count({
+      where: { jobType: 'file.process', status: { in: ['pending', 'running'] } },
+    }),
+    prisma.workerJob.findMany({
+      where: { jobType: 'file.process', status: 'failed' },
+      select: { lastError: true },
+      take: 1000,
+    }),
+  ]);
+  const counts = new Map<string, number>();
+  for (const row of failedRows) {
+    const key = (row.lastError ?? 'unknown error')
+      .split('(')[0]
+      .replace(UUID_RE, '<id>')
+      .trim();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return {
+    queued,
+    failed: failedRows.length,
+    errors: [...counts].sort((a, b) => b[1] - a[1]),
+  };
+}
+
+/**
+ * These three are `updateMany`, not `update`, so a job row that is gone by the
+ * time it finishes is a no-op instead of a throw. `claimPendingJobs` above is
+ * already a compare-and-swap; the completion path assumed exclusive ownership of
+ * a row it had merely read.
+ *
+ * The failure that exposed it was ugly out of proportion to its cause. In
+ * runOnce, `markJobDone` sits INSIDE the try, so its P2025 fell into the catch —
+ * which called `markJobFailed`, which threw P2025 for the same reason. A handler
+ * written to isolate one bad job instead propagated out and killed the whole
+ * poll cycle, taking every other claimed job with it. Same shape as the outbox
+ * bug in repositories/outbox.ts; both are fixed the same way.
+ *
+ * Returns rows changed so a caller can distinguish "recorded" from "row gone".
+ */
+export async function markJobDone(id: string): Promise<number> {
+  const { count } = await prisma.workerJob.updateMany({
     where: { id },
     data: {
       status: 'done',
@@ -66,10 +152,13 @@ export async function markJobDone(id: string) {
       lastError: null,
     },
   });
+  return count;
 }
 
-export async function markJobFailed(id: string, error: string, retryDelayMs = 30_000) {
-  return prisma.workerJob.update({
+export async function markJobFailed(
+  id: string, error: string, retryDelayMs = 30_000,
+): Promise<number> {
+  const { count } = await prisma.workerJob.updateMany({
     where: { id },
     data: {
       status: 'pending',
@@ -78,10 +167,11 @@ export async function markJobFailed(id: string, error: string, retryDelayMs = 30
       lastError: error.slice(0, 2000),
     },
   });
+  return count;
 }
 
-export async function markJobTerminalFailed(id: string, error: string) {
-  return prisma.workerJob.update({
+export async function markJobTerminalFailed(id: string, error: string): Promise<number> {
+  const { count } = await prisma.workerJob.updateMany({
     where: { id },
     data: {
       status: 'failed',
@@ -89,4 +179,5 @@ export async function markJobTerminalFailed(id: string, error: string) {
       lastError: error.slice(0, 2000),
     },
   });
+  return count;
 }

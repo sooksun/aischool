@@ -38,8 +38,8 @@ async function openCreateForm() {
 }
 
 async function fillCommittee(ids: [string, string, string]) {
-  const evaluatee = screen.getByLabelText('รหัสผู้รับการประเมิน (personnel id)');
-  await userEvent.type(evaluatee, VALID_UUID_D);
+  // A name picker since CCR-014, not a uuid text box.
+  await userEvent.selectOptions(screen.getByLabelText('ผู้รับการประเมิน'), VALID_UUID_D);
   // Anchored on the em dash so this matches only the uuid <input>'s label
   // ("ที่นั่ง N — ...") and not the role <select>'s aria-label ("บทบาทที่นั่ง N"),
   // which also contains "ที่นั่ง N" as a substring.
@@ -52,14 +52,31 @@ describe('RoundAssignmentsPage — committee assignment form', () => {
   beforeEach(() => {
     vi.mocked(api.GET).mockReset();
     vi.mocked(api.POST).mockReset();
-    vi.mocked(api.GET).mockResolvedValue({
-      data: { items: [], meta: { page: 1, page_size: 50, total: 0 } }, error: undefined, response: new Response(),
-    } as never);
+    // Route by path: the page now issues two different GETs — assignments (a
+    // paged envelope) and /personnel (a bare array, CCR-014). One blanket
+    // mockResolvedValue would hand the paged envelope to usePersonnel.
+    vi.mocked(api.GET).mockImplementation(((path: string) => {
+      if (path === '/personnel') {
+        return Promise.resolve({
+          data: [
+            { id: VALID_UUID_D, full_name: 'ครูผู้รับการประเมิน', employee_code: null, position_role: 'teacher', rank_level_code: 'apply_adapt', status: 'active' },
+          ],
+          error: undefined,
+          response: new Response(),
+        });
+      }
+      return Promise.resolve({
+        data: { items: [], meta: { page: 1, page_size: 50, total: 0 } }, error: undefined, response: new Response(),
+      });
+    }) as never);
   });
 
   test('rejects duplicate committee evaluator ids without calling the API (mirrors server VAL-002)', async () => {
     renderPage();
-    await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(1));
+    // Wait for the page to finish loading by what the user can see, not by a call
+    // count — the page issues both an assignments and a /personnel GET (CCR-014),
+    // and a count assertion breaks every time a page gains a fetch.
+    await screen.findByRole('button', { name: '+ มอบหมายผู้รับการประเมิน' });
     await openCreateForm();
     await fillCommittee([VALID_UUID_A, VALID_UUID_A, VALID_UUID_B]);
     await userEvent.click(screen.getByRole('button', { name: 'มอบหมาย' }));
@@ -71,7 +88,10 @@ describe('RoundAssignmentsPage — committee assignment form', () => {
 
   test('rejects a malformed evaluator id without calling the API', async () => {
     renderPage();
-    await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(1));
+    // Wait for the page to finish loading by what the user can see, not by a call
+    // count — the page issues both an assignments and a /personnel GET (CCR-014),
+    // and a count assertion breaks every time a page gains a fetch.
+    await screen.findByRole('button', { name: '+ มอบหมายผู้รับการประเมิน' });
     await openCreateForm();
     await fillCommittee(['not-a-uuid', VALID_UUID_B, VALID_UUID_C]);
     await userEvent.click(screen.getByRole('button', { name: 'มอบหมาย' }));
@@ -83,7 +103,10 @@ describe('RoundAssignmentsPage — committee assignment form', () => {
 
   test('requires exactly one chair (mirrors server SCORE-001/VAL-002 "one chair" rule)', async () => {
     renderPage();
-    await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(1));
+    // Wait for the page to finish loading by what the user can see, not by a call
+    // count — the page issues both an assignments and a /personnel GET (CCR-014),
+    // and a count assertion breaks every time a page gains a fetch.
+    await screen.findByRole('button', { name: '+ มอบหมายผู้รับการประเมิน' });
     await openCreateForm();
     await fillCommittee([VALID_UUID_A, VALID_UUID_B, VALID_UUID_C]);
     // demote seat 1 (default chair) to member -> zero chairs among the 3
@@ -102,7 +125,10 @@ describe('RoundAssignmentsPage — committee assignment form', () => {
     } as never);
 
     renderPage();
-    await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(1));
+    // Wait for the page to finish loading by what the user can see, not by a call
+    // count — the page issues both an assignments and a /personnel GET (CCR-014),
+    // and a count assertion breaks every time a page gains a fetch.
+    await screen.findByRole('button', { name: '+ มอบหมายผู้รับการประเมิน' });
     await openCreateForm();
     await fillCommittee([VALID_UUID_A, VALID_UUID_B, VALID_UUID_C]);
     await userEvent.click(screen.getByRole('button', { name: 'มอบหมาย' }));
@@ -117,7 +143,13 @@ describe('RoundAssignmentsPage — committee assignment form', () => {
         { evaluator_user_id: VALID_UUID_C, committee_role: 'member', seat_number: 3 },
       ],
     });
-    // onCreated() reloads the assignment list — a second GET call
-    await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(2));
+    // onCreated() reloads the assignment list. Assert on the assignments path
+    // specifically rather than a total GET count, which also counts /personnel.
+    await waitFor(() => {
+      const assignmentCalls = vi.mocked(api.GET).mock.calls.filter(
+        (c) => (c as unknown as [string])[0] === '/rounds/{roundId}/assignments',
+      );
+      expect(assignmentCalls.length).toBe(2);
+    });
   });
 });

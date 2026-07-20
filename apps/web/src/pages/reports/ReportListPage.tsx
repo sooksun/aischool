@@ -6,6 +6,7 @@ import { ApiError, thaiMessageFor } from '../../api/errors';
 import type { components } from '../../api/schema.generated';
 import { useAuth } from '../../hooks/useAuth';
 import { REPORT_LIST_FIDELITY_HINT } from '../../lib/reportPdfCopy';
+import { usePersonnel } from '../../lib/usePersonnel';
 
 type Report = components['schemas']['Report'];
 type Cycle = components['schemas']['Cycle'];
@@ -100,6 +101,7 @@ export function ReportListPage() {
 }
 
 function CreateReportForm({ onCreated }: { onCreated: () => void }) {
+  const { personnel, failed: personnelFailed } = usePersonnel();
   const [cycles, setCycles] = useState<Cycle[] | null>(null);
   const [cycleId, setCycleId] = useState('');
   const [subjectId, setSubjectId] = useState('');
@@ -156,17 +158,29 @@ function CreateReportForm({ onCreated }: { onCreated: () => void }) {
         </select>
       </label>
       <label className="field">
-        <span>รหัสบุคลากรผู้รับการประเมิน (UUID)</span>
-        <input
-          required
-          value={subjectId}
-          onChange={(e) => setSubjectId(e.target.value.trim())}
-          placeholder="personnel profile uuid"
-          pattern="[0-9a-fA-F-]{36}"
-        />
-        <span className="field-hint">
-          ยังไม่มี API รายชื่อบุคลากร — ใส่ personnel_id จากระบบโดยตรงชั่วคราว
-        </span>
+        <span>ผู้รับการประเมิน</span>
+        {personnel === null && !personnelFailed && <span className="field-hint">กำลังโหลดรายชื่อ…</span>}
+        {personnel !== null && (
+          <select required value={subjectId} onChange={(e) => setSubjectId(e.target.value)}>
+            <option value="">— เลือก —</option>
+            {personnel.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.full_name}{p.employee_code ? ` (${p.employee_code})` : ''}
+              </option>
+            ))}
+          </select>
+        )}
+        {/* Degraded, not broken — and note the old `pattern="[0-9a-fA-F-]{36}"`
+            here accepted 36 consecutive dashes. The picker removes the need to
+            hand-validate a UUID at all. */}
+        {personnelFailed && (
+          <input
+            required
+            value={subjectId}
+            onChange={(e) => setSubjectId(e.target.value.trim())}
+            placeholder="personnel profile uuid"
+          />
+        )}
       </label>
       <label className="field">
         <span>แบบฟอร์ม</span>

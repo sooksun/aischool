@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-19T03:00:00+07:00
+updated_at: 2026-07-20T05:10:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -770,3 +770,170 @@ tasks:
       - Access-token refresh after corruption
       - Director create report + download PDF
       - Chair submits scores on seeded assignment
+
+  # --- Release blockers, opened by the 2026-07-19 code audit ---
+  # These are B-1/B-2/B-3 in docs/project/PROJECT_STATE.md ("Audit correction").
+  # Each is a missing contract surface, not a bug: the models exist in
+  # prisma/schema.prisma but have zero references in apps/ and packages/.
+  # None can merge without a CCR + version bump + user approval (CLAUDE.md).
+  # Major vs minor is decided per CCR, not assumed: an earlier version of this
+  # comment claimed all three need a MAJOR bump. CCR-014 disproved that — adding
+  # operations is additive under contract-policy.md, so BLOCK-001 is 2.8.0->2.9.0.
+  # The CCR is still required because it adds a second unauthenticated write.
+
+  - id: SEIP-BLOCK-001
+    title: "B-1 — onboarding path: no way to create the first login"
+    status: done                # 2026-07-19 — CCR-014 APPLIED; openapi 2.9.0, permissions 1.5.0, error-codes 1.4.0
+    sprint: 2
+    ccr: CCR-014
+    primary_paths:
+      - docs/reviews/CCR-014-onboarding-identity-operations.md
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - apps/api/src/routes/**
+      - packages/database/src/repositories/identity.ts
+      - prisma/seed.mjs
+    notes: >
+      No operation in openapi.yaml creates School / UserAccount / SchoolMembership /
+      PersonnelProfile, and seed.mjs seeds none of them. hashPassword
+      (packages/auth/src/password.ts:12) has no caller outside its own test. A fresh
+      install therefore has a complete framework taxonomy and nobody who can log in.
+      Decide during the CCR whether first-admin bootstrap is a seeded row, a CLI, or
+      a contract operation — the three have very different authz consequences.
+    acceptance_criteria:
+      - CCR-014 approved by the user before merge (drafted + approved 2026-07-19)   # DONE
+      - "openapi 2.8.0 -> 2.9.0 (additive); permissions 1.4.0 -> 1.5.0; rule for every new operationId"  # DONE — oasdiff confirms non-breaking
+      - Bootstrap admin + school provisioning ship as operator CLI, not API (CCR-014 decisions 1 and 2)  # DONE — scripts/ops/*.mjs
+      - listPersonnel replaces the raw UUIDs in the 4 director/evaluator screens    # DONE (committee seats still uuid — documented limitation)
+      - hashPassword has a real (non-test) caller                                   # DONE — bootstrap-admin.mjs
+      - "db:reset then seed then bootstrap then login works, proven with no direct Prisma writes"  # DONE — tests/e2e/onboarding.spec.ts
+      - tests/security permission sweep extended to the new operations              # DONE — 34/35 rows, 204 assertions
+      - School / UserAccount / SchoolMembership / PersonnelProfile creatable
+      - hashPassword has a real (non-test) caller
+      - "db:reset && db:migrate && db:seed then login succeeds — proven by a test, no direct Prisma writes"
+      - tests/security permission sweep extended to the new operations
+
+  - id: SEIP-BLOCK-002
+    title: "B-2 — PerformanceAgreement + AgreementChallenge have no code (ส่วนที่ 2 scored blind)"
+    status: done                # 2026-07-19 — CCR-015 APPLIED; openapi 3.0.0 (breaking), permissions 1.6.0, error-codes 1.5.0
+    sprint: 2
+    ccr: CCR-015
+    dependencies: [SEIP-BLOCK-001]
+    primary_paths:
+      - docs/reviews/CCR-015-performance-agreement-and-challenge.md
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - apps/api/src/routes/scoring.ts
+      - packages/database/src/repositories/**
+      - tests/e2e/global-setup.mjs
+    notes: >
+      prisma.performanceAgreement and prisma.agreementChallenge have zero references
+      in apps/ and packages/. Two consequences.
+      (1) submitMyScores always dies at the workload gate
+      (apps/api/src/routes/scoring.ts:220-227 — VAL-002 then SCORE-004), so no score
+      can be submitted through the API at all.
+      (2) CORRECTION to this entry's original wording: ประเด็นท้าทาย does NOT "have
+      no implementation" — the 40% IS computed, because submitMyScores requires every
+      is_scored indicator and weights T-C.1/T-C.2.1/T-C.2.2 by maxPoints. What is
+      missing is the thing being rated: AgreementChallenge holds the method plan and
+      the quantitative/qualitative targets, and nothing writes or reads it. The
+      committee scores ส่วนที่ 2 BLIND. That is the sharper defect and CCR-015 leads
+      with it.
+      The suites pass only because scoring-flow.test.mjs:114 and global-setup.mjs
+      insert the agreement row straight through Prisma — deleting those inserts is
+      the acceptance criterion, not a side-effect.
+    acceptance_criteria:
+      - CCR-015 approved by the user before merge (drafted 2026-07-19)
+      - "openapi 2.9.0 -> 3.0.0 — BREAKING: AssignmentCreate.agreement_id removed (derived server-side, not client input)"
+      - PerformanceAgreement creatable, with a draft -> submitted -> acknowledged lifecycle that freezes content on submit
+      - AgreementChallenge written by the evaluatee; weights stay ScoreWeight rows per ADR-0003
+      - "AssignmentDetail exposes the challenge so the committee stops scoring ส่วนที่ 2 blind"
+      - submitMyScores succeeds through the API alone on a freshly seeded DB
+      - "the raw performanceAgreement.create is DELETED from scoring-flow.test.mjs and global-setup.mjs"
+      - Permission sweep extended to all 6 new operations (floor rises from 34)
+      - AUDIT_ALLOWLIST gains PerformanceAgreement, or submit/acknowledge audit rows silently log nothing
+
+  - id: SEIP-BLOCK-003
+    title: "B-3 — Approval is schema-only; reports stall at pending_approval"
+    status: done                # 2026-07-20 — CCR-016 APPLIED; openapi 3.1.0, permissions 1.7.0, error-codes 1.6.0, events 1.3.0
+    sprint: 2
+    ccr: CCR-016
+    dependencies: [SEIP-BLOCK-002]
+    primary_paths:
+      - docs/reviews/CCR-016-report-approval.md
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - docs/contracts/events.yaml
+      - apps/api/src/routes/reports.ts
+      - packages/database/src/repositories/reports.ts
+    notes: >
+      prisma.approval has zero references in apps/ and packages/. report.generate
+      flips draft -> pending_approval and nothing can move it further, so every
+      generated report is terminal. reports.ts:241 already carries the comment
+      "approval workflow is later" — this is that task.
+      CCR-016 (drafted 2026-07-20) found a second problem that a naive approve
+      endpoint would have made worse: NOTHING checks round state when a report is
+      created or generated, and scores only freeze when a round closes
+      (SCORE-002). Approving a report built on still-mutable scores produces a
+      signed document that its own data can later contradict. Hence the
+      round-must-be-closed rule, not just the missing endpoints.
+      Also decided there: `rejected` and `issued`/`superseded` stay unreachable on
+      purpose — see the CCR for why inventing semantics for them is worse than
+      leaving them unused.
+    acceptance_criteria:
+      - CCR-016 approved by the user before merge (drafted 2026-07-20)
+      - "openapi 3.0.0 -> 3.1.0 (additive); permissions 1.7.0; error-codes 1.6.0 (RPT-003); events 1.2.0"
+      - "approveReport / returnReport / listReportApprovals, as a compare-and-swap state machine"
+      - "Approval blocked while the report's round is still open — signing mutable scores is the real defect"
+      - Self-approval refused (a director is an evaluatee under ว10 — matrix cannot express it)
+      - "report.approved moves OUT of the events.yaml deferred: block and gains a producer"
+      - AUDIT_ALLOWLIST gains Approval, excluding `comment` (free text about a named person)
+      - PDF states whether the report has been approved
+      - Test proves a report leaves pending_approval through the API alone
+      - "PROJECT_STATE loses its not-releasable banner — this is the last of the three audit blockers"
+
+  - id: SEIP-OPS-005
+    title: Re-scan evidence uploaded before ADR-0009 (the sweep)
+    status: done                # 2026-07-20 — claude; no contract change (scanned_at is internal)
+    sprint: 2
+    dependencies: [SEIP-BLOCK-003]
+    primary_paths:
+      - scripts/ops/rescan-files.mjs
+      - prisma/migrations/20260721060000_evidence_file_scanned_at/migration.sql
+      - packages/database/src/repositories/evidence.ts
+      - packages/database/src/repositories/jobs.ts
+      - apps/worker/src/jobs/file-process.ts
+      - docs/decisions/ADR-0009-malware-scanning.md
+      - docs/project/ops-runbook.md
+    notes: >
+      ADR-0009 named this as its own blind spot under Consequences. Building it
+      corrected how the gap had been described everywhere, including in this
+      board: the population needing a re-scan is NOT the `unscanned` files, it is
+      the `clean` ones. Those were written by the pre-CCR-012 filename stub, which
+      matched "eicar"/"virus" against the FILENAME, read no bytes, and called
+      everything else clean — they are downloadable, badged ปลอดภัย, and were
+      never scanned. This database held 81 of them against 180 `unscanned`.
+      So the sweep cannot select on scan_status: `clean` is precisely the value
+      that lies, and nothing distinguished a stub verdict from a genuine one.
+      Migration 20260718220000 hit this and refused to backfill for exactly that
+      reason. Hence evidence_file.scanned_at — a receipt written ONLY when clamd
+      read the bytes and answered, so "never really scanned" becomes queryable.
+      Deliberately null for anything refused unread (oversize, size mismatch,
+      scanner down), which keeps "could not be checked" re-checkable instead of
+      letting it harden into a permanent verdict.
+      The script enqueues file.process jobs and never writes a verdict, so there
+      stays exactly one scanner and one fail-closed policy.
+      Two things the first real sweep run exposed, both fixed here: a missing S3
+      object surfaced as a bare `UnknownError` eight times over (S3 HEAD has no
+      response body to parse), and a stalled sweep was indistinguishable from a
+      running one. Also wrote the ClamAV memory/freshclam runbook section that
+      ADR-0009 had claimed already existed.
+    acceptance_criteria:
+      - "scanned_at set only on a real clamd verdict — asserted for unscanned, oversize, size-mismatch and scanner-down"   # DONE
+      - "A stub-written `clean` row is selected despite its status, and drops out once verified"                            # DONE — real clamd
+      - Soft-deleted evidence and already-queued files are skipped                                                          # DONE
+      - Refuses to run under SCAN_PROVIDER != clamav, since it would change nothing                                         # DONE
+      - "`blocked` re-scan is opt-in — it can widen access after a CLAMAV_MAX_BYTES raise"                                   # DONE
+      - Missing storage objects fail with a message naming the file                                                         # DONE
+      - "--report shows the receipt gap and any stalled queue"                                                              # DONE
+      - Sweep run for real against the dev store, not only unit-tested                                                      # DONE — 23 files verified, 2 blocked

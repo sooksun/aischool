@@ -19,6 +19,9 @@ import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { grantFor, isExempt } from '@seip/backend-shared';
 import { buildServer } from '../../apps/api/dist/server.js';
+import { cleanupSchools, trackSchools } from '../helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -27,14 +30,14 @@ const tokenFor = {};
 const userIdFor = {};
 let secondEvaluatorUserId;
 let school, area, evidenceId, indicatorId, mappingId, frameworkId, deletableEvidenceId, categoryId;
-let cycleId, roundId, assignmentId, teacherPersonnelId;
+let cycleId, roundId, assignmentId, teacherPersonnelId, agreementId;
 
 before(async () => {
   ({ app } = await buildServer());
   await app.ready();
 
   area = await prisma.area.create({ data: { code: `perm-area-${randomUUID()}`, name: 'Area' } });
-  school = await prisma.school.create({ data: { code: `perm-school-${randomUUID()}`, name: 'School', areaId: area.id } });
+  school = created.add(await prisma.school.create({ data: { code: `perm-school-${randomUUID()}`, name: 'School', areaId: area.id } }));
   await prisma.rankLevel.upsert({
     where: { code: 'perm_kru' }, create: { code: 'perm_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 }, update: {},
   });
@@ -50,6 +53,11 @@ before(async () => {
       data: { email: `perm-${role}-${randomUUID()}@x.io`, displayName: role, status: 'active', passwordHash: await argonHash(password) },
     });
     if (role === 'area_admin') {
+      // Area-scoped: schoolId is NULL by design (permissions.yaml scope: area),
+      // so school-scoped teardown can neither see this membership nor the user
+      // holding it. Tracked explicitly, like every other deliberately
+      // school-less fixture.
+      created.addUser(user);
       await prisma.schoolMembership.create({ data: { userId: user.id, areaId: area.id, role, membershipScope: 'area', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
     } else {
       await prisma.schoolMembership.create({ data: { userId: user.id, schoolId: school.id, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
@@ -84,9 +92,9 @@ before(async () => {
   const create = await app.inject({ method: 'POST', url: '/api/v1/evidence', headers: { authorization: `Bearer ${tokenFor.teacher}` }, payload: { category_id: category.id, title: 'perm sweep evidence' } });
   evidenceId = create.json().id;
 
-  const fw = await prisma.frameworkVersion.upsert({
+  const fw = created.addFramework(await prisma.frameworkVersion.upsert({
     where: { code: `perm-fw-${process.pid}` }, create: { code: `perm-fw-${process.pid}`, roleFamily: 'teacher', legalRef: 'x', revisionYear: 9999, status: 'draft', effectiveFrom: new Date() }, update: {},
-  });
+  }));
   frameworkId = fw.id;
   const domain = await prisma.evaluationDomain.create({ data: { frameworkVersionId: fw.id, code: `D-${randomUUID()}`, nameTh: 'd', sortOrder: 1, part: 'standards' } });
   const indicator = await prisma.indicator.create({ data: { domainId: domain.id, frameworkVersionId: fw.id, code: `I-${randomUUID()}`, nameTh: 'i', sortOrder: 1, isScored: true, indicatorKind: 'standard' } });
@@ -123,9 +131,32 @@ before(async () => {
   roundId = round.id;
   assignmentId = assignment.id;
   teacherPersonnelId = teacherPersonnel.id;
+
+  // A REAL agreement owned by OWNER_ROLE (teacher), created through the API like
+  // the evidence fixture above. A random id would 404 before the ownership check
+  // ever ran, so the sweep would be asserting nothing about `own` on these
+  // operations — which is exactly what it did on the first run of this change.
+  //
+  // Via the API rather than Prisma on purpose: CCR-015's whole point is that the
+  // product can create these now, and a fixture that quietly went around the
+  // operations would reintroduce the shortcut that hid SEIP-BLOCK-002.
+  const agreementRes = await app.inject({
+    method: 'POST', url: '/api/v1/agreements',
+    headers: { authorization: `Bearer ${tokenFor.teacher}`, 'x-school-id': school.id },
+    // No challenge: this fixture's framework is synthetic and carries only a
+    // `standard` indicator, so there is no C.1 to anchor one against. The sweep
+    // does not need one — it needs a real agreement row to test ownership
+    // against. A granted owner therefore gets AGR-002 on submitAgreement rather
+    // than 200, which the sweep treats as an acceptable non-permission failure
+    // (same philosophy as createMapping's expected VAL-002).
+    payload: { cycle_id: cycle.id, personnel_id: teacherPersonnel.id },
+  });
+  assert.equal(agreementRes.statusCode, 201, `setup: agreement fixture — ${agreementRes.body}`);
+  agreementId = agreementRes.json().id;
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
 });
@@ -134,6 +165,31 @@ after(async () => {
 // from apps/api's own route table on purpose: this is the test's independent
 // understanding of the contract's shape, not a re-export of the implementation's.
 const OPERATIONS = () => ({
+  // members / personnel (CCR-014).
+  listPersonnel: { method: 'GET', url: '/api/v1/personnel' },
+  listMembers: { method: 'GET', url: '/api/v1/members' },
+  // A fresh random email per call: a granted role must not fail on RES-002 from
+  // a previous role's successful invite in the same sweep.
+  inviteMember: { method: 'POST', url: '/api/v1/members', payload: { email: `sweep-${randomUUID()}@x.io`, display_name: 'sweep', role: 'teacher' } },
+  // Random membership id → RES-001 for granted roles (never PERM-001), same
+  // philosophy as getReport below.
+  endMembership: { method: 'POST', url: `/api/v1/members/${randomUUID()}/end` },
+  // acceptInvite is NOT swept: permissions.yaml lists it under `unauthenticated:`,
+  // so it has no matrix row and no role dimension to sweep. Its security
+  // properties — single-use, no-oracle AUTH-005, rate limiting — are covered
+  // directly by apps/api/test/onboarding-flow.test.mjs.
+
+  // agreements (CCR-015). A random agreement id yields RES-001 for granted
+  // roles, never PERM-001 — same philosophy as getReport below. createAgreement
+  // uses the fixture's real teacher personnel so a granted role fails at most on
+  // AGR-001 (already exists), which is not a permission denial.
+  listAgreements: { method: 'GET', url: '/api/v1/agreements' },
+  getAgreement: { method: 'GET', url: `/api/v1/agreements/${agreementId}` },
+  createAgreement: { method: 'POST', url: '/api/v1/agreements', payload: { cycle_id: cycleId, personnel_id: teacherPersonnelId } },
+  updateAgreement: { method: 'PATCH', url: `/api/v1/agreements/${agreementId}`, payload: {} },
+  submitAgreement: { method: 'POST', url: `/api/v1/agreements/${agreementId}/submit` },
+  acknowledgeAgreement: { method: 'POST', url: `/api/v1/agreements/${randomUUID()}/acknowledge` },
+
   listFrameworks: { method: 'GET', url: '/api/v1/frameworks' },
   getFramework: { method: 'GET', url: `/api/v1/frameworks/${frameworkId}` },
   listEvidenceCategories: { method: 'GET', url: '/api/v1/evidence-categories' },
@@ -148,6 +204,14 @@ const OPERATIONS = () => ({
   // role's check (see the sweep's DELETABLE handling).
   deleteEvidence: { method: 'DELETE', url: null },
   initiateFileUpload: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/files/initiate`, payload: { content_type: 'application/pdf', byte_size: 10, checksum_sha256: 'a'.repeat(64), original_filename: 'x.pdf' } },
+  // completeFileUpload and getEvidenceFileDownloadUrl were both absent from this
+  // sweep until 2026-07-19 with no justification comment — the audit flagged
+  // them as the only unswept matrix rows besides the deliberately-excluded
+  // getAssignmentResults, and both sit on the PDPA upload/download surface.
+  // A random fileId yields RES-001 for granted roles, never PERM-001, which is
+  // all this sweep needs (same philosophy as createMapping/getReport).
+  completeFileUpload: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/files/${randomUUID()}/complete`, payload: { content_type: 'application/pdf', byte_size: 10, checksum_sha256: 'a'.repeat(64), original_filename: 'x.pdf' } },
+  getEvidenceFileDownloadUrl: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/files/${randomUUID()}/download-url` },
   listEvidenceMappings: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/mappings` },
   createMapping: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, payload: { indicator_id: randomUUID() } }, // random indicator: expected to fail VAL-002 for granted roles, never PERM-001
   // Missing framework/cycle → AI-001 for granted roles (not PERM-001).
@@ -212,6 +276,15 @@ const OPERATIONS = () => ({
   getReport: { method: 'GET', url: `/api/v1/reports/${randomUUID()}` },
   // Missing report → RES-001 for granted roles after PERM check.
   getReportPdf: { method: 'GET', url: `/api/v1/reports/${randomUUID()}/pdf` },
+
+  // approvals (CCR-016). Random report id → RES-001 for granted roles, never
+  // PERM-001. approveReport/returnReport are NOT own-sensitive in this fixture's
+  // sense: their `own`-style rule is the inverse ("you may NOT act on your own
+  // report"), and it lives in the route rather than the matrix, so it is covered
+  // directly by apps/api/test/report-approval.test.mjs instead.
+  listReportApprovals: { method: 'GET', url: `/api/v1/reports/${randomUUID()}/approvals` },
+  approveReport: { method: 'POST', url: `/api/v1/reports/${randomUUID()}/approve`, payload: {} },
+  returnReport: { method: 'POST', url: `/api/v1/reports/${randomUUID()}/return`, payload: { comment: 'sweep' } },
 });
 
 // The fixture evidence/mapping above is owned by 'teacher', who is ALSO the
@@ -224,7 +297,24 @@ const OPERATIONS = () => ({
 const OWNER_ROLE = 'teacher';
 const OWN_SENSITIVE_OPS = new Set([
   'getEvidence', 'updateEvidence', 'deleteEvidence', 'initiateFileUpload',
+  // Added 2026-07-19 with the sweep coverage itself. completeFileUpload carries
+  // the IDENTICAL matrix row to initiateFileUpload above (teacher/deputy/director
+  // all 'own'), and getEvidenceFileDownloadUrl gives deputy 'own' — so for every
+  // non-owner holding those grants, PERM-001 is the ownership boundary working,
+  // not a matrix mismatch. Enforcement was already correct; only the sweep's
+  // knowledge of it was missing, which is precisely what going unswept means.
+  'completeFileUpload', 'getEvidenceFileDownloadUrl',
   'listEvidenceMappings', 'createMapping', 'suggestMappings', 'actOnMapping', 'getAssignment',
+  // CCR-015. The evaluatee owns their ข้อตกลง: teacher/deputy/director all hold
+  // `own` on these, so for any of them who is not the fixture's owner, PERM-001
+  // is the ownership boundary working. Note createAgreement is deliberately
+  // included — a director filing on a teacher's behalf is denied by design (the
+  // director acknowledges, they do not author).
+  // getAgreement included, listAgreements deliberately NOT: a list with an `own`
+  // grant FILTERS rows (a deputy legitimately gets 200 with their own, possibly
+  // empty, set), while a detail read must DENY. Same distinction as
+  // listEvidence vs getEvidence above.
+  'getAgreement', 'createAgreement', 'updateAgreement', 'submitAgreement',
 ]);
 
 test('every implemented operation x every role matches its permissions.yaml disposition', async () => {
@@ -283,7 +373,11 @@ test('every implemented operation x every role matches its permissions.yaml disp
     }
   }
 
-  assert.ok(assertions >= 28 * 6, `sweep should cover at least 28 operations x 6 roles, got ${assertions} assertions`);
+  // 43 of the 44 matrix rows. The one exclusion is getAssignmentResults, whose
+  // temporal rule is explained and separately covered above. Raise this number
+  // whenever a row is added — a sweep that silently covers less than the matrix
+  // is how completeFileUpload and getEvidenceFileDownloadUrl went unswept.
+  assert.ok(assertions >= 43 * 6, `sweep should cover at least 43 operations x 6 roles, got ${assertions} assertions`);
   assert.deepEqual(failures, [], `${failures.length} mismatch(es) between permissions.yaml and enforcement:\n${failures.join('\n')}`);
 });
 
@@ -304,7 +398,7 @@ test('area_admin is read-only: every write operation denies it even where direct
 });
 
 test('X-School-Id header behavior: single membership ignores it safely; multi-membership validates it', async () => {
-  const otherSchool = await prisma.school.create({ data: { code: `perm-other-${randomUUID()}`, name: 'Other' } });
+  const otherSchool = created.add(await prisma.school.create({ data: { code: `perm-other-${randomUUID()}`, name: 'Other' } }));
 
   // Single-membership user: per CCR-003, the header is IGNORED (not validated) —
   // the request proceeds under the caller's own real school. A bogus header must
@@ -322,10 +416,23 @@ test('X-School-Id header behavior: single membership ignores it safely; multi-me
   const multiUser = await prisma.userAccount.create({ data: { email: `perm-multi-${randomUUID()}@x.io`, displayName: 'Multi', status: 'active', passwordHash: await argonHash(multiPassword) } });
   await prisma.schoolMembership.create({ data: { userId: multiUser.id, schoolId: school.id, role: 'teacher', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
   await prisma.schoolMembership.create({ data: { userId: multiUser.id, schoolId: otherSchool.id, role: 'teacher', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
+  // Staff at BOTH schools. Required because listEvidence is the probe below and
+  // 'teacher' holds an 'own' grant on it: without a personnel profile at the
+  // resolved school there is no owner to scope to, and the operation now denies
+  // with PERM-001 (2026-07-18 audit — it previously returned an UNFILTERED list,
+  // which made this assertion pass for the wrong reason and only looked correct
+  // because otherSchool happens to hold no evidence). Keeping the probe honest:
+  // a 200 here must mean "the header resolved the school", not "the owner filter
+  // silently vanished". See tests/security/own-scope-null-personnel.test.mjs.
+  for (const schoolId of [school.id, otherSchool.id]) {
+    await prisma.personnelProfile.create({
+      data: { schoolId, userId: multiUser.id, fullName: 'Multi', positionRole: 'teacher', rankLevelCode: 'perm_kru' },
+    });
+  }
   const multiLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: multiUser.email, password: multiPassword } });
   const multiToken = multiLogin.json().access_token;
 
-  const thirdSchool = await prisma.school.create({ data: { code: `perm-third-${randomUUID()}`, name: 'Third' } });
+  const thirdSchool = created.add(await prisma.school.create({ data: { code: `perm-third-${randomUUID()}`, name: 'Third' } }));
   const rejected = await app.inject({
     method: 'GET', url: '/api/v1/evidence',
     headers: { authorization: `Bearer ${multiToken}`, 'x-school-id': thirdSchool.id },

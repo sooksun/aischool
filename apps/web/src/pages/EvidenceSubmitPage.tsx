@@ -10,7 +10,7 @@
 // NOT persist across a closed tab/browser restart — that needs a service worker
 // or IndexedDB-backed queue, out of scope for this first pass. Documented here
 // rather than silently shipped as if the full design were implemented.
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, unwrap } from '../api/client';
 import { ApiError, thaiMessageFor } from '../api/errors';
@@ -51,6 +51,18 @@ export function EvidenceSubmitPage() {
   useEffect(() => {
     api.GET('/evidence-categories', {}).then((res) => setCategories(unwrap(res))).catch(() => setCategories([]));
   }, []);
+
+  // The file picker runs BEFORE the category is chosen, so `accept` has to be the
+  // union across every category rather than one category's list. Derived from the
+  // API's allowed_mime_types instead of a hardcoded string: seeding a category
+  // that takes a new type used to leave the picker silently refusing to offer it,
+  // even though the server would have accepted the upload. Empty (still loading,
+  // or the fetch failed) means no attribute at all — an empty `accept` would be
+  // the same as absent anyway, and the server validates regardless (UPL-001).
+  const acceptTypes = useMemo(() => {
+    const all = (categories ?? []).flatMap((c) => c.allowed_mime_types ?? []);
+    return [...new Set(all)].sort().join(',');
+  }, [categories]);
 
   useEffect(() => {
     if (step !== 'indicators' || !user?.personnel || indicators !== null) return;
@@ -149,7 +161,9 @@ export function EvidenceSubmitPage() {
       <h1>ส่งหลักฐาน</h1>
       {step !== 'done' && <Stepper step={stepNumber} total={5} />}
 
-      {step === 'pick' && <PickFileStep onPick={onFilePicked} onCancel={() => navigate('/')} />}
+      {step === 'pick' && (
+        <PickFileStep accept={acceptTypes} onPick={onFilePicked} onCancel={() => navigate('/')} />
+      )}
 
       {step === 'details' && file && (
         <DetailsStep
@@ -191,7 +205,9 @@ export function EvidenceSubmitPage() {
 // ---- step sub-components (kept in this file: each is small, single-use, and
 // only meaningful in the context of this stepper's shared state) ----
 
-function PickFileStep({ onPick, onCancel }: { onPick: (f: File) => void; onCancel: () => void }) {
+function PickFileStep({ accept, onPick, onCancel }: {
+  accept: string; onPick: (f: File) => void; onCancel: () => void;
+}) {
   return (
     <div>
       <p className="field-hint">เลือกไฟล์จากคลังภาพ ถ่ายรูป/วิดีโอใหม่ หรือเลือกเอกสาร</p>
@@ -199,7 +215,7 @@ function PickFileStep({ onPick, onCancel }: { onPick: (f: File) => void; onCance
         <label htmlFor="file-input">ไฟล์หลักฐาน</label>
         <input
           id="file-input" type="file"
-          accept="application/pdf,video/mp4,image/jpeg,image/png"
+          {...(accept ? { accept } : {})}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); }}
         />
       </div>

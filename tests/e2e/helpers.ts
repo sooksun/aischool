@@ -8,6 +8,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export type E2eCreds = {
   teacher: { email: string; password: string };
   director: { email: string; password: string };
+  /** CCR-014: the bootstrap admin, the one identity created outside the API. */
+  admin: { email: string; password: string };
   schoolId: string;
   teacherPersonnelId: string | null;
   cycleId: string | null;

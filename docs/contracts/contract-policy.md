@@ -6,10 +6,10 @@ Updated 2026-07-17 (SEIP-ARCH-002) — approval flow rewritten for single-agent 
 
 | File | Version | Surface |
 |---|---|---|
-| `openapi.yaml` | **2.6.0** (CCR-011 ReportPayload; CCR-010 lazy download; …) | HTTP API — the only web↔api interface |
-| `events.yaml` | 1.1.0 | Domain events (outbox-delivered) |
-| `permissions.yaml` | 1.4.0 | Roles, tenancy rule, per-operation matrix |
-| `error-codes.yaml` | 1.3.0 | Stable error codes + response shape |
+| `openapi.yaml` | **3.1.0** (CCR-016 report approval; CCR-015 agreements, BREAKING; CCR-014 onboarding; …) | HTTP API — the only web↔api interface |
+| `events.yaml` | **1.3.0** | Domain events (outbox-delivered) |
+| `permissions.yaml` | **1.7.0** | Roles, tenancy rule, per-operation matrix |
+| `error-codes.yaml` | **1.6.0** | Stable error codes + response shape |
 
 Reports ship as **structured JSON + section refs** (CCR-005) and **on-demand PA form PDF** (CCR-007). Pixel-perfect ก.ค.ศ. plates remain deferred (`x-deferred.official-paper-signature-fidelity`).
 
@@ -41,3 +41,8 @@ No implementation may invent fields outside an approved contract. Types are gene
 | CCR-009 | List `scan_status` + `AssignmentDetail.framework_version_id` | APPLIED 2026-07-18 (v2.4.0) |
 | CCR-010 | Lazy `getEvidenceFileDownloadUrl`; no presign on getEvidence | APPLIED 2026-07-18 (v2.5.0) |
 | CCR-011 | `ReportDetail.payload` → typed `ReportPayload` (schema_version=1) | APPLIED 2026-07-18 (v2.6.0) |
+| CCR-012 | `ScanStatus` gains `unscanned`; the filename-matching "scanner" deleted | APPLIED 2026-07-18 (v2.7.0) |
+| CCR-013 | `AssignmentDetail.evaluatee_rank_level_code` — makes the seeded rubric text usable | APPLIED 2026-07-18 (v2.8.0) |
+| CCR-014 | Onboarding: listPersonnel/listMembers/inviteMember/endMembership + unauthenticated acceptInvite. Bootstrap admin and school provisioning stay operator CLIs (no new role). Closes SEIP-BLOCK-001 — before this, no operation created a user and a fresh install could not be logged into. | APPLIED 2026-07-19 (v2.9.0; permissions 1.5.0, error-codes 1.4.0) |
+| CCR-015 | Performance agreements (แบบ PA1) + ประเด็นท้าทาย: 6 operations, `AssignmentDetail.challenge`. **BREAKING** — `AssignmentCreate.agreement_id` removed (unvalidated client input for a value the server can derive). Closes SEIP-BLOCK-002 — before this no score could be submitted at all, and the committee scored the 40% ส่วนที่ 2 without ever seeing the method and targets it rates. | APPLIED 2026-07-19 (**v3.0.0**; permissions 1.6.0, error-codes 1.5.0) |
+| CCR-016 | Report approval: approveReport/returnReport/listReportApprovals, `ReportDetail.approvals`, `report.approved` out of the events `deferred:` block. Approval requires the round closed (RPT-003) — scores stay mutable until then, so signing earlier yields a document its own data can contradict. Closes SEIP-BLOCK-003, the last of the three audit blockers. | APPLIED 2026-07-20 (v3.1.0; permissions 1.7.0, error-codes 1.6.0, events 1.3.0) |

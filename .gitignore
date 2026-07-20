@@ -12,6 +12,15 @@ coverage/
 !.env.example
 !.env.staging.example
 
+# Local credential notes. autokey.md holds a live n8n API key (all scopes) and
+# says so in its own footer; it sat untracked-but-unignored, one `git add -A`
+# away from the history. gate:secret-scan only sees committed blobs, so it would
+# not have caught it either. Pattern is broad on purpose.
+autokey.md
+*.key
+*.pem
+**/secrets.*
+
 # Uploaded evidence (personal data — lives in object storage, never in git)
 uploads/
 storage/
@@ -33,3 +42,12 @@ test-results/
 playwright-report/
 blob-report/
 
+# Artifacts dropped in the repo root by e2e runs — a downloaded PA report and an
+# upload fixture. Generated output, and the report kind carries evidence data.
+/PA2_s-*.pdf
+/e2e-*.pdf
+
+
+# Backup artefacts (ops-runbook §5). Dumps contain every evaluation score and
+# every teacher-uploaded file: PDPA data. They must never reach git.
+backups/

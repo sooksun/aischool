@@ -21,7 +21,7 @@ Date: 2026-07-17 · Mode: single-agent (ADR-0004) — boundaries define *code st
 2. Authorization decisions follow `docs/contracts/permissions.yaml`; the api module is the only enforcement point (web hides UI affordances but never *is* the gate).
 3. Errors returned to clients use the shape and codes of `docs/contracts/error-codes.yaml`.
 4. Cross-module side effects (notify, project, audit-fan-out) ride on domain events per `docs/contracts/events.yaml` via a transactional outbox — no dual writes inside request handlers.
-5. Evidence binaries live in object storage (OPEN-4 provider-agnostic); PostgreSQL stores metadata only (`EvidenceFile`).
+5. Evidence binaries live in object storage (OPEN-4 provider-agnostic); the relational DB (MySQL 8 per ADR-0008) stores metadata only (`EvidenceFile`).
 6. The indicator taxonomy is read from framework seed data (ADR-0003); no module hard-codes indicator lists or weights.
 
 ## Deferred (explicit)
