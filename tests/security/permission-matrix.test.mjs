@@ -19,6 +19,9 @@ import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { grantFor, isExempt } from '@seip/backend-shared';
 import { buildServer } from '../../apps/api/dist/server.js';
+import { cleanupSchools, trackSchools } from '../helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -34,7 +37,7 @@ before(async () => {
   await app.ready();
 
   area = await prisma.area.create({ data: { code: `perm-area-${randomUUID()}`, name: 'Area' } });
-  school = await prisma.school.create({ data: { code: `perm-school-${randomUUID()}`, name: 'School', areaId: area.id } });
+  school = created.add(await prisma.school.create({ data: { code: `perm-school-${randomUUID()}`, name: 'School', areaId: area.id } }));
   await prisma.rankLevel.upsert({
     where: { code: 'perm_kru' }, create: { code: 'perm_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 }, update: {},
   });
@@ -50,6 +53,11 @@ before(async () => {
       data: { email: `perm-${role}-${randomUUID()}@x.io`, displayName: role, status: 'active', passwordHash: await argonHash(password) },
     });
     if (role === 'area_admin') {
+      // Area-scoped: schoolId is NULL by design (permissions.yaml scope: area),
+      // so school-scoped teardown can neither see this membership nor the user
+      // holding it. Tracked explicitly, like every other deliberately
+      // school-less fixture.
+      created.addUser(user);
       await prisma.schoolMembership.create({ data: { userId: user.id, areaId: area.id, role, membershipScope: 'area', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
     } else {
       await prisma.schoolMembership.create({ data: { userId: user.id, schoolId: school.id, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
@@ -148,6 +156,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await app.close();
   await prisma.$disconnect();
 });
@@ -389,7 +398,7 @@ test('area_admin is read-only: every write operation denies it even where direct
 });
 
 test('X-School-Id header behavior: single membership ignores it safely; multi-membership validates it', async () => {
-  const otherSchool = await prisma.school.create({ data: { code: `perm-other-${randomUUID()}`, name: 'Other' } });
+  const otherSchool = created.add(await prisma.school.create({ data: { code: `perm-other-${randomUUID()}`, name: 'Other' } }));
 
   // Single-membership user: per CCR-003, the header is IGNORED (not validated) —
   // the request proceeds under the caller's own real school. A bogus header must
@@ -423,7 +432,7 @@ test('X-School-Id header behavior: single membership ignores it safely; multi-me
   const multiLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: multiUser.email, password: multiPassword } });
   const multiToken = multiLogin.json().access_token;
 
-  const thirdSchool = await prisma.school.create({ data: { code: `perm-third-${randomUUID()}`, name: 'Third' } });
+  const thirdSchool = created.add(await prisma.school.create({ data: { code: `perm-third-${randomUUID()}`, name: 'Third' } }));
   const rejected = await app.inject({
     method: 'GET', url: '/api/v1/evidence',
     headers: { authorization: `Bearer ${multiToken}`, 'x-school-id': thirdSchool.id },

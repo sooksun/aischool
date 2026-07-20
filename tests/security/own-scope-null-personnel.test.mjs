@@ -29,6 +29,9 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../../apps/api/dist/server.js';
+import { cleanupSchools, trackSchools } from '../helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -42,9 +45,9 @@ before(async () => {
   ({ app } = await buildServer());
   await app.ready();
 
-  school = await prisma.school.create({
+  school = created.add(await prisma.school.create({
     data: { code: `nullpers-${randomUUID()}`, name: 'Null Personnel School' },
-  });
+  }));
   await prisma.rankLevel.upsert({
     where: { code: 'nullpers_kru' },
     create: { code: 'nullpers_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 },
@@ -163,6 +166,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await app.close();
   await prisma.$disconnect();
 });

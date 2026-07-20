@@ -98,15 +98,40 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = []) {
     // Only users this suite left with nothing. A user shared with a sibling
     // suite still has rows elsewhere and is skipped — checked per user rather
     // than assumed, because assuming is how a parallel run gets flaky.
+    // Failures are reported, never swallowed. An earlier version ended this line
+    // with `.catch(() => {})`, which made a user that could not be deleted look
+    // exactly like one that never needed deleting — the leak was invisible and
+    // undiagnosable at the same time. If a row cannot go, the reason is the
+    // interesting part.
+    // Area-scoped memberships (`membershipScope: 'area'`, the area_admin role in
+    // permissions.yaml) carry `schoolId = NULL`, so the school-scoped delete
+    // above cannot reach them — and while one survives, its holder still looks
+    // like a member of something and is skipped below. Cleared only for users
+    // named explicitly in `extras`, so this can never touch a membership a
+    // sibling suite still depends on.
+    if (extras.length > 0) {
+      await prisma.schoolMembership.deleteMany({
+        where: { userId: { in: extras }, schoolId: null },
+      });
+    }
+
+    const failures = new Map();
     for (const userId of candidateUserIds) {
       const [stillPersonnel, stillMember, stillUploaded] = await Promise.all([
         prisma.personnelProfile.count({ where: { userId } }),
         prisma.schoolMembership.count({ where: { userId } }),
         prisma.evidence.count({ where: { uploadedByUserId: userId } }),
       ]);
-      if (stillPersonnel === 0 && stillMember === 0 && stillUploaded === 0) {
-        await prisma.userAccount.delete({ where: { id: userId } }).catch(() => {});
+      if (stillPersonnel > 0 || stillMember > 0 || stillUploaded > 0) continue;
+      try {
+        await prisma.userAccount.delete({ where: { id: userId } });
+      } catch (e) {
+        const key = (e?.message ?? String(e)).split('\n').find((l) => l.trim()) ?? 'unknown';
+        failures.set(key, (failures.get(key) ?? 0) + 1);
       }
+    }
+    for (const [message, n] of failures) {
+      console.warn(`[db-cleanup] ${n} user(s) could not be deleted: ${message.slice(0, 200)}`);
     }
   } catch (e) {
     console.warn(`[db-cleanup] teardown incomplete, leaving rows behind: ${e?.message ?? e}`);
