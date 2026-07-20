@@ -9,6 +9,9 @@ import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
 import { runOnce } from '../../worker/dist/loop.js';
 import { S3Client } from '@aws-sdk/client-s3';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -36,9 +39,9 @@ before(async () => {
   const area = await prisma.area.create({
     data: { code: `rpt-area-${randomUUID()}`, name: 'Area' },
   });
-  school = await prisma.school.create({
+  school = created.add(await prisma.school.create({
     data: { code: `rpt-school-${randomUUID()}`, name: 'School', areaId: area.id },
-  });
+  }));
   await prisma.rankLevel.upsert({
     where: { code: 'teacher_kru' },
     create: { code: 'teacher_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 1 },
@@ -182,6 +185,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await app.close();
   await prisma.$disconnect();
 });

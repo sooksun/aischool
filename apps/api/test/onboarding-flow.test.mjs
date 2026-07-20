@@ -19,6 +19,9 @@ import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
 import { resetLoginRateLimiterState } from '../dist/lib/login-rate-limit.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -33,8 +36,8 @@ before(async () => {
   await app.ready();
 
   // Stand-in for `node scripts/ops/provision-school.mjs` + `bootstrap-admin.mjs`.
-  school = await prisma.school.create({ data: { code: `onb-${randomUUID()}`, name: 'Onboarding School' } });
-  otherSchool = await prisma.school.create({ data: { code: `onb-other-${randomUUID()}`, name: 'Other School' } });
+  school = created.add(await prisma.school.create({ data: { code: `onb-${randomUUID()}`, name: 'Onboarding School' } }));
+  otherSchool = created.add(await prisma.school.create({ data: { code: `onb-other-${randomUUID()}`, name: 'Other School' } }));
 
   adminEmail = `onb-admin-${randomUUID()}@x.io`;
   const admin = await prisma.userAccount.create({
@@ -55,6 +58,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await app.close();
   await prisma.$disconnect();
 });

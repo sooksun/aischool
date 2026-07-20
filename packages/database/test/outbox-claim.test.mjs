@@ -103,3 +103,30 @@ test('a published event is not re-claimed', async () => {
   const row = await prisma.outboxEvent.findUniqueOrThrow({ where: { id } });
   assert.equal(row.lastError, null, 'publishing clears the last error');
 });
+
+test('an event that disappears between claim and publish does not abort its batch', async () => {
+  // Found 2026-07-20 when integration-test teardown began deleting its own
+  // school's outbox rows: markOutboxPublished used `update`, which throws P2025
+  // for a missing row, and dispatchOutboxBatch's catch called markOutboxFailed,
+  // which threw for the SAME reason — so the handler written to isolate one bad
+  // event propagated out and abandoned every remaining event in the cycle.
+  //
+  // Deleting a row mid-flight is not exotic: any retention job, any operator
+  // cleanup, or a second worker would do it. The claim itself is already a
+  // compare-and-swap; these two were the only places that assumed exclusive
+  // ownership of a row they had merely read.
+  const alive = await seedEvent();
+  const doomed = await seedEvent();
+
+  const claimed = await claimUnpublishedOutbox(100);
+  assert.ok(claimed.some((r) => r.id === doomed), 'both events must be claimed first');
+  await prisma.outboxEvent.delete({ where: { id: doomed } });
+
+  assert.equal(await markOutboxPublished(doomed), 0, 'a vanished row is a no-op, not a throw');
+  assert.equal(await markOutboxFailed(doomed, 'gone'), 0, 'the recovery path must not throw either');
+
+  // The survivor still publishes — the point of the whole fix.
+  assert.equal(await markOutboxPublished(alive), 1);
+  const row = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: alive } });
+  assert.ok(row.publishedAt != null, 'a sibling event must not be collateral damage');
+});

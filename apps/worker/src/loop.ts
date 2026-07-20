@@ -64,10 +64,19 @@ export async function runOnce(
       await markJobDone(job.id);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (job.attempts >= 8) {
-        await markJobTerminalFailed(job.id, msg);
-      } else {
-        await markJobFailed(job.id, msg);
+      // Recording the failure must never itself fail the cycle. The mark*
+      // helpers no longer throw for a missing row, but this loop's whole reason
+      // for existing is that one bad job cannot stop the others — so the
+      // handler gets the same guarantee it gives.
+      try {
+        if (job.attempts >= 8) {
+          await markJobTerminalFailed(job.id, msg);
+        } else {
+          await markJobFailed(job.id, msg);
+        }
+      } catch (inner) {
+        console.warn(`[worker] could not record failure for job ${job.id}: `
+          + `${inner instanceof Error ? inner.message : String(inner)}`);
       }
     }
   }

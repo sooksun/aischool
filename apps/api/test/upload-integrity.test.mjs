@@ -15,6 +15,9 @@ import { randomUUID, createHash } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -28,9 +31,9 @@ before(async () => {
   ({ app } = await buildServer());
   await app.ready();
 
-  const school = await prisma.school.create({
+  const school = created.add(await prisma.school.create({
     data: { code: `integ-${randomUUID()}`, name: 'Integrity School' },
-  });
+  }));
   await prisma.rankLevel.upsert({
     where: { code: 'integ_kru' },
     create: { code: 'integ_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 },
@@ -85,6 +88,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await app.close();
   await prisma.$disconnect();
 });

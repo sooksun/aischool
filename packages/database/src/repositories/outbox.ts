@@ -72,11 +72,24 @@ export async function claimUnpublishedOutbox(limit = 20) {
   return claimed;
 }
 
-export async function markOutboxPublished(id: string) {
-  return prisma.outboxEvent.update({
+/**
+ * `updateMany`, not `update`, so a row that is no longer there is a no-op rather
+ * than a throw — matching claimUnpublishedOutbox above, which already does its
+ * state change as a compare-and-swap.
+ *
+ * `update` made this the loudest possible failure for the most benign cause. If
+ * the row vanished between claim and publish, dispatchOutboxBatch's catch called
+ * markOutboxFailed, which threw P2025 for the same reason — so the handler meant
+ * to isolate one bad event instead propagated out and abandoned every remaining
+ * event in the batch. Returns the number of rows actually changed so a caller can
+ * tell "published" from "already gone".
+ */
+export async function markOutboxPublished(id: string): Promise<number> {
+  const { count } = await prisma.outboxEvent.updateMany({
     where: { id },
     data: { publishedAt: new Date(), lastError: null },
   });
+  return count;
 }
 
 /** Records why a dispatch failed. Deliberately does NOT touch `attempts` —
@@ -84,9 +97,12 @@ export async function markOutboxPublished(id: string) {
  * incrementing here too burned the `attempts < 10` retry budget at 2 per cycle,
  * retiring an event after 5 real attempts instead of 10. Mirrors markJobFailed,
  * which leaves the counter to claimPendingJobs for the same reason. */
-export async function markOutboxFailed(id: string, error: string) {
-  return prisma.outboxEvent.update({
+export async function markOutboxFailed(id: string, error: string): Promise<number> {
+  // Same reasoning as markOutboxPublished, and more important here: this IS the
+  // error path. A recovery handler that can throw is not a recovery handler.
+  const { count } = await prisma.outboxEvent.updateMany({
     where: { id },
     data: { lastError: error.slice(0, 2000) },
   });
+  return count;
 }

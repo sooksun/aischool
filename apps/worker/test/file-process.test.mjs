@@ -13,6 +13,7 @@ import {
   listQueuedFileProcessTargets,
   enqueueWorkerJob,
 } from '@seip/database';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
 import { runOnce } from '../dist/loop.js';
 
 const prisma = new PrismaClient();
@@ -50,10 +51,13 @@ async function putObject(key, body, contentType) {
   }));
 }
 
+const created = trackSchools();
+
 async function fixture(filename = 'lesson.pdf', contentType = 'application/pdf', declaredByteSize = null) {
   const school = await prisma.school.create({
     data: { code: `w-${randomUUID().slice(0, 8)}`, name: 'Worker School' },
   });
+  created.add(school.id);
   await prisma.rankLevel.upsert({
     where: { code: 'w_kru' },
     create: { code: 'w_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 },
@@ -127,6 +131,14 @@ before(async () => {
 });
 
 after(async () => {
+  // Not optional hygiene. This suite registers file rows whose objects were
+  // never uploaded (`lost.pdf`, and anything left `pending` by a deliberately
+  // unreachable scanner). To the ADR-0009 re-scan sweep those are
+  // indistinguishable from production evidence whose bytes were lost: each one
+  // burns 8 worker retries and then sits in the census as an unexplained orphan.
+  // Three of them survived into the first full-store sweep and had to be purged
+  // by hand.
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await prisma.$disconnect();
 });
 

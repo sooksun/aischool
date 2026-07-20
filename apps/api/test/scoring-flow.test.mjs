@@ -11,6 +11,9 @@ import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
 import { replaceScoresAndRollup } from '@seip/database';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -24,7 +27,7 @@ before(async () => {
   ({ app } = await buildServer());
   await app.ready();
 
-  school = await prisma.school.create({ data: { code: `score-${randomUUID()}`, name: 'Scoring School' } });
+  school = created.add(await prisma.school.create({ data: { code: `score-${randomUUID()}`, name: 'Scoring School' } }));
   await prisma.rankLevel.upsert({
     where: { code: 'score_kru' }, create: { code: 'score_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 }, update: {},
   });
@@ -79,6 +82,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await app.close();
   await prisma.$disconnect();
 });
@@ -455,9 +459,11 @@ test('committee seats require an eligible membership at the school, and the eval
 
   // A real account with NO membership at this school (exists, so the pre-existing
   // existence check passes — exactly the gap the audit found).
-  const foreign = await prisma.userAccount.create({
+  // Tracked explicitly: this account has no membership anywhere by design, so
+  // school-scoped teardown cannot reach it.
+  const foreign = created.addUser(await prisma.userAccount.create({
     data: { email: `score-foreign-${randomUUID()}@x.io`, displayName: 'Foreign', status: 'active', passwordHash: 'x' },
-  });
+  }));
   const crossSchool = await app.inject({
     method: 'POST', url: `/api/v1/rounds/${round.id}/assignments`, headers: auth(directorToken),
     payload: committeeWith(foreign.id),

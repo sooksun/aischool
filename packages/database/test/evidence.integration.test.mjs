@@ -9,6 +9,7 @@ import {
   prisma, createEvidence, getEvidenceDetail, updateEvidence, listEvidence,
   createEvidenceFile, markEvidenceActiveIfDraft, createMapping, getMappingForAction, confirmMapping,
 } from '../dist/index.js';
+import { cleanupSchools } from '../../../tests/helpers/db-cleanup.mjs';
 
 let schoolA, schoolB, userId, categoryId, personnelA;
 
@@ -32,6 +33,13 @@ before(async () => {
 });
 
 after(async () => {
+  // This suite was the single largest source of orphaned evidence in the dev
+  // database: `createEvidenceFile` here writes a `storage_uri` for an object that
+  // is never uploaded, so the row describes bytes that have never existed. 45 of
+  // the 46 orphans found by the first full-store ADR-0009 sweep came from these
+  // `lifecycle` / `dup` / `y` fixtures. The rows are harmless to this test and
+  // corrosive to everything that reads the store afterwards.
+  await cleanupSchools(prisma, [schoolA, schoolB]);
   await prisma.$disconnect();
 });
 

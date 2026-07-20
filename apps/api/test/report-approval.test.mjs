@@ -20,6 +20,9 @@ import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
 import { resetLoginRateLimiterState } from '../dist/lib/login-rate-limit.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -55,7 +58,7 @@ before(async () => {
   ({ app } = await buildServer());
   await app.ready();
 
-  school = await prisma.school.create({ data: { code: `apr-${randomUUID()}`, name: 'Approval School' } });
+  school = created.add(await prisma.school.create({ data: { code: `apr-${randomUUID()}`, name: 'Approval School' } }));
   const fw = await prisma.frameworkVersion.findFirst({ where: { code: 'v9-2564-teacher' }, select: { id: true } });
   assert.ok(fw, 'taxonomy seed required — run npm run db:seed');
   frameworkId = fw.id;
@@ -79,6 +82,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await app.close();
   await prisma.$disconnect();
 });

@@ -128,8 +128,23 @@ export async function summariseRescanJobs(): Promise<{
   };
 }
 
-export async function markJobDone(id: string) {
-  return prisma.workerJob.update({
+/**
+ * These three are `updateMany`, not `update`, so a job row that is gone by the
+ * time it finishes is a no-op instead of a throw. `claimPendingJobs` above is
+ * already a compare-and-swap; the completion path assumed exclusive ownership of
+ * a row it had merely read.
+ *
+ * The failure that exposed it was ugly out of proportion to its cause. In
+ * runOnce, `markJobDone` sits INSIDE the try, so its P2025 fell into the catch —
+ * which called `markJobFailed`, which threw P2025 for the same reason. A handler
+ * written to isolate one bad job instead propagated out and killed the whole
+ * poll cycle, taking every other claimed job with it. Same shape as the outbox
+ * bug in repositories/outbox.ts; both are fixed the same way.
+ *
+ * Returns rows changed so a caller can distinguish "recorded" from "row gone".
+ */
+export async function markJobDone(id: string): Promise<number> {
+  const { count } = await prisma.workerJob.updateMany({
     where: { id },
     data: {
       status: 'done',
@@ -137,10 +152,13 @@ export async function markJobDone(id: string) {
       lastError: null,
     },
   });
+  return count;
 }
 
-export async function markJobFailed(id: string, error: string, retryDelayMs = 30_000) {
-  return prisma.workerJob.update({
+export async function markJobFailed(
+  id: string, error: string, retryDelayMs = 30_000,
+): Promise<number> {
+  const { count } = await prisma.workerJob.updateMany({
     where: { id },
     data: {
       status: 'pending',
@@ -149,10 +167,11 @@ export async function markJobFailed(id: string, error: string, retryDelayMs = 30
       lastError: error.slice(0, 2000),
     },
   });
+  return count;
 }
 
-export async function markJobTerminalFailed(id: string, error: string) {
-  return prisma.workerJob.update({
+export async function markJobTerminalFailed(id: string, error: string): Promise<number> {
+  const { count } = await prisma.workerJob.updateMany({
     where: { id },
     data: {
       status: 'failed',
@@ -160,4 +179,5 @@ export async function markJobTerminalFailed(id: string, error: string) {
       lastError: error.slice(0, 2000),
     },
   });
+  return count;
 }

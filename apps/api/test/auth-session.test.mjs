@@ -10,6 +10,9 @@ import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { hashRefreshToken } from '@seip/auth';
 import { buildServer } from '../dist/server.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -24,13 +27,14 @@ before(async () => {
   const user = await prisma.userAccount.create({
     data: { email, displayName: 'Session', status: 'active', passwordHash: await argonHash(password) },
   });
-  const school = await prisma.school.create({ data: { code: `session-${randomUUID()}`, name: 'Session School' } });
+  const school = created.add(await prisma.school.create({ data: { code: `session-${randomUUID()}`, name: 'Session School' } }));
   await prisma.schoolMembership.create({
     data: { userId: user.id, schoolId: school.id, role: 'teacher', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
   });
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await app.close();
   await prisma.$disconnect();
 });
@@ -121,9 +125,11 @@ test('refresh rejects garbage (AUTH-001), expired tokens (AUTH-002), and logout 
   const victim = await login();
   const attackerEmail = `session-attacker-${randomUUID()}@x.io`;
   const attackerPassword = 'attacker-password-1234';
-  await prisma.userAccount.create({
+  // Tracked explicitly: deliberately a member of nothing, so school-scoped
+  // teardown cannot reach it.
+  created.addUser(await prisma.userAccount.create({
     data: { email: attackerEmail, displayName: 'Attacker', status: 'active', passwordHash: await argonHash(attackerPassword) },
-  });
+  }));
   const attackerLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: attackerEmail, password: attackerPassword } });
   assert.equal(attackerLogin.statusCode, 200);
   const attacker = attackerLogin.json();
