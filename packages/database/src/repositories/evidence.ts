@@ -351,22 +351,39 @@ export async function countFilesForRescan(sel: Omit<RescanSelection, 'limit'>): 
  * carry a real verdict. The two numbers disagreeing is the finding — 81 rows
  * reading `clean` with 0 receipts is what prompted this whole sweep.
  */
-export async function scanCoverageCensus(schoolId?: string): Promise<
-  { scanStatus: string; total: number; verified: number }[]
-> {
-  const where = schoolId ? { evidence: { schoolId } } : {};
-  const [totals, verified] = await Promise.all([
-    prisma.evidenceFile.groupBy({ by: ['scanStatus'], where, _count: { _all: true } }),
+export async function scanCoverageCensus(schoolId?: string): Promise<{
+  rows: { scanStatus: string; total: number; verified: number }[];
+  softDeleted: number;
+}> {
+  // Counts LIVE evidence only. Soft-deleted files are not served through the API
+  // and are queued for storage GC, so folding them in overstates the thing this
+  // census exists to alarm about — "how many files are we serving that claim a
+  // verdict nobody earned". The first full-store run reported 27 unverified
+  // `clean` files as "downloadable, badged ปลอดภัย" when a chunk of them were
+  // soft-deleted and downloadable by nobody. They are reported separately
+  // instead of hidden, because a soft-deleted file can still be restored.
+  const live = { evidence: { deletedAt: null, ...(schoolId ? { schoolId } : {}) } };
+  const [totals, verified, softDeleted] = await Promise.all([
+    prisma.evidenceFile.groupBy({ by: ['scanStatus'], where: live, _count: { _all: true } }),
     prisma.evidenceFile.groupBy({
       by: ['scanStatus'],
-      where: { ...where, scannedAt: { not: null } },
+      where: { ...live, scannedAt: { not: null } },
       _count: { _all: true },
+    }),
+    prisma.evidenceFile.count({
+      where: {
+        scannedAt: null,
+        evidence: { deletedAt: { not: null }, ...(schoolId ? { schoolId } : {}) },
+      },
     }),
   ]);
   const verifiedBy = new Map(verified.map((r) => [r.scanStatus, r._count._all]));
-  return totals.map((r) => ({
-    scanStatus: r.scanStatus,
-    total: r._count._all,
-    verified: verifiedBy.get(r.scanStatus) ?? 0,
-  }));
+  return {
+    rows: totals.map((r) => ({
+      scanStatus: r.scanStatus,
+      total: r._count._all,
+      verified: verifiedBy.get(r.scanStatus) ?? 0,
+    })),
+    softDeleted,
+  };
 }

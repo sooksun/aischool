@@ -87,30 +87,38 @@ const statuses = includeBlocked
   : ['pending', 'clean', 'unscanned'];
 
 async function printCensus() {
-  const rows = await scanCoverageCensus(schoolId);
+  const { rows, softDeleted } = await scanCoverageCensus(schoolId);
   if (rows.length === 0) {
-    console.log('\n  no evidence files\n');
+    console.log('\n  no live evidence files\n');
     return;
   }
-  console.log('\n  scan coverage' + (schoolId ? ` (school ${schoolId})` : '') + ':\n');
+  console.log('\n  scan coverage' + (schoolId ? ` (school ${schoolId})` : '') + ', live evidence:\n');
   console.log('    status      files   with a real verdict');
   console.log('    ─────────────────────────────────────────');
   let unverified = 0;
   for (const r of rows.sort((a, b) => a.scanStatus.localeCompare(b.scanStatus))) {
-    unverified += r.total - r.verified;
-    const gap = r.total - r.verified > 0 ? '   ← never scanned' : '';
+    const gap = r.total - r.verified;
+    unverified += gap;
     console.log(
-      `    ${r.scanStatus.padEnd(10)} ${String(r.total).padStart(6)}   ${String(r.verified).padStart(8)}${gap}`,
+      `    ${r.scanStatus.padEnd(10)} ${String(r.total).padStart(6)}   ${String(r.verified).padStart(8)}`
+      + (gap > 0 ? `   ← ${gap} never scanned` : ''),
     );
   }
-  console.log(`\n  ${unverified} file(s) carry no scan receipt.`);
+  console.log(`\n  ${unverified} live file(s) carry no scan receipt.`);
   // The single most useful line here: a `clean` row without a receipt is the
-  // platform asserting safety it never established.
+  // platform asserting safety it never established — and unlike `unscanned` or
+  // `blocked`, that file is being served right now.
   const cleanRow = rows.find((r) => r.scanStatus === 'clean');
   if (cleanRow && cleanRow.total > cleanRow.verified) {
     console.log(
       `  WARNING: ${cleanRow.total - cleanRow.verified} of them read "clean" — downloadable, `
       + 'badged ปลอดภัย, never verified (pre-CCR-012 filename stub).',
+    );
+  }
+  if (softDeleted > 0) {
+    console.log(
+      `  (${softDeleted} soft-deleted file(s) are also unverified — excluded above because nothing `
+      + 'serves them, but they are restorable, so a restore should be followed by a sweep.)',
     );
   }
 
@@ -120,12 +128,22 @@ async function printCensus() {
   const jobs = await summariseRescanJobs();
   if (jobs.queued > 0 || jobs.failed > 0) {
     console.log(`\n  re-scan queue: ${jobs.queued} waiting, ${jobs.failed} gave up after 8 attempts.`);
-    for (const [message, n] of jobs.errors) {
-      console.log(`    ${n}×  ${message.slice(0, 120)}`);
+    for (const [message, n] of jobs.errors.slice(0, 8)) {
+      console.log(`    ${String(n).padStart(4)}×  ${message.slice(0, 110)}`);
     }
+    if (jobs.errors.length > 8) console.log(`    … and ${jobs.errors.length - 8} other error(s)`);
     if (jobs.failed > 0) {
       console.log(
         '    a failed job leaves its file exactly as it was — no verdict was invented for it.',
+      );
+      // Worth saying out loud: the skip-guard only looks at pending/running jobs,
+      // so terminally-failed ones do NOT stop the file being selected again. That
+      // is right for a transient outage and wrong for a permanently absent
+      // object, which will burn 8 attempts on every future sweep until the row
+      // or the object is dealt with.
+      console.log(
+        '    NOTE: these files are still selected by the next sweep and will fail again. '
+        + 'Restore the objects or remove the rows — the scanner cannot fix a file that is not there.',
       );
     }
   }

@@ -390,6 +390,35 @@ pushed through the queue to change nothing.
   object, or delete the row), not a scanner fix.
 - A failed job **leaves its file exactly as it was**. No verdict is ever invented
   for a file the scanner could not read.
+- **Terminally-failed jobs do not stop the file being selected again.** The
+  skip-guard only looks at `pending`/`running`, which is right for a transient
+  outage and wrong for a permanently absent object: every future sweep re-queues
+  it and burns another 8 attempts. Deal with those rows (restore the object, or
+  remove the row) rather than letting them accumulate.
+
+### 5b.5 First full-store run, 2026-07-20
+
+Recorded because the numbers are the argument for doing this at all.
+
+| | |
+|---|---|
+| Enqueued | 315 (whole store, `--limit=5000`) |
+| Verified with a real clamd verdict | **295, all clean** |
+| Failed — object missing from storage | 46 |
+| Wall clock | ~7 min, single worker, 10 jobs/poll |
+| Unverified `clean` files being served, before → after | **67 → 0** |
+
+Everything left unverified is accounted for, with nothing unexplained: 50
+`blocked` (opt-out, needs `--include-blocked`), 46 orphaned rows whose objects are
+gone, and 30 soft-deleted (excluded by design; **re-run the sweep after any
+restore**, since a restored file is served again).
+
+Two reporting defects surfaced only at this scale and are fixed:
+`summariseRescanJobs` grouped failures by a key that still contained the file id,
+so 46 identical failures printed as 46 lines instead of one `46×` — the exact
+noise the grouping existed to prevent. And the census counted soft-deleted files
+in the "downloadable, badged ปลอดภัย" warning, overstating the alarm by 27; it
+now reports live evidence and lists soft-deleted separately.
 
 ---
 

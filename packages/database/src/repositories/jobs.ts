@@ -88,9 +88,16 @@ export async function listQueuedFileProcessTargets(): Promise<Set<string>> {
  * Progress and, more importantly, stalls for the re-scan sweep.
  *
  * Groups terminal failures by message because the interesting case is a repeated
- * one — "object missing from storage" ×37 is a story about the store, where 37
+ * one — "object missing from storage" ×46 is a story about the store, where 46
  * separate lines are noise.
+ *
+ * That grouping has to erase the identifiers, which the first version did not:
+ * splitting on `(` left the file id in the key, so the first real full-store
+ * sweep printed 46 lines each reading `1× object missing from storage for file
+ * <uuid>` — precisely the noise this function exists to prevent. Ids are what
+ * make otherwise-identical failures look distinct.
  */
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 export async function summariseRescanJobs(): Promise<{
   queued: number;
   failed: number;
@@ -108,7 +115,10 @@ export async function summariseRescanJobs(): Promise<{
   ]);
   const counts = new Map<string, number>();
   for (const row of failedRows) {
-    const key = (row.lastError ?? 'unknown error').split('(')[0].trim();
+    const key = (row.lastError ?? 'unknown error')
+      .split('(')[0]
+      .replace(UUID_RE, '<id>')
+      .trim();
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return {
