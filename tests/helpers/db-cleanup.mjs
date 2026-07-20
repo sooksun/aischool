@@ -45,10 +45,11 @@
  * Never throws: teardown must not turn a passing suite red, and a failure here
  * means leftover rows, not a wrong test result. It warns loudly instead.
  */
-export async function cleanupSchools(prisma, schoolIds, extraUserIds = []) {
+export async function cleanupSchools(prisma, schoolIds, extraUserIds = [], frameworkIds = []) {
   const ids = [...new Set((schoolIds ?? []).filter(Boolean))];
   const extras = [...new Set((extraUserIds ?? []).filter(Boolean))];
-  if (ids.length === 0 && extras.length === 0) return;
+  const frameworks = [...new Set((frameworkIds ?? []).filter(Boolean))];
+  if (ids.length === 0 && extras.length === 0 && frameworks.length === 0) return;
   const where = { schoolId: { in: ids } };
 
   try {
@@ -133,6 +134,20 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = []) {
     for (const [message, n] of failures) {
       console.warn(`[db-cleanup] ${n} user(s) could not be deleted: ${message.slice(0, 200)}`);
     }
+
+    // Frameworks are NOT school-scoped, so nothing above reaches them — and a
+    // leaked one is worse than a leaked row. Suites create them with status
+    // `active`, roleFamily `teacher` and revisionYear 2564: identical on every
+    // field the app selects a framework by, so a stray fixture ties with the real
+    // seeded ว9 taxonomy and can win. That is exactly how the 2026-07-20 e2e run
+    // ended up on a 3-indicator test framework with no challenge indicator.
+    //
+    // Deleted last, after the cycles that reference them (Restrict), and only
+    // ones this suite created — never by name pattern, and never the seeded rows.
+    if (frameworks.length > 0) {
+      await prisma.frameworkVersion.deleteMany({ where: { id: { in: frameworks } } })
+        .catch((e) => console.warn(`[db-cleanup] framework cleanup failed: ${e?.message ?? e}`));
+    }
   } catch (e) {
     console.warn(`[db-cleanup] teardown incomplete, leaving rows behind: ${e?.message ?? e}`);
   }
@@ -156,6 +171,7 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = []) {
 export function trackSchools() {
   const ids = [];
   const userIds = [];
+  const frameworkIds = [];
   return {
     add(schoolOrId) {
       const id = typeof schoolOrId === 'string' ? schoolOrId : schoolOrId?.id;
@@ -169,7 +185,15 @@ export function trackSchools() {
       if (id) userIds.push(id);
       return userOrId;
     },
+    /** For FrameworkVersion rows a suite creates. Not school-scoped, and an
+     * `active` leftover competes with the seeded taxonomy — see cleanupSchools. */
+    addFramework(fwOrId) {
+      const id = typeof fwOrId === 'string' ? fwOrId : fwOrId?.id;
+      if (id) frameworkIds.push(id);
+      return fwOrId;
+    },
     ids() { return ids; },
     userIds() { return userIds; },
+    frameworkIds() { return frameworkIds; },
   };
 }

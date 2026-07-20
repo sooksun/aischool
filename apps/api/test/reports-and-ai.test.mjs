@@ -111,7 +111,7 @@ before(async () => {
   });
   directorToken = dLogin.json().access_token;
 
-  const fw = await prisma.frameworkVersion.create({
+  const fw = created.addFramework(await prisma.frameworkVersion.create({
     data: {
       code: `rpt-fw-${randomUUID()}`,
       roleFamily: 'teacher',
@@ -120,7 +120,7 @@ before(async () => {
       status: 'active',
       effectiveFrom: new Date(),
     },
-  });
+  }));
   frameworkId = fw.id;
   const domain = await prisma.evaluationDomain.create({
     data: {
@@ -185,7 +185,7 @@ before(async () => {
 });
 
 after(async () => {
-  await cleanupSchools(prisma, created.ids(), created.userIds());
+  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
 });

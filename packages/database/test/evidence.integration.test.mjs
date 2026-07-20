@@ -9,7 +9,11 @@ import {
   prisma, createEvidence, getEvidenceDetail, updateEvidence, listEvidence,
   createEvidenceFile, markEvidenceActiveIfDraft, createMapping, getMappingForAction, confirmMapping,
 } from '../dist/index.js';
-import { cleanupSchools } from '../../../tests/helpers/db-cleanup.mjs';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+
+// Frameworks here are created inside a test, not in before(), so they get their
+// own tracker rather than being threaded through the school one.
+const createdFrameworks = trackSchools();
 
 let schoolA, schoolB, userId, categoryId, personnelA;
 
@@ -39,7 +43,7 @@ after(async () => {
   // the 46 orphans found by the first full-store ADR-0009 sweep came from these
   // `lifecycle` / `dup` / `y` fixtures. The rows are harmless to this test and
   // corrosive to everything that reads the store afterwards.
-  await cleanupSchools(prisma, [schoolA, schoolB]);
+  await cleanupSchools(prisma, [schoolA, schoolB], [], createdFrameworks.frameworkIds());
   await prisma.$disconnect();
 });
 
@@ -91,11 +95,11 @@ test('createEvidenceFile rejects a duplicate file id (UPL-004 signal: P2002 on t
 
 test('mapping governance: suggested -> confirmed; duplicate active mapping rejected (MAP-001 signal)', async () => {
   const ev = await createEvidence(schoolA, { ownerPersonnelId: personnelA, uploadedByUserId: userId, categoryId, title: 'map-test' });
-  const fw = await prisma.frameworkVersion.upsert({
+  const fw = createdFrameworks.addFramework(await prisma.frameworkVersion.upsert({
     where: { code: `itest-fw-${process.pid}` },
     create: { code: `itest-fw-${process.pid}`, roleFamily: 'teacher', legalRef: 'x', revisionYear: 9999, status: 'draft', effectiveFrom: new Date() },
     update: {},
-  });
+  }));
   const domain = await prisma.evaluationDomain.create({
     data: { frameworkVersionId: fw.id, code: `D-${randomUUID()}`, nameTh: 'd', sortOrder: 1, part: 'standards' },
   });

@@ -210,10 +210,28 @@ export default async function globalSetup() {
     let assignmentId = null;
     let readyReportId = null;
 
-    const fw = await prisma.frameworkVersion.findFirst({
-      where: { status: 'active', roleFamily: 'teacher' },
-      orderBy: { revisionYear: 'desc' },
+    // Selected BY CODE, not by "newest active teacher framework".
+    //
+    // The old query was a guess that happened to work. Every leftover
+    // `frameworkVersion` an integration suite creates with status `active` and
+    // revisionYear 2564 ties with the real one, so the winner was whichever row
+    // the database returned first — and on 2026-07-20 that was a 3-indicator
+    // `rpt-fw-*` fixture with no challenge indicator. The whole e2e run silently
+    // moved onto a framework that is not the product's, and only failed later,
+    // deep in agreement creation, with "framework has no challenge indicator".
+    //
+    // e2e exists to exercise the seeded ว9/2564 taxonomy (ADR-0003). Naming it
+    // makes that explicit and makes a missing seed fail here, with a sentence
+    // saying what to run, instead of somewhere downstream.
+    const fw = await prisma.frameworkVersion.findUnique({
+      where: { code: 'v9-2564-teacher' },
     });
+    if (!fw) {
+      throw new Error(
+        '[e2e setup] framework `v9-2564-teacher` not found — run `npm run db:seed` '
+        + '(ADR-0003: the taxonomy is seed data, never hard-coded)',
+      );
+    }
 
     if (fw && teacher.personnelId) {
       let cycle = await prisma.evaluationCycle.findFirst({

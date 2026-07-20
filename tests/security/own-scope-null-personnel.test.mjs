@@ -103,14 +103,14 @@ before(async () => {
   });
 
   // A round + assignment over the victim, so listAssignments has real data to leak.
-  const fw = await prisma.frameworkVersion.upsert({
+  const fw = created.addFramework(await prisma.frameworkVersion.upsert({
     where: { code: `nullpers-fw-${process.pid}` },
     create: {
       code: `nullpers-fw-${process.pid}`, roleFamily: 'teacher', legalRef: 'x',
       revisionYear: 9999, status: 'draft', effectiveFrom: new Date(),
     },
     update: {},
-  });
+  }));
   const cycle = await prisma.evaluationCycle.create({
     data: {
       schoolId: school.id, frameworkVersionId: fw.id, fiscalYear: 9999, evaluationKind: 'pa',
@@ -166,7 +166,7 @@ before(async () => {
 });
 
 after(async () => {
-  await cleanupSchools(prisma, created.ids(), created.userIds());
+  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
 });

@@ -92,9 +92,9 @@ before(async () => {
   const create = await app.inject({ method: 'POST', url: '/api/v1/evidence', headers: { authorization: `Bearer ${tokenFor.teacher}` }, payload: { category_id: category.id, title: 'perm sweep evidence' } });
   evidenceId = create.json().id;
 
-  const fw = await prisma.frameworkVersion.upsert({
+  const fw = created.addFramework(await prisma.frameworkVersion.upsert({
     where: { code: `perm-fw-${process.pid}` }, create: { code: `perm-fw-${process.pid}`, roleFamily: 'teacher', legalRef: 'x', revisionYear: 9999, status: 'draft', effectiveFrom: new Date() }, update: {},
-  });
+  }));
   frameworkId = fw.id;
   const domain = await prisma.evaluationDomain.create({ data: { frameworkVersionId: fw.id, code: `D-${randomUUID()}`, nameTh: 'd', sortOrder: 1, part: 'standards' } });
   const indicator = await prisma.indicator.create({ data: { domainId: domain.id, frameworkVersionId: fw.id, code: `I-${randomUUID()}`, nameTh: 'i', sortOrder: 1, isScored: true, indicatorKind: 'standard' } });
@@ -156,7 +156,7 @@ before(async () => {
 });
 
 after(async () => {
-  await cleanupSchools(prisma, created.ids(), created.userIds());
+  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
 });

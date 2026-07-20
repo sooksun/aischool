@@ -32,9 +32,9 @@ before(async () => {
     where: { code: 'score_kru' }, create: { code: 'score_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 }, update: {},
   });
 
-  const fw = await prisma.frameworkVersion.create({
+  const fw = created.addFramework(await prisma.frameworkVersion.create({
     data: { code: `score-fw-${randomUUID()}`, roleFamily: 'teacher', legalRef: 'x', revisionYear: 9999, status: 'draft', effectiveFrom: new Date() },
-  });
+  }));
   frameworkId = fw.id;
   await prisma.scoreWeight.createMany({ data: [
     { frameworkVersionId: fw.id, weightKey: 'part1_total', weightValue: 60 },
@@ -82,7 +82,7 @@ before(async () => {
 });
 
 after(async () => {
-  await cleanupSchools(prisma, created.ids(), created.userIds());
+  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
 });
