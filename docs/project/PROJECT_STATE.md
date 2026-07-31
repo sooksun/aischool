@@ -7,10 +7,10 @@ School Evidence Intelligence Platform (SEIP)
 Sprint 0 — Multi-AI Team Operating System (planned 2026-07-16)
 
 ## Sprint 0 Goal
-Make the division-of-work system executable before any agent writes a production feature. See `project/SPRINT-0.md`.
+Make the division-of-work system executable before any agent writes a production feature. See `docs/project/SPRINT-0.md`.
 
 ## Hard Constraint
-No production feature code until the Definition of Ready to Build gate in `project/SPRINT-0.md` passes.
+No production feature code until the Definition of Ready to Build gate in `docs/project/SPRINT-0.md` passes.
 
 ## Current Objectives
 - Bootstrap the repository so the operating system actually runs (SEIP-OPS-001)
@@ -26,13 +26,31 @@ No production feature code until the Definition of Ready to Build gate in `proje
 4. SEIP-ARCH-002 (claude) — contract lock → Definition of Ready to Build
 
 ## Active Tasks
-See `.ai-team/task-board.yaml`. Only SEIP-OPS-001 is `ready`; all others are `blocked` on their wave predecessor.
+See `.ai-team/task-board.yaml` (now at the repository root — ADR-0002 §1).
+SEIP-OPS-001 is `review_requested`, awaiting grok. All others remain `blocked`:
+Wave 1 unblocks when SEIP-OPS-001 is **approved**, not when it is submitted.
+
+## Repository Status
+The operating system is executable. Agent instruction files and `.ai-team/`
+load from the repo root; `node scripts/orchestration/validate-ownership.mjs` and
+`validate-gates.mjs` run in CI on every pull request.
+
+Three items from SEIP-OPS-001 need repository-admin action and are open:
+- `develop` does not exist; `main` is the only branch.
+- Branch protection is not active, so charter rule 3 is unenforced.
+
+Definition of Ready item 7 (pipeline proven, not assumed) is **satisfied for the
+PR pipeline**: run 30624657353 on PR #2 is green across all 13 jobs, with the
+ownership and gate validators executing on the runner. The release pipeline is
+untested until a `v*` tag exists.
+
+See `.ai-team/handoffs/SEIP-OPS-001.md` §8 for the exact steps.
 
 ## Major Decisions
 - ADR-0001 — Technology stack: Node/TypeScript monorepo (Accepted)
 - ADR-0002 — Repository layout and ownership canonicalization (Accepted)
-- ADR-0003 — Evaluation framework: วPA ว9/2564 (ครู) + ว10/2564 (ผู้บริหาร) (Accepted); taxonomy in `architecture/evaluation-framework.md`
-- See `decisions/`.
+- ADR-0003 — Evaluation framework: วPA ว9/2564 (ครู) + ว10/2564 (ผู้บริหาร) (Accepted); taxonomy in `docs/architecture/evaluation-framework.md`
+- See `docs/decisions/`.
 
 ## Open Questions
 - ~~OPEN-1~~ CLOSED: GitHub remote — server-side branch protection + GitHub Actions
@@ -40,7 +58,7 @@ See `.ai-team/task-board.yaml`. Only SEIP-OPS-001 is `ready`; all others are `bl
 - OPEN-3: AI provider + PDPA data-residency (blocks Sprint 2 AI-mapping contract)
 - OPEN-4: object storage choice (blocks SEIP-DB-000 storage strategy)
 - OPEN-5: AI-mapping contract has no owning task (Sprint 2)
-See `project/SPRINT-0.md` for detail and owners.
+See `docs/project/SPRINT-0.md` for detail and owners.
 
 ## Known Risks
 - Criteria and official forms may change by year
@@ -48,5 +66,8 @@ See `project/SPRINT-0.md` for detail and owners.
 - Uploaded evidence contains personal data
 - Video storage can grow quickly
 - Multiple AI agents may create incompatible assumptions unless contracts are locked
-- Bootstrap (SEIP-OPS-001) is single-threaded and blocks all other agents
-- `docs/` currently duplicates `aischool-docs.zip`; the zip will drift once git exists
+- ~~Bootstrap (SEIP-OPS-001) is single-threaded and blocks all other agents~~ — submitted, pending grok review
+- `docs/` duplicates `aischool-docs.zip`. Decision recorded: **ignore, keep on disk, do not track**.
+  The zip was not deleted (needs user confirmation) and will drift now that git is the source of truth.
+- CODEOWNERS resolves every module to one human account because the AI owners have no
+  GitHub identity — GitHub enforces *a* review, not *the right agent's* review

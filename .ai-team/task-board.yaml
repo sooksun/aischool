@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-16T21:30:00+07:00
+updated_at: 2026-07-31T00:00:00+07:00
 # Sprint 0 laid out by Claude. See docs/project/SPRINT-0.md and docs/decisions/ADR-0001, ADR-0002.
 # HARD CONSTRAINT: no production feature code until the Definition of Ready to Build gate passes.
 sprint: 0
@@ -22,7 +22,9 @@ tasks:
     wave: 0
     owner: claude
     reviewer: grok
-    status: ready
+    status: review_requested
+    # Branch deviates from the convention below: this run was constrained to the
+    # session branch `claude/remote-control-5aclif`. Recorded in the handoff.
     branch: ai/claude/SEIP-OPS-001-repo-bootstrap
     allowed_paths:
       - .ai-team/**
@@ -33,6 +35,12 @@ tasks:
       - AGENTS.md
       - ANTIGRAVITY.md
       - GROK.md
+      # Added during execution: PROJECT_STATE upkeep is a standing claude
+      # responsibility (CLAUDE.md rule 9) and docs/README.md pointed at the
+      # pre-move file locations. Flagged for grok in the handoff.
+      - docs/project/PROJECT_STATE.md
+      - docs/project/SPRINT-0.md
+      - docs/README.md
     blocked_paths:
       - apps/**
       - packages/**

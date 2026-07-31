@@ -1,0 +1,63 @@
+# Generated from .ai-team/module-ownership.yaml (SEIP-OPS-001, ADR-0002 §5).
+# Keep this file in sync with module-ownership.yaml — CI enforces it via
+# `node scripts/orchestration/validate-ownership.mjs`.
+#
+# The logical owner is an AI agent (claude / codex / antigravity / grok), which
+# has no GitHub identity. Review authority is therefore held by the human
+# maintainer, who is accountable for every agent's output. The agent recorded in
+# the comment is the module owner per module-ownership.yaml; the reviewer named
+# there is the agent that must review before the human merges.
+
+# Fallback — anything not matched below.
+*                               @sooksun
+
+# orchestration — owner: claude, reviewer: grok
+/.ai-team/**                    @sooksun
+/.github/**                     @sooksun
+/scripts/orchestration/**       @sooksun
+/CLAUDE.md                      @sooksun
+/AGENTS.md                      @sooksun
+/ANTIGRAVITY.md                 @sooksun
+/GROK.md                        @sooksun
+/.gitignore                     @sooksun
+/.gitattributes                 @sooksun
+/docs/README.md                 @sooksun
+
+# architecture — owner: claude, reviewer: grok
+/docs/architecture/**           @sooksun
+/docs/contracts/**              @sooksun
+/docs/decisions/**              @sooksun
+/docs/project/**                @sooksun
+
+# Carve-outs. GitHub applies the LAST matching rule, so these must stay below
+# /docs/architecture/** above. See `carve_outs` in module-ownership.yaml.
+# data-model — owner: codex, reviewer: grok
+/docs/architecture/data-model/** @sooksun
+# ux-design — owner: antigravity, reviewer: claude
+/docs/architecture/ux/**        @sooksun
+
+# backend — owner: codex, reviewer: grok
+/apps/api/**                    @sooksun
+/apps/worker/**                 @sooksun
+/packages/database/**           @sooksun
+/packages/auth/**               @sooksun
+/packages/backend-shared/**     @sooksun
+/prisma/**                      @sooksun
+/database/**                    @sooksun
+/infra/docker/**                @sooksun
+/tests/backend/**               @sooksun
+
+# frontend — owner: antigravity, reviewer: claude
+/apps/web/**                    @sooksun
+/packages/ui/**                 @sooksun
+/packages/design-tokens/**      @sooksun
+/tests/frontend/**              @sooksun
+/public/**                      @sooksun
+
+# quality — owner: grok, reviewer: claude
+/tests/e2e/**                   @sooksun
+/tests/security/**              @sooksun
+/tests/regression/**            @sooksun
+/docs/qa/**                     @sooksun
+/docs/reviews/**                @sooksun
+/scripts/security/**            @sooksun

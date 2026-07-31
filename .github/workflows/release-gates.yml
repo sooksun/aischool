@@ -1,0 +1,73 @@
+# Release gate skeleton (SEIP-OPS-001, acceptance criterion 9).
+#
+# One job per gate listed under "Release Gates" in docs/qa/QUALITY-GATES.md.
+# All are stubs for the same reason as pr-gates.yml: SEIP-QA-001 (grok) owns the
+# commands and there is no release to gate yet.
+#
+# Release gates do not run on every pull request — they run on a release tag or
+# on demand — so they are kept in a separate workflow rather than as skipped
+# jobs inside PR Gates, where a skipped required check blocks a merge forever.
+
+name: Release Gates
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PENDING: 'Gate stub — command owned by SEIP-QA-001, wiring owned by SEIP-OPS-001.'
+
+jobs:
+  e2e-tests:
+    name: End-to-end tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=End-to-end tests::$PENDING"
+
+  security-tests:
+    name: Security tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Security tests::$PENDING"
+
+  backup-restore-test:
+    name: Backup and restore test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Backup and restore test::$PENDING"
+
+  report-accuracy-test:
+    name: Report accuracy test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Report accuracy test::$PENDING"
+
+  accessibility-test:
+    name: Accessibility test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Accessibility test::$PENDING"
+
+  performance-test:
+    name: Performance test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Performance test::$PENDING"
+
+  user-acceptance-test:
+    name: User acceptance test
+    runs-on: ubuntu-latest
+    steps:
+      # Manual sign-off, not an automated check. The job records that the gate
+      # was considered; SEIP-QA-001 decides whether it stays in CI at all.
+      - run: echo "::notice title=User acceptance test::Manual sign-off gate — see docs/qa/QUALITY-GATES.md."

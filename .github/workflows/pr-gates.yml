@@ -1,0 +1,131 @@
+# Pull-request gate skeleton (SEIP-OPS-001, acceptance criterion 9).
+#
+# Every gate listed under "Pull Request Gates" in docs/qa/QUALITY-GATES.md has a
+# job here. Most are deliberate no-ops that announce themselves as pending:
+# SEIP-QA-001 (grok) owns the gate *commands*, SEIP-OPS-001 (claude) owns the CI
+# *wiring*, and there is no application to run them against yet.
+#
+# The point of the skeleton is Definition-of-Ready item 7 — a branch that runs
+# the full gate list end to end proves the pipeline exists before anyone relies
+# on it. Filling a stub in means replacing its `run:` block, not adding a job.
+#
+# The `orchestration` job is NOT a stub. It runs today and must stay green.
+
+name: PR Gates
+
+on:
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PENDING: 'Gate stub — command owned by SEIP-QA-001, wiring owned by SEIP-OPS-001.'
+
+jobs:
+  # ---------------------------------------------------------------- real gate
+  orchestration:
+    name: Orchestration integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate module ownership, task board and CODEOWNERS
+        run: node scripts/orchestration/validate-ownership.mjs
+      - name: Validate every documented gate has a job
+        run: node scripts/orchestration/validate-gates.mjs
+
+  # ------------------------------------------------- gate stubs, in gate order
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Format::$PENDING"
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Lint::$PENDING"
+
+  type-check:
+    name: Type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Type check::$PENDING"
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Unit tests::$PENDING"
+
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Integration tests::$PENDING"
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Build::$PENDING"
+
+  migration-validation:
+    name: Migration validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Migration validation::$PENDING"
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Secret scan::$PENDING"
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Dependency audit::$PENDING"
+
+  permission-tests:
+    name: Permission tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Permission tests::$PENDING"
+
+  contract-compatibility:
+    name: Contract compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "::notice title=Contract compatibility::$PENDING"
+
+  code-owner-review:
+    name: Code owner review
+    runs-on: ubuntu-latest
+    steps:
+      # This gate is enforced by GitHub branch protection ("Require review from
+      # Code Owners"), not by a CI step. The job exists so the gate list in
+      # QUALITY-GATES.md maps one-to-one onto jobs and nothing looks forgotten.
+      - run: echo "::notice title=Code owner review::Enforced by branch protection on main and develop, not by CI."
