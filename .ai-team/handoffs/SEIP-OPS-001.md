@@ -163,8 +163,30 @@ $ ls .github/CODEOWNERS .github/workflows/
 pr-gates.yml  release-gates.yml
 ```
 
+### CI run — Definition of Ready item 7
+
+The pipeline is proven, not assumed. Run
+[30624657353](https://github.com/sooksun/aischool/actions/runs/30624657353) on
+PR #2: **all 13 jobs green**, 12 gate stubs plus `Orchestration integrity`.
+
+`Orchestration integrity` did not pass vacuously — the runner log shows both
+validators executing against the checked-out tree on Node 22:
+
+```
+Run node scripts/orchestration/validate-ownership.mjs
+ownership OK — 36 owned paths across 7 modules, 9 tasks on the board, 0 warning(s)
+Run node scripts/orchestration/validate-gates.mjs
+gates OK — 19 documented gates covered by 19 jobs across 2 workflows
+```
+
+`release-gates.yml` has **not** been exercised — it triggers on `v*` tags, and
+there is no release to tag. Its 7 jobs are structurally identical to the PR
+stubs that did run, but that is an inference, not evidence.
+
+### Fault injection
+
 A validator that has never failed is not evidence. Four fault injections were
-run and reverted; each produced exit 1:
+run locally and reverted; each produced exit 1:
 
 | Injected fault | Detected as |
 |---|---|
@@ -207,10 +229,16 @@ settings on both `main` and `develop`: require a pull request before merging;
 require review from Code Owners; require status check `Orchestration integrity`;
 disallow force pushes and deletions.
 
-**AC 10 — throwaway branch proven green.** The pull request opened from this
-branch runs `pr-gates.yml` in full and is the intended evidence, but no CI result
-existed at the time of writing. Definition-of-Ready item 7 stays unsatisfied
-until that run is green and its link is recorded here.
+**AC 10 — throwaway branch proven green.** ✅ **Closed.** Run 30624657353 on
+PR #2 is green across all 13 jobs; see §6. Definition-of-Ready item 7 is
+satisfied for the PR pipeline. The release pipeline remains unproven until
+something is tagged.
+
+**Follow-up, not blocking.** The runner warns that `actions/checkout@v4` and
+`actions/setup-node@v4` target Node 20 and are being forced onto Node 24. The
+jobs pass today. Bumping to `@v5` was left out of this task rather than guessed
+at, because breaking a pipeline whose whole purpose is to prove it works would
+be a poor trade for silencing a warning.
 
 **Scope note.** The work order authorises `.gitkeep` scaffolding for `apps/`,
 `packages/`, `prisma/`, `tests/`, `infra/`. Four more were created —

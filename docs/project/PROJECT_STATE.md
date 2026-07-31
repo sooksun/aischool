@@ -38,8 +38,11 @@ load from the repo root; `node scripts/orchestration/validate-ownership.mjs` and
 Three items from SEIP-OPS-001 need repository-admin action and are open:
 - `develop` does not exist; `main` is the only branch.
 - Branch protection is not active, so charter rule 3 is unenforced.
-- The CI skeleton has not yet been proven green end to end (Definition of Ready
-  item 7).
+
+Definition of Ready item 7 (pipeline proven, not assumed) is **satisfied for the
+PR pipeline**: run 30624657353 on PR #2 is green across all 13 jobs, with the
+ownership and gate validators executing on the runner. The release pipeline is
+untested until a `v*` tag exists.
 
 See `.ai-team/handoffs/SEIP-OPS-001.md` §8 for the exact steps.
 
