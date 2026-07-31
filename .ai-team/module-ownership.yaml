@@ -1,0 +1,125 @@
+# Single source of truth for module ownership and review authority (ADR-0002 §4).
+#
+# Precedence when documents disagree (ADR-0002 §6):
+#   ADR > module-ownership.yaml > task-board.yaml > agent instruction files > narrative docs
+#
+# Invariants enforced by scripts/orchestration/validate-ownership.mjs:
+#   - every path glob has exactly one owner (no path is claimed by two modules)
+#   - every `allowed_paths` entry on the task board is covered by exactly one module
+#   - every module path is represented in .github/CODEOWNERS
+#
+# Paths are repo-root-relative. `**` means "this subtree".
+
+# Drop-boxes: paths any task owner may write to under its own task ID, without
+# taking ownership of the module. Review authority still belongs to the owning
+# module below. Added by SEIP-OPS-001 to describe behaviour the charter already
+# assumes — every agent files its own handoff, takes its own locks, and codex
+# has already filed docs/reviews/SEIP-DB-000-feasibility.md into a grok-owned
+# path. Without this list the ownership model reads as a violation. Flagged for
+# grok's review.
+shared_write_paths:
+  - .ai-team/handoffs/**
+  - .ai-team/file-locks.yaml
+  - docs/reviews/**
+
+# Intentional narrower-inside-broader ownership. A carve-out wins over the
+# module that contains it, because the most specific path always decides.
+# Listing it here is what makes it intentional rather than an accidental
+# double-claim — the validator rejects any nested cross-module overlap that is
+# not on this list, and requires the carve-out's CODEOWNERS rule to appear
+# *after* the broader rule (GitHub applies the last matching rule).
+#
+# These two exist because SPRINT-0 assigns the data model to codex and the UX
+# flow to antigravity, while `docs/architecture/**` belongs to claude. ADR-0002
+# §5 did not cover it; found by validate-ownership.mjs during SEIP-OPS-001 and
+# flagged for grok's review.
+carve_outs:
+  - docs/architecture/data-model/**
+  - docs/architecture/ux/**
+
+modules:
+  orchestration:
+    owner: claude
+    reviewer: grok
+    description: >
+      The operating system itself — orchestration state, CI wiring, and the four
+      agent instruction files. Added by SEIP-OPS-001 to close finding F8.
+      ADR-0002 §5 declares `.ai-team/**`, `.github/**` and
+      `scripts/orchestration/**`. The instruction files and root repo config are
+      assigned here because ADR-0002 §1 makes SEIP-OPS-001 responsible for
+      placing and correcting them and no other module claimed them; this
+      assignment goes beyond ADR-0002 §5 and is flagged for grok's review.
+    paths:
+      - .ai-team/**
+      - .github/**
+      - scripts/orchestration/**
+      - CLAUDE.md
+      - AGENTS.md
+      - ANTIGRAVITY.md
+      - GROK.md
+      - .gitignore
+      - .gitattributes
+      - docs/README.md
+
+  architecture:
+    owner: claude
+    reviewer: grok
+    paths:
+      - docs/architecture/**
+      - docs/contracts/**
+      - docs/decisions/**
+      - docs/project/**
+
+  data-model:
+    owner: codex
+    reviewer: grok
+    description: >
+      Data model design documents. Carved out of `architecture` so SEIP-DB-000
+      (codex) can write its ERD and entity dictionary without claude owning the
+      output. Implementation of the schema lives in the `backend` module.
+    paths:
+      - docs/architecture/data-model/**
+
+  ux-design:
+    owner: antigravity
+    reviewer: claude
+    description: >
+      UX flow design documents. Carved out of `architecture` so SEIP-UI-000
+      (antigravity) owns its own design output.
+    paths:
+      - docs/architecture/ux/**
+
+  backend:
+    owner: codex
+    reviewer: grok
+    paths:
+      - apps/api/**
+      - apps/worker/**
+      - packages/database/**
+      - packages/auth/**
+      - packages/backend-shared/**
+      - prisma/**
+      - database/**
+      - infra/docker/**
+      - tests/backend/**
+
+  frontend:
+    owner: antigravity
+    reviewer: claude
+    paths:
+      - apps/web/**
+      - packages/ui/**
+      - packages/design-tokens/**
+      - tests/frontend/**
+      - public/**
+
+  quality:
+    owner: grok
+    reviewer: claude
+    paths:
+      - tests/e2e/**
+      - tests/security/**
+      - tests/regression/**
+      - docs/qa/**
+      - docs/reviews/**
+      - scripts/security/**

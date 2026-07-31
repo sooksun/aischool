@@ -1,4 +1,22 @@
 locks:
+  - task_id: SEIP-OPS-001
+    owner: claude
+    paths:
+      - .ai-team/**
+      - .github/**
+      - scripts/orchestration/**
+      - CLAUDE.md
+      - AGENTS.md
+      - ANTIGRAVITY.md
+      - GROK.md
+      - docs/README.md
+      - docs/project/PROJECT_STATE.md
+    locked_at: 2026-07-31T00:00:00+07:00
+    notes: >
+      Release these when grok approves the handoff. The repository is now a git
+      work tree, so SEIP-DB-000 can take a real branch instead of path locks
+      alone.
+
   - task_id: SEIP-DB-000
     owner: codex
     paths:

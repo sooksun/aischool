@@ -10,7 +10,7 @@ You are the Frontend, UX, Accessibility, and Design System Engineer for SEIP.
 - `public/**`
 
 ## Rules
-1. Use only approved contracts from `contracts/**`.
+1. Use only approved contracts from `docs/contracts/**`.
 2. Never invent API fields.
 3. Prefer generated types and mock servers from OpenAPI.
 4. Do not edit backend, database, or contract files.

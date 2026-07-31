@@ -26,7 +26,22 @@ No production feature code until the Definition of Ready to Build gate in `proje
 4. SEIP-ARCH-002 (claude) — contract lock → Definition of Ready to Build
 
 ## Active Tasks
-See `.ai-team/task-board.yaml`. Only SEIP-OPS-001 is `ready`; all others are `blocked` on their wave predecessor.
+See `.ai-team/task-board.yaml` (now at the repository root — ADR-0002 §1).
+SEIP-OPS-001 is `review_requested`, awaiting grok. All others remain `blocked`:
+Wave 1 unblocks when SEIP-OPS-001 is **approved**, not when it is submitted.
+
+## Repository Status
+The operating system is executable. Agent instruction files and `.ai-team/`
+load from the repo root; `node scripts/orchestration/validate-ownership.mjs` and
+`validate-gates.mjs` run in CI on every pull request.
+
+Three items from SEIP-OPS-001 need repository-admin action and are open:
+- `develop` does not exist; `main` is the only branch.
+- Branch protection is not active, so charter rule 3 is unenforced.
+- The CI skeleton has not yet been proven green end to end (Definition of Ready
+  item 7).
+
+See `.ai-team/handoffs/SEIP-OPS-001.md` §8 for the exact steps.
 
 ## Major Decisions
 - ADR-0001 — Technology stack: Node/TypeScript monorepo (Accepted)
@@ -48,5 +63,8 @@ See `project/SPRINT-0.md` for detail and owners.
 - Uploaded evidence contains personal data
 - Video storage can grow quickly
 - Multiple AI agents may create incompatible assumptions unless contracts are locked
-- Bootstrap (SEIP-OPS-001) is single-threaded and blocks all other agents
-- `docs/` currently duplicates `aischool-docs.zip`; the zip will drift once git exists
+- ~~Bootstrap (SEIP-OPS-001) is single-threaded and blocks all other agents~~ — submitted, pending grok review
+- `docs/` duplicates `aischool-docs.zip`. Decision recorded: **ignore, keep on disk, do not track**.
+  The zip was not deleted (needs user confirmation) and will drift now that git is the source of truth.
+- CODEOWNERS resolves every module to one human account because the AI owners have no
+  GitHub identity — GitHub enforces *a* review, not *the right agent's* review
