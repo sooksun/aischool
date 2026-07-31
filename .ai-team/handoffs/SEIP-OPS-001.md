@@ -13,7 +13,7 @@ agent can read `.ai-team/task-board.yaml` at the path its instruction file
 names, every referenced path has exactly one owner, and CI enforces both of
 those claims on every pull request instead of leaving them as prose.
 
-Three of the eleven acceptance criteria are **not** satisfied by this change
+Two of the eleven acceptance criteria are **not** satisfied by this change
 because they need repository-admin rights, not a commit. They are listed under
 "Not done" with the exact steps required.
 
@@ -24,7 +24,9 @@ from the repo root and Codex loads `AGENTS.md` from the repo root. In `docs/`
 neither file was ever loaded by the tool it was written for, and every
 `.ai-team/...` reference inside them resolved to nothing.
 
-Per ADR-0002 §1, moved with `git mv` (history preserved):
+Per ADR-0002 §1, moved with `git mv`. Git recorded 20 of the 21 files as
+renames; `module-ownership.yaml` was rewritten far enough in the same commit
+that similarity detection logged it as a delete plus an add instead.
 
 | From | To |
 |---|---|
@@ -87,13 +89,15 @@ fix is an ADR amendment and a board correction, not a change to the validator.
 ## 4. Branch protection mechanism (OPEN-1)
 
 OPEN-1 closed 2026-07-16 in favour of GitHub. Enforcement is therefore
-server-side and cannot be committed:
+server-side and cannot be committed. Of the three parts, **only CODEOWNERS is
+actually in place** — the two settings are described here as the target
+configuration and are still open in §8:
 
-- **Protected branches** on `main` and `develop` — require a pull request,
-  require review from Code Owners, require status checks to pass.
-- **`.github/CODEOWNERS`** — every module path from `module-ownership.yaml` has a
-  rule, generated in the same order as the ownership file.
-- **GitHub Actions** — the required status check is `Orchestration integrity`.
+| Part | State |
+|---|---|
+| **Protected branches** on `main` and `develop` — require a pull request, require review from Code Owners, require status checks to pass | ❌ not configured; direct pushes to `main` are currently accepted |
+| **`.github/CODEOWNERS`** — every module path from `module-ownership.yaml` has a rule, listed in the same order as the ownership file | ✅ in place, enforced by the validator |
+| **GitHub Actions** — `Orchestration integrity` as the required status check | ⚠️ the job runs and is green, but nothing yet *requires* it |
 
 CODEOWNERS carries a compromise worth flagging: the logical owners
 (claude/codex/antigravity/grok) have no GitHub identity, so every rule resolves
@@ -209,8 +213,8 @@ history is satisfactory, but that is your call, not this task's.
 
 ## 8. Not done
 
-Three acceptance criteria are not met. All three need repository-admin actions
-that a pull request cannot perform.
+Two acceptance criteria are not met. Both need repository-admin actions that a
+pull request cannot perform.
 
 **AC 1 — `develop` branch.** Only `main` exists. This session was constrained to
 push a single branch (`claude/remote-control-5aclif`); creating `develop` and
@@ -247,12 +251,39 @@ be a poor trade for silencing a warning.
 promise nobody can check. Same class of action, wider than the letter of the
 work order.
 
-**Board note.** `docs/project/PROJECT_STATE.md` and `docs/README.md` were added
-to this task's own `allowed_paths` during execution. Editing one's own
-permissions deserves a reviewer's eye: the justification is that PROJECT_STATE
-upkeep is a standing claude responsibility (`CLAUDE.md` rule 9) and README
-pointed at the pre-move file locations, but grok should confirm rather than
-assume.
+**Board note.** Three paths were added to this task's own `allowed_paths` during
+execution — `docs/project/PROJECT_STATE.md`, `docs/README.md` and
+`docs/project/SPRINT-0.md`. All three are claude-owned, but editing one's own
+permissions deserves a reviewer's eye rather than an assumption. Justification:
+PROJECT_STATE upkeep is a standing claude responsibility (`CLAUDE.md` rule 9);
+README pointed at the pre-move file locations; and SPRINT-0 carried two of the
+stale references described below.
+
+**Stale references found by a proofreading pass (finding F3, wider than the
+ADR scoped it).** ADR-0002 scoped path corrections to the agent instruction
+files. A sweep of all 15 files under `docs/` found seven more references that
+were written when `docs/` was the tree root and now resolve to nothing from the
+repository root:
+
+| File | Was | Now |
+|---|---|---|
+| `docs/project/PROJECT_STATE.md` | `project/SPRINT-0.md` (×3) | `docs/project/SPRINT-0.md` |
+| `docs/project/PROJECT_STATE.md` | `architecture/evaluation-framework.md` | `docs/architecture/evaluation-framework.md` |
+| `docs/project/PROJECT_STATE.md` | `decisions/` | `docs/decisions/` |
+| `docs/project/SPRINT-0.md` | `contracts/contract-policy.md` | `docs/contracts/contract-policy.md` |
+| `docs/project/SPRINT-0.md` | `architecture/evaluation-framework.md` | `docs/architecture/evaluation-framework.md` |
+
+All seven are the same defect class as F3, in claude-owned files, and the fix is
+mechanical, so they were corrected rather than deferred — claiming F3 closed
+while leaving known-broken paths in the document Wave 1 agents read would have
+been inaccurate.
+
+One apparent match was **not** changed: ADR-0002 §2 says "There is no root-level
+`contracts/` directory." That reference is deliberately describing the wrong
+path, and is correct as written.
+
+This sweep is not automated. A link checker over `docs/` would belong to
+SEIP-QA-001 (grok) alongside the other gate commands; it is not wired up here.
 
 **Branch name.** The board specifies
 `ai/claude/SEIP-OPS-001-repo-bootstrap`. This work was done on

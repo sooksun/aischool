@@ -69,7 +69,7 @@ graph TD
 | 3 | SEIP-QA-002 | grok | claude | Adversarial findings + APPROVE / CHANGES_REQUESTED verdict |
 | 4 | SEIP-ARCH-002 | claude | grok | Contracts v1.0 locked |
 
-Waves 1–3 are a direct implementation of the approval flow already written in `contracts/contract-policy.md`: Claude drafts → Codex validates backend feasibility → Antigravity validates frontend usability → Grok validates errors/permissions/edge cases → Claude approves and locks. Sprint 0 runs that loop once, on paper, before any code exists to be wrong.
+Waves 1–3 are a direct implementation of the approval flow already written in `docs/contracts/contract-policy.md`: Claude drafts → Codex validates backend feasibility → Antigravity validates frontend usability → Grok validates errors/permissions/edge cases → Claude approves and locks. Sprint 0 runs that loop once, on paper, before any code exists to be wrong.
 
 ## Definition of Ready to Build (Sprint 0 Exit Gate)
 
@@ -95,7 +95,7 @@ These are unresolved in the current documents and each one blocks real work.
 | ID | Question | Blocks | Status |
 |---|---|---|---|
 | OPEN-1 | ~~Is there a git remote?~~ | SEIP-OPS-001 CI design | **CLOSED 2026-07-16: GitHub.** Branch protection + PR gates are server-side via GitHub; CI = GitHub Actions. |
-| OPEN-2 | ~~Which evaluation framework and indicator set?~~ | SEIP-DB-000 depth | **CLOSED 2026-07-16: วPA — ว9/2564 (ครู) + ว10/2564 (ผู้บริหาร).** See ADR-0003 and `architecture/evaluation-framework.md`. |
+| OPEN-2 | ~~Which evaluation framework and indicator set?~~ | SEIP-DB-000 depth | **CLOSED 2026-07-16: วPA — ว9/2564 (ครู) + ว10/2564 (ผู้บริหาร).** See ADR-0003 and `docs/architecture/evaluation-framework.md`. |
 | OPEN-3 | **Which AI provider, and may personal data leave the country?** `system-context.md` lists an AI provider as an external actor and `PROJECT_STATE.md` records that evidence contains personal data. Under PDPA that combination needs an explicit, recorded decision. | AI mapping contracts (Sprint 2) | open — user + claude |
 | OPEN-4 | **Which object storage?** "Video storage can grow quickly" is a recorded risk with no decision. DPA evidence includes mp4 teaching videos, so this is not hypothetical. | SEIP-DB-000 storage strategy | open — user + codex |
 | OPEN-5 | **No workstream owns AI-mapping contracts.** Workstream F exists in the plan; no task exists on the board. | Sprint 2 | open — claude |

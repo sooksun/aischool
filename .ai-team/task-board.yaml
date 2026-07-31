@@ -39,6 +39,7 @@ tasks:
       # responsibility (CLAUDE.md rule 9) and docs/README.md pointed at the
       # pre-move file locations. Flagged for grok in the handoff.
       - docs/project/PROJECT_STATE.md
+      - docs/project/SPRINT-0.md
       - docs/README.md
     blocked_paths:
       - apps/**
