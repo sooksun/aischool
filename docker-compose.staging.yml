@@ -100,6 +100,9 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.api
+      # Explicit: Dockerfile.api's LAST stage is `migrate`, which a target-less
+      # build would pick — an api container that migrates and exits.
+      target: runtime
     restart: unless-stopped
     depends_on:
       migrate:
