@@ -79,6 +79,10 @@ Members, taxonomy, cycles/rounds, agreements (PA1 and ประเด็นท�
 | `oasdiff breaking` 3.1.0 → 4.0.0 (via `scripts/security/check-contract-compatibility.mjs`) | **87 breaking items**, accepted because the major version is bumped. Every one is on the evidence, mapping or upload surface: 30 enum additions, 25 + 13 removed response properties, 5 new required headers (`Idempotency-Key` / `If-Match`), 4 removed request properties, 3 removed paths, and 5 enum removals. **None** touches members, taxonomy, cycles, agreements or auth. |
 | Dart client: swagger_parser 1.45.0 + retrofit_generator 10.2 + json_serializable 6.14 (SEIP-P0-004 spike) | **pass**: 16 clients, 74 requests and 170 models generate; `build_runner` builds; `dart analyze --fatal-infos` is clean; 4 decode tests pass. CI now runs this as `Gate: dart client`. The fallback (openapi-generator) is **not needed**. |
 
+### What the S3 conformance suite established for the upload operations
+
+The server opens multipart uploads **without** `ChecksumAlgorithm`. Each `signUploadParts` URL signs `x-amz-checksum-sha256` as a header, so the store verifies every part. Whole-object integrity is the worker's re-hash against `UploadCreate.checksum_sha256`. No contract field changes; this is a server-side implementation rule (ADR-0013 conformance results).
+
 ### What the Dart spike changed in the draft
 
 1. **`SyncChange.data` (a `oneOf` with no discriminator) became one nullable property per entity.** swagger_parser compiled the oneOf, but as *try each type in order, take the first that parses*. That can bind a row to the wrong type when two schemas share their required fields. With `evidence` / `evidence_file` / `analysis` / `suggestion` / `mapping` / `notification` as separate fields, decoding is unambiguous in every generator, and a tombstone is simply all null.

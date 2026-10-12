@@ -29,9 +29,13 @@ services:
   seaweedfs:
     image: chrislusf/seaweedfs:4.48
     container_name: seip-seaweedfs
+    # Small volumes, fixed count: every bucket is a SeaweedFS collection with its
+    # own volumes, and -volume.max=0 (auto from free disk) ran out after a handful
+    # of buckets on a small dev/CI disk — PutObjectPart then fails with 500.
+    # Caps dev storage at 6.4 GB. Staging keeps 1024 MB / auto.
     command: >
       server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
-      -master.volumeSizeLimitMB=1024 -volume.max=0
+      -master.volumeSizeLimitMB=64 -volume.max=100
     ports:
       - "8333:8333"   # S3 API
     volumes:

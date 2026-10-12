@@ -231,6 +231,8 @@ jobs:
           # REPORTS-AI merge; found while fixing the red develop runs (SEC-002).
           npm run build --workspace apps/worker
           node scripts/ci/ensure-bucket.mjs
+      - name: S3 conformance (ADR-0013 §4) — multipart, checksums, ListParts resume, Object Lock
+        run: npm run test:storage
       - name: apps/api evidence-workflow integration tests
         run: npm run test:integration --workspace apps/api
       - name: packages/database repository integration tests

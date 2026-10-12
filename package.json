@@ -40,7 +40,8 @@
     "dev:api": "npm run dev --workspace apps/api",
     "dev:web": "npm run dev --workspace apps/web",
     "dev:worker": "npm run build:libs && npm run build --workspace apps/worker && npm run start --workspace apps/worker",
-    "db:bootstrap": "psql -v ON_ERROR_STOP=1 -f scripts/db/bootstrap-roles.sql"
+    "db:bootstrap": "psql -v ON_ERROR_STOP=1 -f scripts/db/bootstrap-roles.sql",
+    "test:storage": "node --env-file-if-exists=.env --test \"tests/storage/*.test.mjs\""
   },
   "dependencies": {
     "@prisma/client": "7.10.0"

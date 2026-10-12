@@ -1050,3 +1050,26 @@ tasks:
       - build_runner + dart analyze --fatal-infos clean                           # DONE
       - Decode tests for sync / suggestion / upload session                       # DONE (4)
       - Gate green in CI                                                           # DONE — run 38306379490 (14/14)
+
+  - id: SEIP-P0-005
+    title: "P0 — S3 conformance suite (ADR-0013 §4)"
+    status: review              # 2026-10-12 — 4/4 locally (x3); in CI integration gate
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-001]
+    decisions: [ADR-0013, ADR-0016, ADR-0018]
+    primary_paths:
+      - tests/storage/s3-conformance.test.mjs
+      - docker-compose.yml
+      - scripts/ci/start-seaweedfs.sh
+    notes: >
+      Proves presigned single PUT size binding, checksummed presigned multipart
+      parts (corrupt part rejected), ListParts resume, server-side complete,
+      abort, and Object Lock retention + legal hold on SeaweedFS 4.48. Found:
+      ChecksumAlgorithm on CreateMultipartUpload breaks server-side complete on
+      SeaweedFS (ListParts has no part checksums) — rule recorded in ADR-0013 and
+      CCR-017. Found: -volume.max=0 exhausts volumes after a few buckets on a small
+      disk; dev/CI now 64 MB x 100.
+    acceptance_criteria:
+      - Suite green against SeaweedFS                                              # DONE
+      - Runs in CI                                                                 # PENDING
+      - Same suite green against Amazon S3 ap-southeast-7                          # OPEN — P1 (needs the AWS account)

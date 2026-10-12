@@ -17,6 +17,16 @@
 3. **ลบ MinIO ออก** จาก CI และ compose ทั้งหมดใน P0
 4. P0 CI รัน **conformance suite** สำหรับ presigned multipart, checksum และ Object Lock กับ storage ทุกตัวที่รองรับ
 
+## Conformance results (P0, 2026-10-12)
+`tests/storage/s3-conformance.test.mjs` (`npm run test:storage`, run in the CI integration gate) against SeaweedFS 4.48:
+- presigned single PUT binds Content-Length ✔
+- presigned multipart UploadPart with `x-amz-checksum-sha256` as a signed header ✔, and a corrupted part is rejected (400) ✔
+- ListParts resume ✔, server-side complete from ListParts ✔, abort ✔
+- Object Lock governance retention and legal hold both refuse deletion ✔
+- **Constraint found:** do **not** set `ChecksumAlgorithm` on CreateMultipartUpload. SeaweedFS's ListParts does not return part checksums, so a full-object-checksum complete fails `InvalidRequest`. Parts are still verified one by one. Whole-object integrity comes from the worker's SHA-256 re-hash (ADR-0018).
+- **To verify in P1:** run the same suite against Amazon S3 ap-southeast-7.
+- **Dev/CI sizing:** `-master.volumeSizeLimitMB=64 -volume.max=100`. Every bucket is a SeaweedFS collection with its own volumes, and with `-volume.max=0` a small disk ran out after a few buckets (500 on PutObjectPart). Staging keeps 1024 MB / auto.
+
 ## Options Considered
 1. **S3 Bangkok + SeaweedFS (เลือก)** — managed ใน production และใช้ open source ที่ยังดูแลอยู่สำหรับ dev/Thai-owned
 2. MinIO rebuild ของ Chainguard — ใช้ได้ระยะสั้น แต่ขึ้นกับผู้ rebuild รายเดียวและต้องพิจารณาผลของ AGPLv3
