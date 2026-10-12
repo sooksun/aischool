@@ -1133,6 +1133,6 @@ tasks:
       - "contract compat: 95 breaking items accepted on the 2.6.0 → 4.0.0 major bump"               # DONE (local oasdiff)
       - "test:backend 20, database 18, worker 23, api 85, security 9, storage 4, e2e 13"              # DONE (local, fresh DB)
       - "dart client generate + analyze + test; mobile analyze + test"                                # DONE (local)
-      - CI green on the pushed commit                                                                 # OPEN
+      - "CI green on the pushed commit"                                                               # DONE — run 38321728017 on 03f64b8, 15/15 jobs
       - "min_acr (acr ≥ 2 for validate / return / cross-person export) enforced"                     # OPEN — needs step-up auth (ADR-0014), P2
       - "web hides v2 screens when FEATURE_SCORING=false"                                            # OPEN — web has no flag yet; production keeps the default off

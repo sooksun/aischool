@@ -162,7 +162,9 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
-## Verified runs (2026-10-12, local — SEIP-P1-001, contract 4.0.0 applied)
+## Verified runs (2026-10-12, local and CI — SEIP-P1-001, contract 4.0.0 applied)
+
+CI: run [38321728017](https://github.com/sooksun/aischool/actions/runs/38321728017) on `03f64b8` — all 15 jobs green.
 
 Fresh database (bootstrap → migrate as `seip_migrator` → seed). `FEATURE_SCORING=true`
 for the API suites, as in CI, so the frozen v2 scoring and report routes keep their

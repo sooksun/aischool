@@ -6,7 +6,7 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
-> **Contract 4.0.0 is in force (SEIP-P1-001, in review):** the owner approved [CCR-017](../reviews/CCR-017-contract-4.0.0.md) on 2026-10-12, and it is applied.
+> **Contract 4.0.0 is in force (SEIP-P1-001, in review):** the owner approved [CCR-017](../reviews/CCR-017-contract-4.0.0.md) on 2026-10-12, and it is applied. CI is green on 03f64b8 (run 38321728017, 15/15 jobs).
 > - Evidence belongs to a **person**, not a school (ADR-0015).
 > - Uploads go through **upload sessions**: one PUT up to 16 MiB, S3 multipart above that, and the server completes the upload.
 > - Mappings are **two-tier**: the owner confirms, then the director or committee validates or returns, keyed on the framework version.
