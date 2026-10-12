@@ -1071,5 +1071,29 @@ tasks:
       disk; dev/CI now 64 MB x 100.
     acceptance_criteria:
       - Suite green against SeaweedFS                                              # DONE
-      - Runs in CI                                                                 # PENDING
+      - Runs in CI                                                                 # PENDING (integration gate step)
       - Same suite green against Amazon S3 ap-southeast-7                          # OPEN — P1 (needs the AWS account)
+
+  - id: SEIP-P0-006
+    title: "P0 — Flutter skeleton calling the API through the generated Dart client"
+    status: review              # 2026-10-12 — analyze clean, widget tests + live API test pass
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-004]
+    decisions: [ADR-0014, ADR-0016]
+    primary_paths:
+      - apps/mobile/
+      - .github/workflows/ci.yml
+    notes: >
+      Flutter 3.47.7 / Dart 3.13.5, Android minSdk 24, iOS. Sign-in → getCurrentUser
+      via clients/dart/seip_api (generated). Tokens in memory only until Keycloak
+      PKCE (P1). Debug-only cleartext for the dev API. Live test signs in as the
+      e2e teacher against the real API and passed on the host VM; an Android
+      emulator run is NOT verified (no emulator in this environment). New CI job
+      "Gate: mobile" (15th). apps/mobile has no package.json, so npm workspaces
+      (apps/*) skip it — verified with npm query and typecheck.
+    acceptance_criteria:
+      - Calls the API only through the generated client                           # DONE
+      - flutter analyze --fatal-infos clean; widget tests pass                     # DONE (2)
+      - Live sign-in against the real API                                          # DONE (host VM)
+      - On an Android emulator (P0 exit wording)                                   # OPEN — needs a machine with an emulator
+      - Gate green in CI                                                           # PENDING

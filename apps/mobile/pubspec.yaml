@@ -1,0 +1,25 @@
+name: seip_mobile
+description: >
+  SEIP Flutter app (ADR-0016): capture evidence once — photo, scan, video, voice,
+  share-in — with an encrypted offline outbox and resumable uploads. P0 skeleton:
+  talks to the API only through the generated client (clients/dart/seip_api).
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  dio: ^5.11.0
+  seip_api:
+    path: ../../clients/dart/seip_api
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

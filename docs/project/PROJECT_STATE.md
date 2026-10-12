@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Flutter skeleton (SEIP-P0-006):** `apps/mobile` signs in and reads `/auth/me` through the generated client — live test against the real API passes; emulator run still to do. **S3 conformance suite (SEIP-P0-005)** green on SeaweedFS.
+>
 > **Dart client spike passed (SEIP-P0-004):** swagger_parser generates, builds and analyses the 4.0.0 draft cleanly; new CI gate `dart client`.
 >
 > **Contract 4.0.0 drafted (SEIP-P0-003): [CCR-017](../reviews/CCR-017-contract-4.0.0.md) awaits owner approval** — breaking; drafts in `docs/contracts/drafts/`, applied in P1.

@@ -1,0 +1,20 @@
+import 'package:flutter/material.dart';
+
+import 'src/api.dart';
+import 'src/screens.dart';
+
+void main() => runApp(SeipApp(session: SeipSession()));
+
+class SeipApp extends StatelessWidget {
+  const SeipApp({super.key, required this.session});
+  final SeipSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'SEIP',
+      theme: ThemeData(colorSchemeSeed: const Color(0xFF1B5E9A), useMaterial3: true),
+      home: LoginScreen(session: session),
+    );
+  }
+}

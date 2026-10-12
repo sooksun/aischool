@@ -122,6 +122,29 @@ jobs:
           dart analyze --fatal-infos
           dart test
 
+  mobile:
+    name: "Gate: mobile"
+    runs-on: ubuntu-latest
+    # ADR-0016: the Flutter app builds against the generated client and its
+    # widget tests pass. (Device/emulator runs are not part of CI.)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7
+          channel: stable
+      - name: Generate the API client the app depends on
+        working-directory: clients/dart/seip_api
+        run: |
+          dart pub get
+          tool/generate.sh
+      - name: Analyse and test
+        working-directory: apps/mobile
+        run: |
+          flutter pub get
+          flutter analyze --fatal-infos
+          flutter test
+
   # ---------- SELF-ARMING gates (activate when their subject exists) ----------
   format:
     name: "Gate: format"
