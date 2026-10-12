@@ -977,7 +977,7 @@ tasks:
 
   - id: SEIP-P0-002
     title: "P0 week 2 — Prisma 6.19 → 7.10 (ADR-0012 §5)"
-    status: review              # 2026-10-12 — all suites green locally; CI pending
+    status: review              # 2026-10-12 — 13/13 CI green (run 38304129059); awaiting owner review
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P0-001]
     decisions: [ADR-0012]
@@ -1000,4 +1000,4 @@ tasks:
       - "test:backend 20, api 78, database 17, worker 21, security 6, e2e 12"     # DONE (local, fresh DB)
       - npm audit high clean                                                       # DONE — 0
       - "api runtime image builds — NOT verifiable in this sandbox (npm inside docker build hits the session proxy: SELF_SIGNED_CERT_IN_CHAIN); CI does not build images"   # OPEN
-      - CI 13/13 green again after the upgrade (P0 exit criterion)                 # PENDING
+      - CI 13/13 green again after the upgrade (P0 exit criterion)                 # DONE — run 38304129059 on cefc5d7
