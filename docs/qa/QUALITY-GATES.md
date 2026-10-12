@@ -162,6 +162,16 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Gate defect fixed 2026-10-12: contract compatibility could pass unchecked
+
+`scripts/security/check-contract-compatibility.mjs` runs oasdiff via `docker run`
+when it is not on PATH (always, in CI). It parsed `result.stdout || '[]'`, so a
+failed image pull (Docker Hub 429 → exit 125, empty stdout) read as "no breaking
+changes" and the gate passed without comparing anything. Seen live on the CCR-017
+draft: 87 breaking items reported as none. Now a non-0/1 exit or empty output
+fails the gate (oasdiff prints `[]` when clean). Verified: identical specs pass;
+a docker that exits 125 fails.
+
 ## Verified runs (2026-10-12, local — P0-002 Prisma 7.10 upgrade)
 
 Same stack as below, fresh database (bootstrap → migrate as `seip_migrator` →

@@ -1001,3 +1001,27 @@ tasks:
       - npm audit high clean                                                       # DONE — 0
       - "api runtime image builds — NOT verifiable in this sandbox (npm inside docker build hits the session proxy: SELF_SIGNED_CERT_IN_CHAIN); CI does not build images"   # OPEN
       - CI 13/13 green again after the upgrade (P0 exit criterion)                 # DONE — run 38304129059 on cefc5d7
+
+  - id: SEIP-P0-003
+    title: "P0 week 2 — draft contract 4.0.0 (CCR-017) + internal AI contract"
+    status: review              # 2026-10-12 — draft done; BREAKING → owner approval required
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-001]
+    decisions: [ADR-0010, ADR-0015, ADR-0016, ADR-0017, ADR-0018]
+    primary_paths:
+      - docs/reviews/CCR-017-contract-4.0.0.md
+      - docs/contracts/drafts/openapi-4.0.0.yaml
+      - docs/contracts/drafts/internal-ai-0.1.0.yaml
+      - scripts/security/check-contract-compatibility.mjs
+    notes: >
+      Draft only — nothing in force changes; apply in P1 after approval. 49 → 74
+      operations (+28, −3, 9 tagged v2). oasdiff: 87 breaking items, all on the
+      evidence/mapping/upload surface. Found and fixed a fail-open in the
+      contract-compatibility gate: when `docker run tufin/oasdiff` failed (Docker
+      Hub 429), empty stdout parsed as `[]` and the gate passed unchecked.
+    acceptance_criteria:
+      - Draft lints clean with the gate's linter and generates TS types           # DONE
+      - Breaking list produced by the gate's own checker, recorded in the CCR     # DONE — 87
+      - Permissions / error-code / event deltas and migration plan in the CCR     # DONE
+      - Dart client compiles from the draft (swagger_parser spike)                # NEXT — SEIP-P0-004
+      - Owner approves CCR-017                                                     # PENDING

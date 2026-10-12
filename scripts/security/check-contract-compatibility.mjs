@@ -64,9 +64,21 @@ const result = runOasdiff(baseFile, headFile);
 // oasdiff exits 0 (no breaking changes) or 1 (breaking changes found) — both are
 // normal outcomes here, we branch on content, not exit code. A genuine tool
 // failure (e.g. bad YAML) exits with something else / empty stdout.
+// Fail closed when oasdiff itself did not run. Before this check, a docker pull
+// failure (Docker Hub 429, exit 125) produced empty stdout, `|| '[]'` turned it
+// into "no breaking changes", and the gate PASSED without having compared
+// anything — found 2026-10-12 while diffing the 4.0.0 draft (87 real breaks
+// reported as none). oasdiff prints `[]` when there is nothing to report, so
+// empty output is never a valid answer.
+if (result.error || ![0, 1].includes(result.status) || !result.stdout?.trim()) {
+  console.error(`oasdiff did not run (status ${result.status}${result.error ? `, ${result.error.message}` : ''}) — refusing to pass unchecked`);
+  console.error(result.stderr);
+  process.exit(1);
+}
+
 let breaking = [];
 try {
-  breaking = JSON.parse(result.stdout || '[]');
+  breaking = JSON.parse(result.stdout);
 } catch {
   console.error('oasdiff did not return parseable JSON:');
   console.error(result.stdout);

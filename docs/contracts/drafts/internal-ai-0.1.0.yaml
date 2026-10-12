@@ -1,0 +1,165 @@
+# SEIP internal AI contract — 0.1.0 DRAFT (CCR-017, ADR-0010). NOT IN FORCE.
+#
+# Private listener only: mTLS, reachable over Direct Connect from the GPU node,
+# excluded from every client bundle. The GPU node PULLS work — it holds no
+# database credentials, no S3 credentials beyond the presigned URLs in a lease,
+# and needs no inbound port. Nothing here ever leaves Thailand (ADR-0010 D1).
+openapi: 3.1.0
+info:
+  title: SEIP internal AI job API
+  version: 0.1.0
+  license:
+    name: UNLICENSED (private)
+    identifier: LicenseRef-SEIP-Private
+  description: >
+    Lease/heartbeat/submit/fail protocol between the SEIP control plane (Bangkok)
+    and self-hosted inference workers. Jobs are idempotent on job_id; a lease that
+    is not heartbeated before lease_until returns to the queue. The worker never
+    decides anything user-visible: submitted suggestions are validated
+    (ai.validate — quotes and locators re-checked server-side) and calibrated
+    before any client can see them, and nothing is ever auto-confirmed.
+servers:
+  - url: https://ai-internal.seip.invalid/internal/ai/v1
+security:
+  - mtls: []
+tags:
+  - name: jobs
+    description: Inference job leasing
+paths:
+  /jobs/lease:
+    post:
+      operationId: leaseAiJobs
+      summary: Lease up to `max` jobs this worker can run
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaseRequest' }
+      responses:
+        '200':
+          description: Leased jobs (possibly empty — long-poll up to 20 s)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LeasedJob' }
+        '400': { description: Malformed lease request or unknown capability }
+  /jobs/{jobId}/heartbeat:
+    post:
+      operationId: heartbeatAiJob
+      summary: Extend a lease
+      tags: [jobs]
+      parameters: [{ $ref: '#/components/parameters/JobId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Heartbeat' }
+      responses:
+        '200':
+          description: Lease extended
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lease_until]
+                properties:
+                  lease_until: { type: string, format: date-time }
+        '409': { description: Lease lost — another worker owns the job or it was cancelled; stop work }
+  /jobs/{jobId}/result:
+    post:
+      operationId: submitAiJobResult
+      summary: Submit a result (idempotent on job_id + lease_token)
+      tags: [jobs]
+      parameters: [{ $ref: '#/components/parameters/JobId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JobResult' }
+      responses:
+        '204': { description: Accepted for validation }
+        '409': { description: Lease lost }
+        '422': { description: Result does not match the job's output schema (rejected; job retried on another tier) }
+  /jobs/{jobId}/fail:
+    post:
+      operationId: failAiJob
+      summary: Report a failure
+      tags: [jobs]
+      parameters: [{ $ref: '#/components/parameters/JobId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JobFailure' }
+      responses:
+        '204': { description: 'Recorded — retried if retryable and attempts remain, otherwise dead-lettered' }
+        '409': { description: Lease lost }
+components:
+  securitySchemes:
+    mtls:
+      type: mutualTLS
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Capability:
+      type: string
+      enum: [ocr, asr, caption, embed, map_fast, map_dense]
+    LeaseRequest:
+      type: object
+      required: [worker_id, capabilities, max]
+      properties:
+        worker_id: { type: string }
+        capabilities: { type: array, items: { $ref: '#/components/schemas/Capability' } }
+        model_pack: { type: string, enum: [Q, G] }
+        max: { type: integer, minimum: 1, maximum: 32 }
+    LeasedJob:
+      type: object
+      required: [job_id, lease_token, lease_until, capability, input]
+      properties:
+        job_id: { type: string, format: uuid }
+        lease_token: { type: string }
+        lease_until: { type: string, format: date-time }
+        capability: { $ref: '#/components/schemas/Capability' }
+        prompt_version: { type: [string, 'null'] }
+        input:
+          type: object
+          description: >
+            Capability-specific. Media arrives as presigned GET URLs (15 min) to the
+            redacted/proxy rendition — never the original unless the capability needs it.
+            map_* inputs carry segment texts (redacted) and the indicator descriptors of
+            the pinned framework version; never names or citizen IDs.
+    Heartbeat:
+      type: object
+      required: [lease_token]
+      properties:
+        lease_token: { type: string }
+        progress: { type: [number, 'null'], minimum: 0, maximum: 1 }
+    JobResult:
+      type: object
+      required: [lease_token, model_id, output]
+      properties:
+        lease_token: { type: string }
+        model_id: { type: string, description: ai_model registry id (repo + revision sha) }
+        tokens_in: { type: [integer, 'null'] }
+        tokens_out: { type: [integer, 'null'] }
+        gpu_ms: { type: [integer, 'null'] }
+        output:
+          type: object
+          description: >
+            map_*: xgrammar-constrained JSON — [{indicator_code, support, raw_score,
+            quotes: [{segment_id, quote}]}]. The control plane re-validates every quote
+            against the stored segment text; unmatched quotes are dropped, not trusted.
+    JobFailure:
+      type: object
+      required: [lease_token, retryable, code]
+      properties:
+        lease_token: { type: string }
+        retryable: { type: boolean }
+        code: { type: string }
+        message: { type: [string, 'null'], maxLength: 2000 }
