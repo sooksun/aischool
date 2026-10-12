@@ -108,6 +108,7 @@ enum EvidenceStatus {
 enum ScanStatus {
   pending
   clean
+  sanitised
   unscanned
   blocked
 }
@@ -122,15 +123,76 @@ enum StorageProvider {
 /// so that adding AI later is not a schema change — but a suggestion still requires
 /// human confirmation to count.
 enum MappingSource {
-  human
-  ai_suggested
+  ai_accepted
+  manual
 }
 
+enum EvidenceKind {
+  file
+  link
+  note
+}
+
+enum PerformedDateSource {
+  teacher
+  exif
+  ai_suggested_confirmed
+}
+
+enum ContainsLearners {
+  unknown
+  yes
+  no
+}
+
+/// Only `original` is uploaded by clients; every other role is a server rendition.
+enum FileRole {
+  original
+  review_720p
+  audio_16k
+  audio_proxy
+  keyframe
+  poster
+  ocr_pdf
+  blurred
+  redacted
+  dpa_ready
+}
+
+enum MediaState {
+  uploading
+  verifying
+  processing
+  ready
+  failed
+}
+
+enum UploadProtocol {
+  single_put
+  s3_multipart
+}
+
+enum UploadStatus {
+  open
+  completing
+  completed
+  aborted
+  expired
+}
+
+/// Two-tier confirmation (ADR-0015, CCR-017): the owner confirms; the director
+/// or an assigned committee member validates or returns. AI output is not a
+/// mapping until the owner accepts it.
 enum MappingStatus {
-  suggested
-  confirmed
-  rejected
+  owner_confirmed
+  validated
+  returned
   revoked
+}
+
+enum ValidatorRole {
+  director
+  committee
 }
 
 enum AssignmentStatus {
@@ -168,6 +230,7 @@ model Area {
   name    String
   schools School[]
   memberships SchoolMembership[]
+  controlledEvidence Evidence[]
 
   @@map("area")
 }
@@ -198,8 +261,25 @@ model School {
 
 /// Login identity. Separate from PersonnelProfile: an account is who you authenticate
 /// as; a profile is your employment record at a school.
+/// The human (ADR-0015). Owns the evidence portfolio across schools; a person
+/// may exist before they have an account (HR import, P1). Citizen-id columns
+/// (cid_hmac / cid_enc) arrive with the ThaID work in P1.
+model Person {
+  id          String   @id @default(uuid()) @db.Uuid
+  displayName String   @map("display_name")
+  status      String   @default("active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  account   UserAccount?
+  personnel PersonnelProfile[]
+  evidence  Evidence[]
+
+  @@map("person")
+}
+
 model UserAccount {
   id           String     @id @default(uuid()) @db.Uuid
+  personId     String?    @unique @map("person_id") @db.Uuid
   email        String     @unique                  // stored lowercase — enforced in app + CHECK
   displayName  String     @map("display_name")
   /// SEIP-API-001 addition: DB-000/DB-001 modeled the evaluation domain, not
@@ -217,11 +297,14 @@ model UserAccount {
   inviteTokenHash String?   @unique @map("invite_token_hash")
   inviteExpiresAt DateTime? @map("invite_expires_at")
 
+  person            Person?                    @relation(fields: [personId], references: [id], onDelete: Restrict)
   memberships       SchoolMembership[]
   personnelProfiles PersonnelProfile[]
   uploadedEvidence  Evidence[]                 @relation("EvidenceUploader")
-  mappedBy          EvidenceIndicatorMapping[] @relation("MappingMapper")
-  confirmedBy       EvidenceIndicatorMapping[] @relation("MappingConfirmer")
+  ownerConfirmed    EvidenceIndicatorMapping[] @relation("MappingOwnerConfirmer")
+  validated         EvidenceIndicatorMapping[] @relation("MappingValidator")
+  uploadSessions    UploadSession[]
+  idempotencyKeys   IdempotencyKey[]
   committeeSeats    CommitteeMember[]
   indicatorScores   IndicatorScore[]
   roundResults      RoundResult[]
@@ -298,6 +381,7 @@ model PersonnelProfile {
   id            String     @id @default(uuid()) @db.Uuid
   schoolId      String     @map("school_id") @db.Uuid
   userId        String     @map("user_id") @db.Uuid
+  personId      String     @map("person_id") @db.Uuid
   employeeCode  String?    @map("employee_code")
   fullName      String     @map("full_name")
   positionRole  RoleFamily @map("position_role") // selects ว9 vs ว10 framework
@@ -306,15 +390,16 @@ model PersonnelProfile {
 
   school    School      @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   user      UserAccount @relation(fields: [userId], references: [id], onDelete: Restrict)
+  person    Person      @relation(fields: [personId], references: [id], onDelete: Restrict)
   rankLevel RankLevel   @relation(fields: [rankLevelCode], references: [code], onDelete: Restrict)
 
   agreements     PerformanceAgreement[]
-  ownedEvidence  Evidence[]
   assignments    EvaluationAssignment[]
   reports        Report[]
 
   @@unique([schoolId, employeeCode], name: "personnel_school_employee_code")
   @@index([schoolId, status])
+  @@index([personId])
   @@map("personnel_profile")
 }
 
@@ -337,6 +422,7 @@ model FrameworkVersion {
   weights    ScoreWeight[]
   indicators Indicator[]
   cycles     EvaluationCycle[]
+  mappings   EvidenceIndicatorMapping[]
 
   @@index([roleFamily, status])
   @@map("framework_version")
@@ -453,7 +539,6 @@ model EvaluationCycle {
 
   rounds     EvaluationRound[]
   agreements PerformanceAgreement[]
-  mappings   EvidenceIndicatorMapping[]
   reports    Report[]
 
   // PA uniqueness per (school, year, framework) is a partial unique index
@@ -558,28 +643,47 @@ model AgreementChallenge {
 /// reports through mappings — never copied per use.
 /// Lifecycle (CCR-002): draft → active once the first file upload completes.
 model Evidence {
-  id                String         @id @default(uuid()) @db.Uuid
-  schoolId          String         @map("school_id") @db.Uuid
-  ownerPersonnelId  String         @map("owner_personnel_id") @db.Uuid
-  uploadedByUserId  String         @map("uploaded_by_user_id") @db.Uuid
-  categoryId        String         @map("category_id") @db.Uuid
-  title             String         @db.VarChar(300)
-  description       String?        @db.Text
-  status            EvidenceStatus @default(draft)
-  capturedAt        DateTime?      @map("captured_at")
-  createdAt         DateTime       @default(now()) @map("created_at")
-  deletedAt         DateTime?      @map("deleted_at") // soft delete; storage GC is async
+  id                  String               @id @default(uuid()) @db.Uuid
+  ownerPersonId       String               @map("owner_person_id") @db.Uuid
+  controllerAreaId    String?              @map("controller_area_id") @db.Uuid
+  originSchoolId      String               @map("origin_school_id") @db.Uuid
+  uploadedByUserId    String               @map("uploaded_by_user_id") @db.Uuid
+  categoryId          String               @map("category_id") @db.Uuid
+  kind                EvidenceKind         @default(file)
+  title               String               @db.VarChar(300)
+  description         String?              @db.Text
+  linkUrl             String?              @map("link_url") @db.Text
+  noteText            String?              @map("note_text") @db.Text
+  status              EvidenceStatus       @default(draft)
+  capturedAt          DateTime?            @map("captured_at")
+  performedFrom       DateTime?            @map("performed_from") @db.Date
+  performedTo         DateTime?            @map("performed_to") @db.Date
+  performedDateSource PerformedDateSource? @map("performed_date_source")
+  academicYearBe      Int?                 @map("academic_year_be")
+  semester            Int?
+  containsLearners    ContainsLearners     @default(unknown) @map("contains_learners")
+  /// The offline client's id for this item; UNIQUE per owner so an outbox replay
+  /// cannot create a duplicate (constraints migration).
+  clientUuid          String?              @map("client_uuid") @db.Uuid
+  version             Int                  @default(1)
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @default(now()) @updatedAt @map("updated_at")
+  deletedAt           DateTime?            @map("deleted_at") // soft delete; storage GC is async
 
-  school     School           @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-  owner      PersonnelProfile @relation(fields: [ownerPersonnelId], references: [id], onDelete: Restrict)
-  uploadedBy UserAccount      @relation("EvidenceUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
-  category   EvidenceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  owner        Person           @relation(fields: [ownerPersonId], references: [id], onDelete: Restrict)
+  controller   Area?            @relation(fields: [controllerAreaId], references: [id], onDelete: Restrict)
+  originSchool School           @relation(fields: [originSchoolId], references: [id], onDelete: Restrict)
+  uploadedBy   UserAccount      @relation("EvidenceUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  category     EvidenceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
-  files      EvidenceFile[]
-  mappings   EvidenceIndicatorMapping[]
-  sectionRefs ReportSectionRef[]
+  files          EvidenceFile[]
+  mappings       EvidenceIndicatorMapping[]
+  sectionRefs    ReportSectionRef[]
+  uploadSessions UploadSession[]
 
-  @@index([schoolId, ownerPersonnelId, deletedAt])
+  @@unique([ownerPersonId, clientUuid], map: "evidence_owner_client_uuid_uk")
+  @@index([originSchoolId, deletedAt])
+  @@index([ownerPersonId, deletedAt])
   @@map("evidence")
 }
 
@@ -595,6 +699,15 @@ model EvidenceFile {
   byteSize         BigInt          @map("byte_size")
   checksumSha256   String          @map("checksum_sha256")
   durationSeconds  Int?            @map("duration_seconds") // null until the worker probes (CCR-002)
+  durationMs       Int?            @map("duration_ms")
+  role             FileRole        @default(original)
+  parentFileId     String?         @map("parent_file_id") @db.Uuid
+  /// Set when the worker re-hashed the stored object and it matched checksum_sha256.
+  sha256VerifiedAt DateTime?       @map("sha256_verified_at")
+  pageCount        Int?            @map("page_count")
+  width            Int?
+  height           Int?
+  mediaState       MediaState      @default(uploading) @map("media_state")
   originalFilename String          @map("original_filename") @db.VarChar(255)
   scanStatus       ScanStatus      @default(pending) @map("scan_status")
   /// Receipt for a REAL scan: set only when clamd returned a verdict (ADR-0009).
@@ -608,7 +721,8 @@ model EvidenceFile {
   scannedAt        DateTime?       @map("scanned_at")
   uploadedAt       DateTime        @default(now()) @map("uploaded_at")
 
-  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  evidence      Evidence       @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  uploadSession UploadSession?
 
   @@index([evidenceId])
   @@index([scanStatus])
@@ -668,34 +782,86 @@ model WorkerJob {
 /// machine so a human confirms what counts toward which indicator. AI suggestions
 /// (Sprint 2) will land here as mappingSource=ai_suggested, still requiring confirmation.
 model EvidenceIndicatorMapping {
-  id                String         @id @default(uuid()) @db.Uuid
-  schoolId          String         @map("school_id") @db.Uuid
-  evidenceId        String         @map("evidence_id") @db.Uuid
-  indicatorId       String         @map("indicator_id") @db.Uuid
-  cycleId           String?        @map("cycle_id") @db.Uuid
-  mappingSource     MappingSource  @default(human) @map("mapping_source")
-  status            MappingStatus  @default(suggested)
-  rationale         String?        @db.Text
-  mappedByUserId    String         @map("mapped_by_user_id") @db.Uuid
-  confirmedByUserId String?        @map("confirmed_by_user_id") @db.Uuid
-  mappedAt          DateTime       @default(now()) @map("mapped_at")
-  confirmedAt       DateTime?      @map("confirmed_at")
+  id                     String         @id @default(uuid()) @db.Uuid
+  schoolId               String         @map("school_id") @db.Uuid // = evidence.origin_school_id; tenancy index for validator queues
+  evidenceId             String         @map("evidence_id") @db.Uuid
+  indicatorId            String         @map("indicator_id") @db.Uuid
+  frameworkVersionId     String         @map("framework_version_id") @db.Uuid
+  mappingSource          MappingSource  @map("mapping_source")
+  status                 MappingStatus  @default(owner_confirmed)
+  aiSuggestionId         String?        @map("ai_suggestion_id") @db.Uuid
+  note                   String?        @db.Text
+  ownerConfirmedByUserId String         @map("owner_confirmed_by_user_id") @db.Uuid
+  ownerConfirmedAt       DateTime       @default(now()) @map("owner_confirmed_at")
+  validatedByUserId      String?        @map("validated_by_user_id") @db.Uuid
+  validatedAt            DateTime?      @map("validated_at")
+  validatorRole          ValidatorRole? @map("validator_role")
+  returnNote             String?        @map("return_note") @db.Text
+  locatorSnapshot        Json?          @map("locator_snapshot")
+  version                Int            @default(1)
+  updatedAt              DateTime       @default(now()) @updatedAt @map("updated_at")
 
-  school      School           @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-  evidence    Evidence         @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
-  indicator   Indicator        @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
-  cycle       EvaluationCycle? @relation(fields: [cycleId], references: [id], onDelete: Restrict)
-  mappedBy    UserAccount      @relation("MappingMapper", fields: [mappedByUserId], references: [id], onDelete: Restrict)
-  confirmedBy UserAccount?     @relation("MappingConfirmer", fields: [confirmedByUserId], references: [id], onDelete: Restrict)
+  school           School           @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  evidence         Evidence         @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  indicator        Indicator        @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
+  frameworkVersion FrameworkVersion @relation(fields: [frameworkVersionId], references: [id], onDelete: Restrict)
+  ownerConfirmedBy UserAccount      @relation("MappingOwnerConfirmer", fields: [ownerConfirmedByUserId], references: [id], onDelete: Restrict)
+  validatedBy      UserAccount?     @relation("MappingValidator", fields: [validatedByUserId], references: [id], onDelete: Restrict)
 
   sectionRefs ReportSectionRef[]
 
-  // Uniqueness of an ACTIVE mapping is the partial unique index
-  // `evidence_indicator_mapping_active_uk` (revoked/rejected rows never block a
-  // re-map; NULL cycle_id collides via NULLS NOT DISTINCT) — constraints migration
+  // One live mapping per (evidence, indicator, framework version): the partial
+  // unique index `evidence_indicator_mapping_active_uk` WHERE status <> 'revoked'
+  // — constraints migration.
   @@index([indicatorId, status])
   @@index([schoolId, status])
+  @@index([evidenceId, status])
   @@map("evidence_indicator_mapping")
+}
+
+/// Resumable upload (ADR-0016 §5, CCR-017): single PUT ≤16 MiB, S3 multipart above.
+/// The server completes multipart uploads from its own ListParts.
+model UploadSession {
+  id               String         @id @default(uuid()) @db.Uuid
+  evidenceId       String         @map("evidence_id") @db.Uuid
+  fileId           String         @unique @map("file_id") @db.Uuid
+  protocol         UploadProtocol
+  s3UploadId       String?        @map("s3_upload_id")
+  partSize         Int            @map("part_size")
+  partCount        Int            @map("part_count")
+  byteSize         BigInt         @map("byte_size")
+  checksumSha256   String         @map("checksum_sha256")
+  status           UploadStatus   @default(open)
+  createdByUserId  String         @map("created_by_user_id") @db.Uuid
+  expiresAt        DateTime       @map("expires_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  evidence  Evidence     @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  file      EvidenceFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  createdBy UserAccount  @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([status, expiresAt])
+  @@map("upload_session")
+}
+
+/// Idempotency-Key replay store (CCR-017): (actor, key) → the first response,
+/// kept 24 h. A retry with the same body replays it; a different body fails IDEMP-001.
+model IdempotencyKey {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String   @map("actor_user_id") @db.Uuid
+  key         String   @db.Uuid
+  operationId String   @map("operation_id")
+  requestHash String   @map("request_hash")
+  statusCode  Int      @map("status_code")
+  response    Json
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor UserAccount @relation(fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  @@unique([actorUserId, key])
+  @@index([expiresAt])
+  @@map("idempotency_key")
 }
 
 // ─────────────────── committee & per-evaluator scores ───────────────────

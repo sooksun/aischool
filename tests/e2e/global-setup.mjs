@@ -85,7 +85,7 @@ async function ensureUser(prisma, {
   let user = await prisma.userAccount.findUnique({ where: { email } });
   if (!user) {
     user = await prisma.userAccount.create({
-      data: {
+      data: { person: { create: { displayName } },
         email,
         displayName,
         status: 'active',
@@ -93,9 +93,13 @@ async function ensureUser(prisma, {
       },
     });
   } else {
-    await prisma.userAccount.update({
+    user = await prisma.userAccount.update({
       where: { id: user.id },
-      data: { passwordHash: await argonHash(password), status: 'active' },
+      data: {
+        passwordHash: await argonHash(password), status: 'active',
+        // A fixture user from before ADR-0015 gets their person now.
+        ...(user.personId ? {} : { person: { create: { displayName } } }),
+      },
     });
   }
 
@@ -124,7 +128,7 @@ async function ensureUser(prisma, {
       personnel = await prisma.personnelProfile.create({
         data: {
           schoolId,
-          userId: user.id,
+          userId: user.id, personId: user.personId,
           fullName: displayName,
           positionRole,
           rankLevelCode: 'apply_adapt',

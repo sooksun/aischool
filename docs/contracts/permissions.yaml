@@ -26,7 +26,12 @@
 # This file is also a TEST FIXTURE (SECURITY-BASELINE SEC-TEN-5): permission tests
 # generate their cases from this matrix, so contract and enforcement cannot drift.
 
-version: 1.7.0
+# version: 2.0.0 — CCR-017 (BREAKING, contract 4.0.0): suggestMappings and
+#   initiate/completeFileUpload removed; upload sessions, AI analysis/suggestions,
+#   sync, notifications, devices, coverage, committee evidence view and exports
+#   added; actOnMapping becomes owner revoke + director/committee validate/return.
+#   New top-level `min_acr`: operations (or actions) that need step-up auth.
+version: 2.0.0
 status: locked
 locked_at: 2026-07-17
 
@@ -79,6 +84,16 @@ any_authenticated:
   getCurrentUser: >
     Returns only the caller's own identity and memberships — the caller is the tenancy
     scope, so no role rule applies. Must never accept a user id parameter.
+  getChanges: Self-scoped delta sync — returns only rows the caller may read (CCR-017).
+  listNotifications: The caller's own inbox.
+  markNotificationsRead: The caller's own inbox.
+  getNotificationPreferences: The caller's own preferences.
+  updateNotificationPreferences: The caller's own preferences.
+  listDeviceSessions: The caller's own device sessions.
+  registerPushToken: Binds a token to the caller's current session only.
+  removePushToken: The caller's current session only.
+  revokeDeviceSession: The caller's own sessions only (RES-001 for anyone else's).
+  listDpaSlotProfiles: Reference data (versioned DPA slot definitions), like taxonomy.
   logout: >
     CCR-008. Revokes only the caller's own refresh token(s) — the caller is the
     tenancy scope, so no role rule applies. A refresh_token in the body that does
@@ -123,19 +138,46 @@ matrix:
   getEvidence:             { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
   updateEvidence:          { teacher: own, deputy: own, director: own, school_admin: school }
   deleteEvidence:          { teacher: own, deputy: own, director: own, school_admin: school }
-  initiateFileUpload:      { teacher: own, deputy: own, director: own, school_admin: school }
-  completeFileUpload:      { teacher: own, deputy: own, director: own, school_admin: school }
   getEvidenceFileDownloadUrl: { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
 
-  # mappings — evidence owner proposes; confirmation is a governance act
+  # uploads (CCR-017) — the evidence owner (or school_admin for their school)
+  createUpload:            { teacher: own, deputy: own, director: own, school_admin: school }
+  getUpload:               { teacher: own, deputy: own, director: own, school_admin: school }
+  signUploadParts:         { teacher: own, deputy: own, director: own, school_admin: school }
+  completeUpload:          { teacher: own, deputy: own, director: own, school_admin: school }
+  abortUpload:             { teacher: own, deputy: own, director: own, school_admin: school }
+
+  # mappings — two-tier (ADR-0015). The OWNER confirms (createMapping / accepting
+  # a suggestion) and may revoke; the director or an assigned committee member
+  # validates or returns. Nobody confirms a mapping on someone else's evidence.
   listEvidenceMappings:    { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
-  createMapping:           { teacher: own, deputy: own, director: own, school_admin: school }
-  suggestMappings:         { teacher: own, deputy: own, director: own, school_admin: school }
+  createMapping:           { teacher: own, deputy: own, director: own }
   listMappings:            { director: school, school_admin: school, evaluator: committee, area_admin: area-r }
-  actOnMapping:            # confirm/reject/revoke
-    teacher: own-revoke    # owner may revoke their own suggested mapping only
+  actOnMapping:            # revoke (owner) | validate / return (director, committee — min_acr 2)
+    teacher: own-revoke
+    deputy: own-revoke
     director: school
-    school_admin: school
+    evaluator: committee
+
+  # AI analysis and suggestions (ADR-0010). calibrated_p and rationale_th are
+  # returned to the OWNER only — a route rule, not expressible here. Only the
+  # owner decides on a suggestion.
+  requestEvidenceAnalysis: { teacher: own, deputy: own, director: own, school_admin: school }
+  getEvidenceAnalysis:     { teacher: own, deputy: own, director: school, school_admin: school }
+  listEvidenceSuggestions: { teacher: own, deputy: own, director: school, school_admin: school }
+  listEvidenceSegments:    { teacher: own, deputy: own, director: school, school_admin: school, evaluator: committee }
+  acceptSuggestion:        { teacher: own, deputy: own, director: own }
+  acceptSuggestions:       { teacher: own, deputy: own, director: own }
+  rejectSuggestion:        { teacher: own, deputy: own, director: own }
+
+  # coverage — person scope: own / school; school and area scope: counts only
+  getCoverage:             { teacher: own, deputy: own, director: school, school_admin: school, evaluator: committee, area_admin: area-r }
+
+  # exports — another person's export needs min_acr 2 (route rule: own vs school)
+  listExports:             { teacher: own, deputy: own, director: school, school_admin: school }
+  createExport:            { teacher: own, deputy: own, director: school, school_admin: school }
+  getExport:               { teacher: own, deputy: own, director: school, school_admin: school }
+  getExportDownloadUrl:    { teacher: own, deputy: own, director: school, school_admin: school }
 
   # agreements — แบบ PA1 + ประเด็นท้าทาย (CCR-015)
   # The evaluatee owns the document: they write it, they submit it, they can never
@@ -159,6 +201,7 @@ matrix:
   listAssignments:         { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
   createAssignment:        { director: school, school_admin: school }
   getAssignment:           { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
+  listAssignmentEvidence:  { director: school, school_admin: school, evaluator: committee }   # committee view: no AI fields
   submitMyScores:          { evaluator: committee, director: committee }   # director scores only as committee chair/member
   getAssignmentResults:    { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
 
@@ -174,6 +217,17 @@ matrix:
   # chair endorses. area_admin is absent per SEC-TEN-3 (read-only).
   approveReport:           { director: school, school_admin: school }
   returnReport:            { director: school, school_admin: school }
+
+# Step-up (ADR-0014): operations, or individual actions of an operation, that
+# need authentication context class ≥ the value. Below it → 403 AUTH-006 and the
+# client re-authenticates with acr_values. Until Keycloak lands (P1) every session
+# is acr 1 and these are enforced by role alone.
+min_acr:
+  actOnMapping: { validate: 2, return: 2 }
+  createAssignment: 2
+  inviteMember: 2
+  endMembership: 2
+  createExport: { other_person: 2 }
 
 notes:
   - teacher:own on listEvidence means the default filter is owner=self and other owners are rejected.

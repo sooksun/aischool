@@ -162,10 +162,36 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-12, local — SEIP-P1-001, contract 4.0.0 applied)
+
+Fresh database (bootstrap → migrate as `seip_migrator` → seed). `FEATURE_SCORING=true`
+for the API suites, as in CI, so the frozen v2 scoring and report routes keep their
+tests (ADR-0017).
+
+| Command | Result |
+|---|---|
+| `build` · `typecheck` · `lint` · `format:check` · `test:unit` | pass (web 38 unit tests) |
+| `gate:contracts` · `gate:ownership` · `gate:dep-audit` · `gate:secret-scan` | pass (74 ops, authz coverage OK; 0 vulnerabilities; no leaks) |
+| contract compatibility vs develop (oasdiff) | 95 breaking items, accepted on the 2.6.0 → 4.0.0 major bump (CCR-017) |
+| `test:backend` · database · worker · api · security | 20 · 18 · 23 · 85 · 9 — all pass |
+| `test:storage` (S3 conformance) | 4/4, twice in a row (the suite now drops its buckets) |
+| `test:e2e` | 13/13 (new: teacher maps at upload, director validates) |
+| Dart client generate + analyse + test · `apps/mobile` analyse + test | pass |
+
+The permission sweep now **derives its coverage from the matrix**. It fails if any
+served `permissions.yaml` row has no sweep entry, instead of comparing against a
+hand-kept count. The one exclusion is getAssignmentResults, which has a temporal
+rule covered in scoring-flow. The sweep also checks that every phase-gated
+operation answers 501 SYS-003.
+
+**Caveat added:** `min_acr` (acr ≥ 2 for validate / return / cross-person export)
+is in the contract but not enforced, because step-up authentication lands in P2
+(ADR-0014). No test asserts it yet. A green permission gate does not prove it.
+
 ## New gate 2026-10-12: `Gate: dart client` (14th)
 
 `clients/dart/seip_api`: swagger_parser generates the Flutter API client from the
-contract (the 4.0.0 draft during P0), then `build_runner`, `dart analyze
+contract (`docs/contracts/openapi.yaml`, 4.0.0 since SEIP-P1-001), then `build_runner`, `dart analyze
 --fatal-infos` and `dart test` (decode tests for sync batches, suggestions and
 upload sessions). Fails if the contract stops generating valid Dart.
 

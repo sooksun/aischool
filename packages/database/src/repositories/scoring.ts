@@ -180,6 +180,18 @@ export async function getRoundResultsForAssignment(assignmentId: string) {
  * grant needs (permissions.yaml note: "evaluator:committee resolves through
  * CommitteeMember rows of the target assignment"). Previously deferred (stubbed
  * to always deny) until assignments existed to join against. */
+/** Persons whose portfolios the caller may see as a committee member: the
+ * evaluatees of every assignment they sit on (any school — a committee member
+ * from outside the school is normal for วิทยฐานะ). Evidence is person-owned
+ * (ADR-0015), so the committee grant resolves to persons, not personnel rows. */
+export async function listEvaluateePersonIdsForCommitteeMember(evaluatorUserId: string): Promise<string[]> {
+  const rows = await prisma.evaluationAssignment.findMany({
+    where: { committee: { some: { evaluatorUserId } } },
+    select: { evaluatee: { select: { personId: true } } },
+  });
+  return [...new Set(rows.map((r) => r.evaluatee.personId))];
+}
+
 export async function listEvaluateePersonnelIdsForCommitteeMember(
   schoolId: string, evaluatorUserId: string,
 ): Promise<string[]> {

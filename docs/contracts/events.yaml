@@ -23,7 +23,11 @@
 # change; a dispatcher relays to consumers (notification, projections).
 # No dual-writes inside request handlers.
 
-version: 1.3.0
+# version: 2.0.0 — CCR-017 (BREAKING): evidence.mapping.suggested/confirmed/rejected retired
+#   (the states no longer exist); evidence.mapping.revoked → mapping.revoked; added
+#   evidence.file.verified, analysis.completed/failed, mapping.owner_confirmed/validated/returned,
+#   export.ready. evidence.created carries owner_person_id.
+version: 2.0.0
 status: locked
 locked_at: 2026-07-17
 
@@ -41,13 +45,13 @@ envelope:
 
 events:
   evidence.created:
-    payload: { evidence_id: uuid, owner_personnel_id: uuid, category_code: string }
+    payload: { evidence_id: uuid, owner_person_id: uuid, category_code: string }
     consumers: [audit-projection]
 
   evidence.file.registered:
     payload: { evidence_id: uuid, file_id: uuid, content_type: string, byte_size: integer }
     consumers: [scan-worker]
-    note: Emitted by completeFileUpload; triggers async virus scan + video probe.
+    note: Emitted by completeUpload; triggers async verify (SHA-256 re-hash) + virus scan + media probe.
 
   evidence.file.scan_completed:
     payload: { evidence_id: uuid, file_id: uuid, scan_status: 'enum[clean, unscanned, blocked]' }
@@ -57,22 +61,39 @@ events:
       but no scanner ran (CCR-012), served like clean; a notification consumer
       should not word this as "ปลอดภัย".
 
-  evidence.mapping.suggested:
-    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, mapping_source: 'enum[human, ai_suggested]' }
-    consumers: [notification]
-    note: Fired for both human createMapping and AI suggestMappings rows.
+  evidence.file.verified:
+    payload: { evidence_id: uuid, file_id: uuid, sha256_matched: boolean }
+    consumers: [analysis-pipeline, audit-projection]
+    note: The worker re-hashed the stored object. false → file blocked (size or hash mismatch).
 
-  evidence.mapping.confirmed:
-    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, confirmed_by_user_id: uuid }
+  analysis.completed:
+    payload: { analysis_id: uuid, evidence_id: uuid, status: 'enum[succeeded, degraded]', suggestion_count: integer }
+    consumers: [notification]
+
+  analysis.failed:
+    payload: { analysis_id: uuid, evidence_id: uuid, error_code: string }
+    consumers: [notification]
+
+  mapping.owner_confirmed:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, mapping_source: 'enum[ai_accepted, manual]' }
     consumers: [notification, audit-projection]
 
-  evidence.mapping.rejected:
-    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, rationale: string|null }
-    consumers: [notification]
+  mapping.validated:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, validated_by_user_id: uuid, validator_role: 'enum[director, committee]' }
+    consumers: [notification, audit-projection]
 
-  evidence.mapping.revoked:
+  mapping.returned:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, validated_by_user_id: uuid }
+    consumers: [notification, audit-projection]
+    note: The owner is notified; return_note is read from the mapping, never copied into the event.
+
+  mapping.revoked:
     payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid }
     consumers: [audit-projection]
+
+  export.ready:
+    payload: { export_id: uuid, kind: 'enum[dpa_pack, pa2_workbook, portfolio_portable]', person_id: uuid|null }
+    consumers: [notification]
 
   assignment.created:
     payload: { assignment_id: uuid, round_id: uuid, evaluatee_personnel_id: uuid, committee_user_ids: 'uuid[3]' }
@@ -100,9 +121,9 @@ events:
     note: Emitted by report.generate worker when payload + section_refs are written.
 
   ai.suggestion.created:
-    payload: { evidence_id: uuid, mapping_ids: 'uuid[]', provider: 'enum[local_heuristic]', suggestion_count: integer }
+    payload: { evidence_id: uuid, analysis_id: uuid, suggestion_count: integer }
     consumers: [notification, audit-projection]
-    note: Batch summary after suggestMappings; individual rows also emit evidence.mapping.suggested.
+    note: Batch summary when an analysis writes suggestions (CCR-017). Suggestions are not mappings until the owner accepts.
 
   report.approved:
     payload: { report_id: uuid, cycle_id: uuid, subject_personnel_id: uuid, approver_user_id: uuid, step_code: string }

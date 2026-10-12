@@ -41,19 +41,39 @@ ALTER TABLE indicator
     indicator_kind <> 'workload_gate' OR is_scored = false
   );
 
--- ── a confirmed mapping requires WHO confirmed it and WHEN (governance, not vibes) ──
+-- ── two-tier confirmation carries its actors (ADR-0015, CCR-017) ──
 ALTER TABLE evidence_indicator_mapping
-  ADD CONSTRAINT mapping_confirmed_has_actor CHECK (
-    status <> 'confirmed' OR (confirmed_by_user_id IS NOT NULL AND confirmed_at IS NOT NULL)
+  ADD CONSTRAINT mapping_validated_has_actor CHECK (
+    status <> 'validated'
+    OR (validated_by_user_id IS NOT NULL AND validated_at IS NOT NULL AND validator_role IS NOT NULL)
+  );
+ALTER TABLE evidence_indicator_mapping
+  ADD CONSTRAINT mapping_returned_has_note CHECK (
+    status <> 'returned' OR (return_note IS NOT NULL AND length(btrim(return_note)) > 0)
   );
 
--- ── one ACTIVE mapping per (evidence, indicator, cycle).
--- Partial + NULLS NOT DISTINCT: rejected/revoked rows must NOT block a re-map, and a
--- NULL cycle_id must still collide with another NULL cycle_id (default SQL treats
--- NULLs as distinct, which would silently allow duplicates). ──
+-- ── one LIVE mapping per (evidence, indicator, framework version). A revoked row
+-- never blocks a re-map. Keyed on the framework version, not a cycle: a portfolio
+-- item outlives any one evaluation cycle (CCR-017). ──
 CREATE UNIQUE INDEX evidence_indicator_mapping_active_uk
-  ON evidence_indicator_mapping (evidence_id, indicator_id, cycle_id) NULLS NOT DISTINCT
-  WHERE status IN ('suggested', 'confirmed');
+  ON evidence_indicator_mapping (evidence_id, indicator_id, framework_version_id)
+  WHERE status <> 'revoked';
+
+-- ── evidence kind carries its payload; dates and periods are sane ──
+ALTER TABLE evidence
+  ADD CONSTRAINT evidence_kind_payload CHECK (
+    (kind <> 'link' OR link_url IS NOT NULL) AND (kind <> 'note' OR note_text IS NOT NULL)
+  );
+ALTER TABLE evidence
+  ADD CONSTRAINT evidence_performed_ordered CHECK (
+    performed_from IS NULL OR performed_to IS NULL OR performed_from <= performed_to
+  );
+ALTER TABLE evidence
+  ADD CONSTRAINT evidence_semester_range CHECK (semester IS NULL OR semester IN (1, 2));
+
+-- ── upload sessions ──
+ALTER TABLE upload_session
+  ADD CONSTRAINT upload_session_sizes CHECK (part_size > 0 AND part_count >= 1 AND byte_size > 0);
 
 -- ── one PA cycle per (school, fiscal year, framework). DPA is on-demand and may repeat. ──
 CREATE UNIQUE INDEX evaluation_cycle_pa_uk

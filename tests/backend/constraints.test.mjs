@@ -125,55 +125,63 @@ test('email must be lowercase', async (t) => {
     'uppercase email must be rejected');
 });
 
+async function mkPerson() {
+  const id = uid();
+  await q(`INSERT INTO person (id, display_name) VALUES (?, 'p')`, [id]);
+  return id;
+}
+
 async function mkEvidenceGraph(prefix) {
   const sId = uid(); const uId = uid(); const pId = uid(); const cId = uid(); const eId = uid();
   await q(`INSERT INTO school (id, code, name) VALUES (?, ?, 's')`, [sId, `S-${prefix}`]);
   await q(`INSERT INTO user_account (id, email, display_name, status) VALUES (?, ?, 'M', 'active')`, [uId, `${prefix}@x.io`]);
   await q(`INSERT INTO rank_level (code, role_family, label_th, sort_order) VALUES (?, 'teacher', 'ครู', 2) ON CONFLICT (code) DO NOTHING`, [`kru-${prefix}`]);
-  await q(`INSERT INTO personnel_profile (id, school_id, user_id, full_name, position_role, rank_level_code) VALUES (?, ?, ?, 'p', 'teacher', ?)`, [pId, sId, uId, `kru-${prefix}`]);
+  const personId = await mkPerson();
+  await q(`INSERT INTO personnel_profile (id, school_id, user_id, person_id, full_name, position_role, rank_level_code) VALUES (?, ?, ?, ?, 'p', 'teacher', ?)`, [pId, sId, uId, personId, `kru-${prefix}`]);
   await q(`INSERT INTO evidence_category (id, code, label_th, allowed_mime_types) VALUES (?, ?, 'เอกสาร', ARRAY['application/pdf'])`, [cId, `pdf-${prefix}`]);
-  await q(`INSERT INTO evidence (id, school_id, owner_personnel_id, uploaded_by_user_id, category_id, title, status) VALUES (?, ?, ?, ?, ?, 't', 'active')`, [eId, sId, pId, uId, cId]);
+  await q(`INSERT INTO evidence (id, owner_person_id, origin_school_id, uploaded_by_user_id, category_id, title, status) VALUES (?, ?, ?, ?, ?, 't', 'active')`, [eId, personId, sId, uId, cId]);
   const fwId = await mkFramework(`${prefix}-fw`);
   const dId = await mkDomain(fwId);
   const iId = await mkIndicator(dId, fwId, 'T-1.1');
-  return { sId, uId, pId, cId, eId, fwId, dId, iId };
+  return { sId, uId, pId, personId, cId, eId, fwId, dId, iId };
 }
 
-test('only one ACTIVE mapping per (evidence, indicator, cycle); revoked frees the slot', async (t) => {
+test('only one LIVE mapping per (evidence, indicator, framework version); revoked frees the slot', async (t) => {
   await client.query('BEGIN');
   t.after(rollback);
-  const { sId, uId, eId, iId } = await mkEvidenceGraph('t5');
+  const { sId, uId, eId, iId, fwId } = await mkEvidenceGraph('t5');
 
-  const mk = (status) => q(
-    `INSERT INTO evidence_indicator_mapping (id, school_id, evidence_id, indicator_id, mapping_source, status, mapped_by_user_id)
-     VALUES (?, ?, ?, ?, 'human', ?, ?)`, [uid(), sId, eId, iId, status, uId]);
-
-  await mk('suggested');
-  await rejects(
-    `INSERT INTO evidence_indicator_mapping (id, school_id, evidence_id, indicator_id, mapping_source, status, mapped_by_user_id)
-     VALUES (?, ?, ?, ?, 'human', 'confirmed', ?)`, [uid(), sId, eId, iId, uId],
-    'a second active (confirmed) mapping to the same indicator must be rejected');
+  const insert = `INSERT INTO evidence_indicator_mapping
+      (id, school_id, evidence_id, indicator_id, framework_version_id, mapping_source, status, owner_confirmed_by_user_id)
+    VALUES (?, ?, ?, ?, ?, 'manual', 'owner_confirmed', ?)`;
+  await q(insert, [uid(), sId, eId, iId, fwId, uId]);
+  await rejects(insert, [uid(), sId, eId, iId, fwId, uId],
+    'a second live mapping to the same (indicator, framework version) must be rejected');
   await q(`UPDATE evidence_indicator_mapping SET status='revoked' WHERE evidence_id=?`, [eId]);
-  await mk('suggested');
+  await q(insert, [uid(), sId, eId, iId, fwId, uId]);
 });
 
-test('confirmed mapping requires confirmed_by + confirmed_at', async (t) => {
+test('validated mapping requires validator + timestamp + role; returned requires a note', async (t) => {
   await client.query('BEGIN');
   t.after(rollback);
-  const { sId, uId, eId, iId } = await mkEvidenceGraph('conf');
+  const { sId, uId, eId, iId, fwId } = await mkEvidenceGraph('conf');
+  const cols = '(id, school_id, evidence_id, indicator_id, framework_version_id, mapping_source, owner_confirmed_by_user_id';
 
   await rejects(
-    `INSERT INTO evidence_indicator_mapping (id, school_id, evidence_id, indicator_id, mapping_source, status, mapped_by_user_id)
-     VALUES (?, ?, ?, ?, 'human', 'confirmed', ?)`,
-    [uid(), sId, eId, iId, uId],
-    'confirmed without actor/timestamp must be rejected',
+    `INSERT INTO evidence_indicator_mapping ${cols}, status) VALUES (?, ?, ?, ?, ?, 'manual', ?, 'validated')`,
+    [uid(), sId, eId, iId, fwId, uId],
+    'validated without validator/timestamp must be rejected',
   );
-
+  await rejects(
+    `INSERT INTO evidence_indicator_mapping ${cols}, status, validated_by_user_id, validated_at, validator_role)
+     VALUES (?, ?, ?, ?, ?, 'manual', ?, 'returned', ?, NOW(), 'director')`,
+    [uid(), sId, eId, iId, fwId, uId, uId],
+    'returned without a return_note must be rejected',
+  );
   await q(
-    `INSERT INTO evidence_indicator_mapping
-       (id, school_id, evidence_id, indicator_id, mapping_source, status, mapped_by_user_id, confirmed_by_user_id, confirmed_at)
-     VALUES (?, ?, ?, ?, 'human', 'confirmed', ?, ?, NOW())`,
-    [uid(), sId, eId, iId, uId, uId],
+    `INSERT INTO evidence_indicator_mapping ${cols}, status, validated_by_user_id, validated_at, validator_role)
+     VALUES (?, ?, ?, ?, ?, 'manual', ?, 'validated', ?, NOW(), 'director')`,
+    [uid(), sId, eId, iId, fwId, uId, uId],
   );
 });
 
@@ -182,7 +190,8 @@ async function mkAssignmentGraph(prefix) {
   await q(`INSERT INTO school (id, code, name) VALUES (?, ?, 's')`, [sId, `S-${prefix}`]);
   await q(`INSERT INTO user_account (id, email, display_name, status) VALUES (?, ?, 'E', 'active')`, [uId, `${prefix}@x.io`]);
   await q(`INSERT INTO rank_level (code, role_family, label_th, sort_order) VALUES (?, 'teacher', 'ครู', 2) ON CONFLICT (code) DO NOTHING`, [`kru-${prefix}`]);
-  await q(`INSERT INTO personnel_profile (id, school_id, user_id, full_name, position_role, rank_level_code) VALUES (?, ?, ?, 'p', 'teacher', ?)`, [pId, sId, uId, `kru-${prefix}`]);
+  const personId = await mkPerson();
+  await q(`INSERT INTO personnel_profile (id, school_id, user_id, person_id, full_name, position_role, rank_level_code) VALUES (?, ?, ?, ?, 'p', 'teacher', ?)`, [pId, sId, uId, personId, `kru-${prefix}`]);
   const fwId = await mkFramework(`${prefix}-fw`);
   await q(`INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on) VALUES (?, ?, ?, 2569, 'pa', 'c', 'open', '2025-10-01', '2026-09-30')`, [cyId, sId, fwId]);
   await q(`INSERT INTO evaluation_round (id, cycle_id, round_number, purpose, period_start, period_end, status) VALUES (?, ?, 1, 'formal', '2025-10-01', '2026-09-30', 'scoring')`, [rId, cyId]);

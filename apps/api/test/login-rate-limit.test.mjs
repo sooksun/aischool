@@ -39,7 +39,7 @@ before(async () => {
 
   email = `rate-${randomUUID()}@x.io`;
   const user = await prisma.userAccount.create({
-    data: {
+    data: { person: { create: { displayName: 'fixture' } },
       email,
       displayName: 'Rate',
       status: 'active',

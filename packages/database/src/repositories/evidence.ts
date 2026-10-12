@@ -1,21 +1,27 @@
-// Evidence + EvidenceFile. Every function takes `schoolId` as the first, required
-// parameter and folds it into the WHERE clause — SEC-TEN-1 ("school-scoped by
-// construction"): there is no code path here that can return another school's row,
-// because there is no query that omits the filter. A cross-school id therefore
-// returns `null`, indistinguishable from a truly-missing id (RES-001 by design,
-// permissions.yaml tenancy rule) — callers must not turn a null into a 403.
+// Evidence + EvidenceFile — a PERSON-OWNED portfolio (ADR-0015, CCR-017).
+//
+// Evidence used to be school-owned and every query folded a school id in. A
+// portfolio item now belongs to a person and survives their transfer, so access
+// is decided in the API layer from three sources — the caller IS the owner, holds
+// a school grant at the item's ORIGIN school, or sits on a committee for the
+// owner — and the queries here take whichever filter that decision produced.
+// listEvidence refuses to run with no scope filter at all, so a missing filter can
+// never widen into "everything".
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../client.js';
-import type { EvidenceStatus, Prisma } from '@prisma/client';
+import type {
+  ContainsLearners, EvidenceKind, EvidenceStatus, PerformedDateSource, Prisma,
+} from '@prisma/client';
 import { enqueueOutboxEvent } from './outbox.js';
 import { enqueueWorkerJob } from './jobs.js';
 
 export interface ListEvidenceFilter {
-  ownerPersonnelId?: string; // undefined = no owner filter (school-wide grant); set = 'own' grant
-  /** 'committee' grant: evidence owned by any evaluatee the caller currently sits
-   * on a committee for. Mutually exclusive with ownerPersonnelId in practice (the
-   * route layer sets exactly one), but both are honored if ever combined. */
-  ownerPersonnelIdIn?: string[];
+  /** school grant: everything that originated in this school. */
+  originSchoolId?: string;
+  /** own grant: the caller's portfolio, wherever it was created. */
+  ownerPersonId?: string;
+  /** committee grant: the portfolios of the caller's current evaluatees. */
+  ownerPersonIdIn?: string[];
   categoryId?: string;
   status?: EvidenceStatus;
   mappedToIndicatorId?: string;
@@ -23,17 +29,20 @@ export interface ListEvidenceFilter {
   pageSize: number;
 }
 
-const ACTIVE_MAPPING_STATUSES = ['suggested', 'confirmed'] as const;
+const LIVE_MAPPING_STATUSES = ['owner_confirmed', 'validated', 'returned'] as const;
 
-export async function listEvidence(schoolId: string, f: ListEvidenceFilter) {
+export async function listEvidence(f: ListEvidenceFilter) {
+  if (!f.originSchoolId && !f.ownerPersonId && !f.ownerPersonIdIn) {
+    throw new Error('listEvidence needs a scope filter (school, owner or committee) — refusing an unscoped query');
+  }
   const where: Prisma.EvidenceWhereInput = {
-    schoolId,
     deletedAt: null,
-    ownerPersonnelId: f.ownerPersonnelId ?? (f.ownerPersonnelIdIn ? { in: f.ownerPersonnelIdIn } : undefined),
+    originSchoolId: f.originSchoolId,
+    ownerPersonId: f.ownerPersonId ?? (f.ownerPersonIdIn ? { in: f.ownerPersonIdIn } : undefined),
     categoryId: f.categoryId,
     status: f.status,
     ...(f.mappedToIndicatorId
-      ? { mappings: { some: { indicatorId: f.mappedToIndicatorId, status: { in: [...ACTIVE_MAPPING_STATUSES] } } } }
+      ? { mappings: { some: { indicatorId: f.mappedToIndicatorId, status: { in: [...LIVE_MAPPING_STATUSES] } } } }
       : {}),
   };
   const [items, total] = await Promise.all([
@@ -42,106 +51,156 @@ export async function listEvidence(schoolId: string, f: ListEvidenceFilter) {
       orderBy: { createdAt: 'desc' },
       skip: (f.page - 1) * f.pageSize,
       take: f.pageSize,
-      // scan_status aggregate for list badges (CCR-009) — only status columns, not bytes
-      include: { files: { select: { scanStatus: true } } },
+      // scan_status aggregate for list badges (CCR-009) — status columns only
+      include: { files: { select: { scanStatus: true, mediaState: true } } },
     }),
     prisma.evidence.count({ where }),
   ]);
   return { items, total };
 }
 
-/** Worst-of file scan states for list/detail badges. null = no files.
+/** Worst-of file scan states for list/detail badges. null = no uploaded files.
  *
- * Order is pending > blocked > unscanned > clean (CCR-012): 'clean' is only
- * reported when EVERY file earned it, so one unverified file cannot hide behind
- * a set of scanned ones. */
+ * Order is pending > blocked > unscanned > sanitised > clean (CCR-012): 'clean'
+ * is only reported when EVERY file earned it. A file still `uploading` (an open
+ * or abandoned upload session) is not part of the item yet and is ignored. */
 export function aggregateScanStatus(
-  files: { scanStatus: string }[],
-): 'pending' | 'clean' | 'unscanned' | 'blocked' | null {
-  if (files.length === 0) return null;
-  if (files.some((f) => f.scanStatus === 'pending')) return 'pending';
-  if (files.some((f) => f.scanStatus === 'blocked')) return 'blocked';
-  if (files.some((f) => f.scanStatus === 'unscanned')) return 'unscanned';
+  files: { scanStatus: string; mediaState?: string }[],
+): 'pending' | 'clean' | 'sanitised' | 'unscanned' | 'blocked' | null {
+  const real = files.filter((f) => f.mediaState !== 'uploading');
+  if (real.length === 0) return null;
+  if (real.some((f) => f.scanStatus === 'pending')) return 'pending';
+  if (real.some((f) => f.scanStatus === 'blocked')) return 'blocked';
+  if (real.some((f) => f.scanStatus === 'unscanned')) return 'unscanned';
+  if (real.some((f) => f.scanStatus === 'sanitised')) return 'sanitised';
   return 'clean';
 }
 
-export async function createEvidence(schoolId: string, data: {
-  ownerPersonnelId: string;
+export interface CreateEvidenceInput {
+  ownerPersonId: string;
+  controllerAreaId: string | null;
+  originSchoolId: string;
   uploadedByUserId: string;
   categoryId: string;
+  kind: EvidenceKind;
   title: string;
   description?: string | null;
+  linkUrl?: string | null;
+  noteText?: string | null;
   capturedAt?: Date | null;
-}) {
-  return prisma.evidence.create({
-    data: {
-      schoolId,
-      ownerPersonnelId: data.ownerPersonnelId,
-      uploadedByUserId: data.uploadedByUserId,
-      categoryId: data.categoryId,
-      title: data.title,
-      description: data.description ?? null,
-      capturedAt: data.capturedAt ?? null,
-      status: 'draft', // CCR-002: draft -> active happens on first completed upload, not here
-    },
-  });
+  performedFrom?: Date | null;
+  performedTo?: Date | null;
+  academicYearBe?: number | null;
+  semester?: number | null;
+  containsLearners?: ContainsLearners;
+  clientUuid: string;
 }
 
-export async function getEvidenceDetail(schoolId: string, evidenceId: string) {
+/**
+ * Returns `{ row, replayed }`. The (owner, client_uuid) unique key makes an
+ * offline outbox replay — the same capture sent twice, even under a different
+ * Idempotency-Key — return the existing row instead of creating a duplicate.
+ * Link and note items have nothing to upload, so they are `active` at once;
+ * file items stay `draft` until their first upload completes (CCR-002).
+ */
+export async function createEvidence(input: CreateEvidenceInput): Promise<{ row: Awaited<ReturnType<typeof prisma.evidence.create>>; replayed: boolean }> {
+  const existing = await prisma.evidence.findUnique({
+    where: { ownerPersonId_clientUuid: { ownerPersonId: input.ownerPersonId, clientUuid: input.clientUuid } },
+  });
+  if (existing) return { row: existing, replayed: true };
+  const row = await prisma.evidence.create({
+    data: {
+      ownerPersonId: input.ownerPersonId,
+      controllerAreaId: input.controllerAreaId,
+      originSchoolId: input.originSchoolId,
+      uploadedByUserId: input.uploadedByUserId,
+      categoryId: input.categoryId,
+      kind: input.kind,
+      title: input.title,
+      description: input.description ?? null,
+      linkUrl: input.linkUrl ?? null,
+      noteText: input.noteText ?? null,
+      capturedAt: input.capturedAt ?? null,
+      performedFrom: input.performedFrom ?? null,
+      performedTo: input.performedTo ?? null,
+      academicYearBe: input.academicYearBe ?? null,
+      semester: input.semester ?? null,
+      containsLearners: input.containsLearners ?? 'unknown',
+      clientUuid: input.clientUuid,
+      status: input.kind === 'file' ? 'draft' : 'active',
+    },
+  });
+  return { row, replayed: false };
+}
+
+/** Detail by id with files and mappings. NO tenancy filter: the API authorizes the
+ * returned row (owner / origin-school grant / committee) before serving it. */
+export async function getEvidenceDetail(evidenceId: string) {
   return prisma.evidence.findFirst({
-    where: { id: evidenceId, schoolId, deletedAt: null },
+    where: { id: evidenceId, deletedAt: null },
     include: {
       files: { orderBy: { uploadedAt: 'asc' } },
-      mappings: { orderBy: { mappedAt: 'desc' } },
+      mappings: { orderBy: { ownerConfirmedAt: 'desc' } },
     },
   });
 }
 
-export async function getEvidenceOwnerAndStatus(schoolId: string, evidenceId: string) {
-  return prisma.evidence.findFirst({
-    where: { id: evidenceId, schoolId, deletedAt: null },
-    select: { id: true, ownerPersonnelId: true, status: true },
-  });
-}
+export type EvidenceWriteResult<T> =
+  | { ok: true; row: T }
+  | { ok: false; reason: 'missing' | 'stale' };
 
-/** Returns the updated row, or null if evidenceId doesn't exist in this school
- * (updateMany never throws on zero matches — that's what makes the tenancy check
- * "by construction" instead of "check-then-update", which would have a TOCTOU gap). */
-export async function updateEvidence(schoolId: string, evidenceId: string, patch: {
+export interface EvidencePatchInput {
   title?: string;
   description?: string | null;
   status?: EvidenceStatus;
   capturedAt?: Date | null;
-}) {
-  const result = await prisma.evidence.updateMany({
-    where: { id: evidenceId, schoolId, deletedAt: null },
-    data: patch,
-  });
-  if (result.count === 0) return null;
-  return getEvidenceDetail(schoolId, evidenceId);
+  linkUrl?: string | null;
+  noteText?: string | null;
+  performedFrom?: Date | null;
+  performedTo?: Date | null;
+  performedDateSource?: PerformedDateSource | null;
+  academicYearBe?: number | null;
+  semester?: number | null;
+  containsLearners?: ContainsLearners;
 }
 
-/** Promotes draft -> active. Called by the API after the FIRST file upload
- * completes successfully (CCR-002 lifecycle) — a no-op if already active. */
-export async function markEvidenceActiveIfDraft(schoolId: string, evidenceId: string) {
+/** Compare-and-swap on `version` (If-Match). A zero-row update is a missing row
+ * (RES-001) or a stale version (RES-004 / 412). */
+export async function updateEvidence(evidenceId: string, expectedVersion: number, patch: EvidencePatchInput) {
+  const res = await prisma.evidence.updateMany({
+    where: { id: evidenceId, deletedAt: null, version: expectedVersion },
+    data: { ...patch, version: { increment: 1 } },
+  });
+  if (res.count === 0) return classifyMiss(evidenceId);
+  return { ok: true, row: (await getEvidenceDetail(evidenceId))! } as const;
+}
+
+async function classifyMiss(evidenceId: string): Promise<{ ok: false; reason: 'missing' | 'stale' }> {
+  const now = await prisma.evidence.findFirst({ where: { id: evidenceId, deletedAt: null }, select: { id: true } });
+  return { ok: false, reason: now ? 'stale' : 'missing' };
+}
+
+/** Promotes draft -> active (CCR-002) — a no-op if already active. */
+export async function markEvidenceActiveIfDraft(evidenceId: string) {
   await prisma.evidence.updateMany({
-    where: { id: evidenceId, schoolId, status: 'draft' },
-    data: { status: 'active' },
+    where: { id: evidenceId, status: 'draft' },
+    data: { status: 'active', version: { increment: 1 } },
   });
 }
 
-export async function softDeleteEvidence(schoolId: string, evidenceId: string): Promise<boolean> {
-  const result = await prisma.evidence.updateMany({
-    where: { id: evidenceId, schoolId, deletedAt: null },
-    data: { deletedAt: new Date() },
+export async function softDeleteEvidence(evidenceId: string, expectedVersion: number): Promise<EvidenceWriteResult<true>> {
+  const res = await prisma.evidence.updateMany({
+    where: { id: evidenceId, deletedAt: null, version: expectedVersion },
+    data: { deletedAt: new Date(), version: { increment: 1 } },
   });
-  return result.count > 0;
+  if (res.count === 0) return classifyMiss(evidenceId);
+  return { ok: true, row: true };
 }
 
 // ── files ──
 
 export interface CreateFileInput {
-  id: string; // client-facing file_id, issued at initiate (see apps/api upload routes)
+  id: string; // client-facing file_id
   evidenceId: string;
   storageUri: string;
   contentType: string;
@@ -151,10 +210,10 @@ export interface CreateFileInput {
   originalFilename: string;
 }
 
-/** Throws Prisma's P2002 (unique violation on the `id` PK) if this file_id was
- * already completed — the caller maps that to UPL-004. No separate "already
- * completed" flag needed: the row's existence IS the signal (see evidence.ts
- * module header — initiate never writes a row, only complete does). */
+/** A file row in its final, uploaded state — for fixtures and operator tools
+ * that put bytes in storage themselves. The API path is the upload session
+ * (uploads.ts), which creates the row as `uploading` and completes it there.
+ * Throws P2002 on a duplicate id. */
 export async function createEvidenceFile(input: CreateFileInput) {
   return prisma.evidenceFile.create({
     data: {
@@ -168,14 +227,16 @@ export async function createEvidenceFile(input: CreateFileInput) {
       durationSeconds: input.durationSeconds,
       originalFilename: input.originalFilename,
       scanStatus: 'pending',
+      mediaState: 'verifying',
     },
   });
 }
 
 /**
- * Complete-file path for the API: file row + draft→active + outbox
- * `evidence.file.registered` + worker job `file.process` in ONE transaction
- * (module-boundaries rule 4 — no dual-write after commit).
+ * Register an already-stored file and queue its processing: file row + draft→active
+ * + outbox `evidence.file.registered` + worker job `file.process` in ONE
+ * transaction (module-boundaries rule 4). The API's completeUpload does the same
+ * through uploads.ts; this entry point serves fixtures and operator tools.
  */
 export async function registerEvidenceFileWithWorkerJobs(input: CreateFileInput & {
   schoolId: string;
@@ -196,12 +257,13 @@ export async function registerEvidenceFileWithWorkerJobs(input: CreateFileInput 
         durationSeconds: input.durationSeconds,
         originalFilename: input.originalFilename,
         scanStatus: 'pending',
+        mediaState: 'verifying',
       },
     });
 
     await tx.evidence.updateMany({
-      where: { id: input.evidenceId, schoolId: input.schoolId, status: 'draft' },
-      data: { status: 'active' },
+      where: { id: input.evidenceId, status: 'draft' },
+      data: { status: 'active', version: { increment: 1 } },
     });
 
     await enqueueOutboxEvent({
@@ -241,8 +303,8 @@ export async function countFilesForEvidence(evidenceId: string): Promise<number>
  * returns null here rather than a row the caller must remember to reject. */
 export async function getEvidenceFileById(schoolId: string, fileId: string) {
   return prisma.evidenceFile.findFirst({
-    where: { id: fileId, evidence: { schoolId } },
-    include: { evidence: { select: { id: true, schoolId: true, deletedAt: true } } },
+    where: { id: fileId, evidence: { originSchoolId: schoolId } },
+    include: { evidence: { select: { id: true, originSchoolId: true, deletedAt: true } } },
   });
 }
 
@@ -260,7 +322,7 @@ export async function getEvidenceFileById(schoolId: string, fileId: string) {
  */
 export async function setFileScanStatus(
   fileId: string,
-  status: 'clean' | 'unscanned' | 'blocked',
+  status: 'clean' | 'sanitised' | 'unscanned' | 'blocked',
   opts: { scanned: boolean },
 ) {
   return prisma.evidenceFile.update({
@@ -272,8 +334,18 @@ export async function setFileScanStatus(
 export async function setFileDurationSeconds(fileId: string, durationSeconds: number) {
   return prisma.evidenceFile.update({
     where: { id: fileId },
-    data: { durationSeconds },
+    data: { durationSeconds, durationMs: durationSeconds * 1000 },
   });
+}
+
+/** The worker re-hashed the stored object (ADR-0018). A match records the receipt;
+ * a mismatch is the caller's to block. */
+export async function markFileSha256Verified(fileId: string) {
+  return prisma.evidenceFile.update({ where: { id: fileId }, data: { sha256VerifiedAt: new Date() } });
+}
+
+export async function setFileMediaState(fileId: string, mediaState: 'verifying' | 'processing' | 'ready' | 'failed') {
+  return prisma.evidenceFile.update({ where: { id: fileId }, data: { mediaState } });
 }
 
 /** Soft-deleted evidence whose files are eligible for storage GC. */
@@ -283,7 +355,7 @@ export async function listFilesForStorageGc(cutoff: Date, limit = 50) {
       evidence: { deletedAt: { not: null, lte: cutoff } },
     },
     take: limit,
-    include: { evidence: { select: { id: true, schoolId: true, deletedAt: true } } },
+    include: { evidence: { select: { id: true, originSchoolId: true, deletedAt: true } } },
   });
 }
 
@@ -295,7 +367,7 @@ export async function deleteEvidenceFileRow(fileId: string) {
 
 export interface RescanSelection {
   /** Only files in these scan states. `blocked` is excluded by default — see the CLI. */
-  statuses: ('pending' | 'clean' | 'unscanned' | 'blocked')[];
+  statuses: ('pending' | 'clean' | 'sanitised' | 'unscanned' | 'blocked')[];
   /** Null → "never scanned by a real scanner". A date → also re-scan verdicts
    * older than it, which is how a signature update gets swept in. */
   scannedBefore?: Date | null;
@@ -319,7 +391,7 @@ function rescanWhere(sel: RescanSelection) {
       // sweep look broken. Skipping them is not laziness about coverage: these
       // files are already unreachable through the API.
       deletedAt: null,
-      ...(sel.schoolId ? { schoolId: sel.schoolId } : {}),
+      ...(sel.schoolId ? { originSchoolId: sel.schoolId } : {}),
     },
   };
 }
@@ -337,7 +409,7 @@ export async function listFilesForRescan(sel: RescanSelection) {
       byteSize: true,
       scanStatus: true,
       uploadedAt: true,
-      evidence: { select: { schoolId: true } },
+      evidence: { select: { originSchoolId: true } },
     },
   });
 }
@@ -362,7 +434,7 @@ export async function scanCoverageCensus(schoolId?: string): Promise<{
   // `clean` files as "downloadable, badged ปลอดภัย" when a chunk of them were
   // soft-deleted and downloadable by nobody. They are reported separately
   // instead of hidden, because a soft-deleted file can still be restored.
-  const live = { evidence: { deletedAt: null, ...(schoolId ? { schoolId } : {}) } };
+  const live = { evidence: { deletedAt: null, ...(schoolId ? { originSchoolId: schoolId } : {}) } };
   const [totals, verified, softDeleted] = await Promise.all([
     prisma.evidenceFile.groupBy({ by: ['scanStatus'], where: live, _count: { _all: true } }),
     prisma.evidenceFile.groupBy({
@@ -373,7 +445,7 @@ export async function scanCoverageCensus(schoolId?: string): Promise<{
     prisma.evidenceFile.count({
       where: {
         scannedAt: null,
-        evidence: { deletedAt: { not: null }, ...(schoolId ? { schoolId } : {}) },
+        evidence: { deletedAt: { not: null }, ...(schoolId ? { originSchoolId: schoolId } : {}) },
       },
     }),
   ]);

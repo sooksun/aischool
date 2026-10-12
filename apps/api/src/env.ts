@@ -12,6 +12,9 @@ const EnvSchema = z.object({
   S3_REGION: z.string().default('us-east-1'),
   PORT: z.coerce.number().int().positive().default(3001),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  /** ADR-0017: committee scoring and report approval are v2. Their routes are
+   * registered only when this is true; the code stays compiled and tested. */
+  FEATURE_SCORING: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

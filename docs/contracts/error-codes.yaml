@@ -21,7 +21,10 @@
 #   }
 # HTTP status is authoritative for transport semantics; `code` for business semantics.
 
-version: 1.6.0
+# version: 2.0.0 — CCR-017 (BREAKING): AI-001 retired (synchronous suggest removed); MAP-001
+#   keyed on framework version; MAP-002 now guards validate/return; new AUTH-006, RES-004/005,
+#   IDEMP-001, UPL-007/008, AI-002/003/004, EXP-001/002, SYNC-001, SYS-003.
+version: 2.0.0
 status: locked
 locked_at: 2026-07-17
 error_shape:
@@ -38,7 +41,10 @@ namespaces:
   CYCLE: cycle / round configuration and state
   AGR: performance agreement (แบบ PA1) lifecycle and ประเด็นท้าทาย
   RPT: report generation and template rules
-  AI: AI mapping suggestion rules
+  AI: AI analysis and suggestion rules
+  IDEMP: Idempotency-Key replay rules
+  EXP: exports (DPA pack, PA2 workbook, portfolio)
+  SYNC: offline delta sync
   RES: resource existence / conflict
   SYS: infrastructure and unexpected
 
@@ -50,6 +56,7 @@ codes:
   AUTH-004: { http: 429, meaning: Too many login attempts — throttled per IP and/or account (SEC-AUTH-5) }
   # One code covers unknown, expired and already-used on purpose: three codes
   # would tell an attacker which invite tokens once existed (CCR-014).
+  AUTH-006: { http: 403, meaning: 'Step-up authentication required — token acr is below the operation''s min_acr (ADR-0014)' }
   AUTH-005: { http: 401, meaning: Invite token not usable — unknown, expired, or already accepted (indistinguishable by design) }
 
   # --- PERM (403) ---
@@ -70,10 +77,12 @@ codes:
   UPL-004: { http: 409, meaning: Upload already completed for this file id }
   UPL-005: { http: 422, meaning: Checksum mismatch between initiate and complete }
   UPL-006: { http: 423, meaning: File quarantined — virus scan not clean }
+  UPL-007: { http: 409, meaning: Upload session not open — completed, aborted or expired }
+  UPL-008: { http: 422, meaning: Complete called with parts missing (server ListParts disagrees with part_count) }
 
   # --- MAP (mapping governance) ---
-  MAP-001: { http: 409, meaning: Active mapping already exists for (evidence, indicator, cycle) }
-  MAP-002: { http: 422, meaning: Confirm rejected — mapping not in suggested state }
+  MAP-001: { http: 409, meaning: A live mapping already exists for (evidence, indicator, framework version) }
+  MAP-002: { http: 422, meaning: Action not allowed in the mapping's state — validate/return need owner_confirmed; revoke needs a live mapping }
   MAP-003: { http: 422, meaning: Indicator not scorable/mappable (workload gate rows cannot be mapped) }
   MAP-004: { http: 422, meaning: Evidence and cycle framework versions incompatible }
 
@@ -99,7 +108,9 @@ codes:
   RPT-003: { http: 422, meaning: Approval not permitted — report not pending_approval, round not yet closed, or approver is the report subject }
 
   # --- AI (mapping suggest) ---
-  AI-001: { http: 422, meaning: Mapping suggest rejected — evidence not eligible, framework unknown, or provider unavailable }
+  AI-002: { http: 429, meaning: Analysis re-run throttled — at most once per 10 minutes per evidence }
+  AI-003: { http: 409, meaning: Suggestion is not open (already accepted, rejected or superseded) }
+  AI-004: { http: 422, meaning: Batch accept not enabled for this indicator — its pre-tick gate has not passed }
 
   # --- AGR (performance agreements, CCR-015) ---
   AGR-001: { http: 409, meaning: An agreement already exists for this (cycle, personnel) — one per cycle }
@@ -111,8 +122,15 @@ codes:
   # Distinct from RES-002: nothing was concurrently modified and retrying will not
   # help — the caller is asking for a second membership where one already exists
   # (CCR-014). Reusing RES-002 would have told the client "try again".
+  RES-004: { http: 412, meaning: If-Match is stale — the resource changed since it was read }
+  RES-005: { http: 428, meaning: If-Match is required for this write }
+  IDEMP-001: { http: 422, meaning: Idempotency-Key reused with a different request body }
+  EXP-001: { http: 422, meaning: Export pre-flight found blocking errors }
+  EXP-002: { http: 409, meaning: Export not ready }
+  SYNC-001: { http: 410, meaning: Sync cursor too old — resync from scratch }
   RES-003: { http: 409, meaning: Duplicate — an active membership already exists for this (school, user) }
 
   # --- SYS ---
   SYS-001: { http: 500, meaning: Unexpected server error — request_id always present }
   SYS-002: { http: 503, meaning: Dependency unavailable (storage, database) — retryable }
+  SYS-003: { http: 501, meaning: Operation is in the contract but not served yet — phase-gated (CCR-017 migration plan) }

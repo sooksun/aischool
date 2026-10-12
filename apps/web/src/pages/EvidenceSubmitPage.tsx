@@ -10,7 +10,7 @@
 // NOT persist across a closed tab/browser restart — that needs a service worker
 // or IndexedDB-backed queue, out of scope for this first pass. Documented here
 // rather than silently shipped as if the full design were implemented.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, unwrap } from '../api/client';
 import { ApiError, thaiMessageFor } from '../api/errors';
@@ -18,10 +18,11 @@ import { useAuth } from '../hooks/useAuth';
 import { Stepper } from '../components/Stepper';
 import { PdpaNotice } from '../components/PdpaNotice';
 import { validateFileAgainstCategory, validateDuration, readVideoDurationSeconds, sha256Hex } from '../lib/fileValidation';
-import { uploadWithProgress } from '../lib/uploadWithProgress';
+import { sendUploadBytes } from '../lib/uploadWithProgress';
 import type { components } from '../api/schema.generated';
 
 type EvidenceCategory = components['schemas']['EvidenceCategory'];
+type UploadSession = components['schemas']['UploadSession'];
 type Indicator = components['schemas']['Indicator'];
 
 type Step = 'pick' | 'details' | 'indicators' | 'review' | 'uploading' | 'done';
@@ -47,6 +48,12 @@ export function EvidenceSubmitPage() {
   const [uploadStage, setUploadStage] = useState<'idle' | 'preparing' | 'uploading' | 'confirming' | 'error'>('idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [createdEvidenceId, setCreatedEvidenceId] = useState<string | null>(null);
+  // CCR-017: one client_uuid / Idempotency-Key per submission, kept across
+  // "ลองใหม่" so a retry after a lost response never creates a second evidence
+  // item or upload session; the session itself is kept so a retry resumes it.
+  const idsRef = useRef({ clientUuid: crypto.randomUUID(), evidenceKey: crypto.randomUUID(), uploadKey: crypto.randomUUID() });
+  const sessionRef = useRef<UploadSession | null>(null);
+  const mappedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     api.GET('/evidence-categories', {}).then((res) => setCategories(unwrap(res))).catch(() => setCategories([]));
@@ -120,31 +127,56 @@ export function EvidenceSubmitPage() {
     setUploadStage('preparing');
     setUploadError(null);
     try {
+      const ids = idsRef.current;
       const evidence = createdEvidenceId
         ? { id: createdEvidenceId }
-        : unwrap(await api.POST('/evidence', { body: { category_id: category.id, title: title.trim() } }));
+        : unwrap(await api.POST('/evidence', {
+          params: { header: { 'Idempotency-Key': ids.evidenceKey } },
+          body: {
+            category_id: category.id, title: title.trim(), kind: 'file',
+            contains_learners: 'unknown', client_uuid: ids.clientUuid,
+          },
+        }));
       setCreatedEvidenceId(evidence.id);
 
-      const checksum = await sha256Hex(file);
-      const initiate = unwrap(await api.POST('/evidence/{evidenceId}/files/initiate', {
-        params: { path: { evidenceId: evidence.id } },
-        body: { content_type: file.type, byte_size: file.size, checksum_sha256: checksum, original_filename: file.name, duration_seconds: durationSeconds },
-      }));
+      let session = sessionRef.current;
+      if (session && session.status === 'completed') {
+        // Bytes and completion already went through on an earlier attempt.
+      } else {
+        if (session) {
+          session = unwrap(await api.GET('/uploads/{uploadId}', { params: { path: { uploadId: session.id } } }));
+        } else {
+          const checksum = await sha256Hex(file);
+          session = unwrap(await api.POST('/uploads', {
+            params: { header: { 'Idempotency-Key': ids.uploadKey } },
+            body: {
+              evidence_id: evidence.id, filename: file.name, content_type: file.type,
+              byte_size: file.size, checksum_sha256: checksum,
+              duration_ms: durationSeconds === null ? null : Math.round(durationSeconds * 1000),
+            },
+          }));
+        }
+        sessionRef.current = session;
 
-      setUploadStage('uploading');
-      await uploadWithProgress(initiate.upload_url, file, file.type, setUploadProgress);
+        setUploadStage('uploading');
+        await sendUploadBytes(session, file, setUploadProgress);
 
-      setUploadStage('confirming');
-      unwrap(await api.POST('/evidence/{evidenceId}/files/{fileId}/complete', {
-        params: { path: { evidenceId: evidence.id, fileId: initiate.file_id } },
-        body: { checksum_sha256: checksum, content_type: file.type, byte_size: file.size, original_filename: file.name, duration_seconds: durationSeconds },
-      }));
+        setUploadStage('confirming');
+        unwrap(await api.POST('/uploads/{uploadId}/complete', {
+          params: { path: { uploadId: session.id } },
+          body: { part_count: session.part_count },
+        }));
+        sessionRef.current = { ...session, status: 'completed' };
+      }
 
+      // Owner mappings (tier 1). A failure here does not undo the upload — the
+      // owner can add the indicator again from the evidence page.
       for (const indicatorId of selectedIndicatorIds) {
+        if (mappedRef.current.has(indicatorId)) continue;
         await api.POST('/evidence/{evidenceId}/mappings', {
-          params: { path: { evidenceId: evidence.id } },
+          params: { path: { evidenceId: evidence.id }, header: { 'Idempotency-Key': crypto.randomUUID() } },
           body: { indicator_id: indicatorId },
-        }).catch(() => {});
+        }).then(() => mappedRef.current.add(indicatorId)).catch(() => {});
       }
 
       setStep('done');

@@ -51,6 +51,8 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = [], frame
   const frameworks = [...new Set((frameworkIds ?? []).filter(Boolean))];
   if (ids.length === 0 && extras.length === 0 && frameworks.length === 0) return;
   const where = { schoolId: { in: ids } };
+  // Evidence is person-owned (ADR-0015); its school anchor is the origin school.
+  const evidenceWhere = { originSchoolId: { in: ids } };
 
   try {
     // Users are collected BEFORE their personnel and memberships are deleted —
@@ -58,7 +60,7 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = [], frame
     const [personnel, memberships, evidence] = await Promise.all([
       prisma.personnelProfile.findMany({ where, select: { userId: true } }),
       prisma.schoolMembership.findMany({ where, select: { userId: true } }),
-      prisma.evidence.findMany({ where, select: { uploadedByUserId: true } }),
+      prisma.evidence.findMany({ where: evidenceWhere, select: { uploadedByUserId: true } }),
     ]);
     // `extras` matters more than it looks. Deriving users from a school's
     // personnel/memberships/evidence misses every user a test creates with NO
@@ -87,8 +89,8 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = [], frame
     await prisma.report.deleteMany({ where });            // cascades ReportSectionRef
     await prisma.evaluationAssignment.deleteMany({ where }); // Restrict -> Personnel, Agreement
     await prisma.performanceAgreement.deleteMany({ where }); // cascades AgreementChallenge
-    await prisma.evidenceIndicatorMapping.deleteMany({ where }); // Restrict -> Evidence, Cycle
-    await prisma.evidence.deleteMany({ where });          // cascades EvidenceFile
+    await prisma.evidenceIndicatorMapping.deleteMany({ where }); // Restrict -> Evidence
+    await prisma.evidence.deleteMany({ where: evidenceWhere }); // cascades EvidenceFile, UploadSession
     await prisma.evaluationCycle.deleteMany({ where });   // cascades EvaluationRound
     await prisma.personnelProfile.deleteMany({ where });  // Restrict -> User
     await prisma.schoolMembership.deleteMany({ where });
@@ -116,6 +118,7 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = [], frame
     }
 
     const failures = new Map();
+    const orphanPersonIds = new Set();
     for (const userId of candidateUserIds) {
       const [stillPersonnel, stillMember, stillUploaded] = await Promise.all([
         prisma.personnelProfile.count({ where: { userId } }),
@@ -124,7 +127,10 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = [], frame
       ]);
       if (stillPersonnel > 0 || stillMember > 0 || stillUploaded > 0) continue;
       try {
-        await prisma.userAccount.delete({ where: { id: userId } });
+        // UploadSession.createdBy is Restrict; IdempotencyKey cascades.
+        await prisma.uploadSession.deleteMany({ where: { createdByUserId: userId } });
+        const gone = await prisma.userAccount.delete({ where: { id: userId }, select: { personId: true } });
+        if (gone.personId) orphanPersonIds.add(gone.personId);
       } catch (e) {
         const key = (e?.message ?? String(e)).split('\n').find((l) => l.trim()) ?? 'unknown';
         failures.set(key, (failures.get(key) ?? 0) + 1);
@@ -132,6 +138,19 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = [], frame
     }
     for (const [message, n] of failures) {
       console.warn(`[db-cleanup] ${n} user(s) could not be deleted: ${message.slice(0, 200)}`);
+    }
+
+    // A deleted user's Person goes too — unless something still points at it
+    // (evidence owned elsewhere, personnel in a school this suite did not create).
+    for (const personId of orphanPersonIds) {
+      const [acct, pers, ev] = await Promise.all([
+        prisma.userAccount.count({ where: { personId } }),
+        prisma.personnelProfile.count({ where: { personId } }),
+        prisma.evidence.count({ where: { ownerPersonId: personId } }),
+      ]);
+      if (acct + pers + ev > 0) continue;
+      await prisma.person.delete({ where: { id: personId } })
+        .catch((e) => console.warn(`[db-cleanup] person cleanup failed: ${e?.message ?? e}`));
     }
 
     // Frameworks are NOT school-scoped, so nothing above reaches them — and a

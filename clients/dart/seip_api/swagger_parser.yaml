@@ -1,7 +1,7 @@
 # P0 spike (SEIP-P0-004): generate from the 4.0.0 DRAFT. Point at
 # ../../../docs/contracts/openapi.yaml once CCR-017 is applied.
 swagger_parser:
-  schema_path: ../../../docs/contracts/drafts/openapi-4.0.0.yaml
+  schema_path: ../../../docs/contracts/openapi.yaml
   output_directory: lib/src/generated
   name: seip_api
   language: dart

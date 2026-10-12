@@ -1,6 +1,9 @@
 // S7 (done screen, revisited) + ongoing detail view — per evidence-submission-flow.md
 // "S7 ส่งแล้ว: การ์ดสรุป + สถานะสแกน + ปุ่มผูกตัวชี้วัดเพิ่ม"
-// AI suggest (SEIP-UI-005): local_heuristic proposals require human confirm.
+// Mappings are two-tier (ADR-0015, CCR-017): the owner confirms (and may revoke);
+// the director or an assigned committee member validates or returns. AI
+// suggestions arrive with the in-country analysis pipeline (P3) — there is no
+// suggest button any more.
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, unwrap } from '../api/client';
@@ -13,19 +16,15 @@ type EvidenceDetail = components['schemas']['Evidence'] & {
   mappings: components['schemas']['Mapping'][];
 };
 type Mapping = components['schemas']['Mapping'];
-type Framework = components['schemas']['Framework'];
 
 export function EvidenceDetailPage() {
-  const { capabilities } = useAuth();
-  const canGovernMappings = capabilities.governMappings;
+  const { user, capabilities } = useAuth();
+  const canValidateMappings = capabilities.governMappings;
   const { evidenceId } = useParams<{ evidenceId: string }>();
   const [evidence, setEvidence] = useState<EvidenceDetail | null>(null);
   const [error, setError] = useState(false);
-  const [frameworks, setFrameworks] = useState<Framework[]>([]);
-  const [frameworkId, setFrameworkId] = useState('');
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestMsg, setSuggestMsg] = useState<string | null>(null);
-  const [suggestErr, setSuggestErr] = useState<string | null>(null);
+  const [actErr, setActErr] = useState<string | null>(null);
+  const [returnNotes, setReturnNotes] = useState<Record<string, string>>({});
   const [actingId, setActingId] = useState<string | null>(null);
   const [downloadBusyId, setDownloadBusyId] = useState<string | null>(null);
   const [downloadErr, setDownloadErr] = useState<string | null>(null);
@@ -53,50 +52,24 @@ export function EvidenceDetailPage() {
     return () => clearInterval(t);
   }, [evidence, reload]);
 
-  useEffect(() => {
-    api.GET('/frameworks', {})
-      .then((res) => {
-        const list = unwrap(res);
-        setFrameworks(list);
-        if (list[0]) setFrameworkId(list[0].id);
-      })
-      .catch(() => setFrameworks([]));
-  }, []);
-
-  async function onSuggest() {
-    if (!evidenceId || !frameworkId) return;
-    setSuggesting(true);
-    setSuggestMsg(null);
-    setSuggestErr(null);
+  async function act(mapping: Mapping, action: 'validate' | 'return' | 'revoke') {
+    setActingId(mapping.id);
+    setActErr(null);
     try {
-      const result = unwrap(await api.POST('/evidence/{evidenceId}/mappings/suggest', {
-        params: { path: { evidenceId } },
-        body: { framework_version_id: frameworkId, max_suggestions: 5 },
+      const returnNote = action === 'return' ? (returnNotes[mapping.id] ?? '').trim() : null;
+      if (action === 'return' && !returnNote) {
+        setActErr('กรุณาระบุเหตุผลที่ส่งกลับให้เจ้าของหลักฐาน');
+        return;
+      }
+      unwrap(await api.PATCH('/mappings/{mappingId}', {
+        // If-Match: the version this page last read — a change made meanwhile
+        // (another validator, the owner revoking) comes back as RES-004.
+        params: { path: { mappingId: mapping.id }, header: { 'If-Match': `"${mapping.version}"` } },
+        body: { action, return_note: returnNote },
       }));
-      setSuggestMsg(
-        result.items.length === 0
-          ? 'ไม่พบคำแนะนำที่ตรงพอ — ลองปรับชื่อ/คำอธิบายหลักฐาน หรือผูกด้วยมือ'
-          : `ระบบแนะนำ ${result.items.length} ตัวชี้วัด (ต้องยืนยันก่อนใช้งาน) · ข้ามที่ผูกแล้ว ${result.skipped_active ?? 0}`,
-      );
-      reload();
+      await reload();
     } catch (err) {
-      setSuggestErr(err instanceof ApiError ? thaiMessageFor(err) : 'แนะนำตัวชี้วัดไม่สำเร็จ');
-    } finally {
-      setSuggesting(false);
-    }
-  }
-
-  async function act(mappingId: string, action: 'confirm' | 'reject' | 'revoke') {
-    setActingId(mappingId);
-    setSuggestErr(null);
-    try {
-      await unwrap(await api.PATCH('/mappings/{mappingId}', {
-        params: { path: { mappingId } },
-        body: { action },
-      }));
-      reload();
-    } catch (err) {
-      setSuggestErr(err instanceof ApiError ? thaiMessageFor(err) : 'ดำเนินการไม่สำเร็จ');
+      setActErr(err instanceof ApiError ? thaiMessageFor(err) : 'ดำเนินการไม่สำเร็จ');
     } finally {
       setActingId(null);
     }
@@ -168,7 +141,7 @@ export function EvidenceDetailPage() {
                 ระบบนี้ยังไม่ได้ติดตั้งโปรแกรมสแกนไวรัส — ดาวน์โหลดได้ แต่ยังไม่มีการตรวจไฟล์ กรุณาใช้ความระมัดระวัง
               </p>
             )}
-            {(f.scan_status === 'clean' || f.scan_status === 'unscanned') && (
+            {(f.scan_status === 'clean' || f.scan_status === 'unscanned' || f.scan_status === 'sanitised') && f.media_state !== 'uploading' && (
               <p style={{ marginTop: 8 }}>
                 <button
                   type="button"
@@ -190,69 +163,61 @@ export function EvidenceDetailPage() {
       <h2>ตัวชี้วัดที่ผูก</h2>
       {evidence.mappings.length === 0 && <p className="field-hint">ยังไม่ได้ผูกตัวชี้วัด</p>}
       <ul style={{ listStyle: 'none', padding: 0 }}>
-        {evidence.mappings.map((m) => (
-          <li key={m.id} className="evidence-card" style={{ marginBottom: 8 }}>
-            <div className="title">
-              {mappingSourceLabel(m.mapping_source)} · {mappingStatusLabel(m.status)}
-            </div>
-            {m.rationale && <p className="field-hint">{m.rationale}</p>}
-            {m.status === 'suggested' && canGovernMappings && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={actingId === m.id}
-                  onClick={() => act(m.id, 'confirm')}
-                >
-                  ยืนยัน
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={actingId === m.id}
-                  onClick={() => act(m.id, 'reject')}
-                >
-                  ปฏิเสธ
-                </button>
+        {evidence.mappings.map((m) => {
+          // Only the owner ever confirms a mapping, so the confirming user is the owner.
+          const mine = m.owner_confirmed_by_user_id === user?.id;
+          const live = m.status !== 'revoked';
+          return (
+            <li key={m.id} className="evidence-card" style={{ marginBottom: 8 }}>
+              <div className="title">
+                {mappingSourceLabel(m.mapping_source)} · {mappingStatusLabel(m.status)}
               </div>
-            )}
-            {m.status === 'suggested' && !canGovernMappings && (
-              <p className="field-hint">รอผู้บริหารยืนยันการผูกตัวชี้วัด</p>
-            )}
-          </li>
-        ))}
+              {m.note && <p className="field-hint">{m.note}</p>}
+              {m.status === 'returned' && m.return_note && (
+                <p className="field-hint" role="note">ส่งกลับ: {m.return_note}</p>
+              )}
+              {mine && m.status === 'owner_confirmed' && (
+                <p className="field-hint">รอผู้บริหารหรือกรรมการตรวจรับรอง</p>
+              )}
+              {!mine && canValidateMappings && m.status === 'owner_confirmed' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                  <label className="field">
+                    <span>เหตุผล (กรณีส่งกลับ)</span>
+                    <input
+                      type="text" maxLength={1000} value={returnNotes[m.id] ?? ''}
+                      onChange={(e) => setReturnNotes((prev) => ({ ...prev, [m.id]: e.target.value }))}
+                    />
+                  </label>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" className="btn btn-primary" disabled={actingId === m.id} onClick={() => act(m, 'validate')}>
+                      รับรอง
+                    </button>
+                    <button type="button" className="btn btn-secondary" disabled={actingId === m.id} onClick={() => act(m, 'return')}>
+                      ส่งกลับ
+                    </button>
+                  </div>
+                </div>
+              )}
+              {mine && live && (
+                <div style={{ marginTop: 8 }}>
+                  <button type="button" className="btn btn-secondary" disabled={actingId === m.id} onClick={() => act(m, 'revoke')}>
+                    ยกเลิกการผูก
+                  </button>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
-
-      <h2>แนะนำตัวชี้วัดอัตโนมัติ</h2>
-      <p className="field-hint">
-        ใช้การจับคู่ข้อความในเครื่อง (local heuristic) — ไม่ส่งข้อมูลออกนอกระบบ · ต้องยืนยันด้วยมือเสมอ
-      </p>
-      <label className="field">
-        <span>กรอบตัวชี้วัด</span>
-        <select value={frameworkId} onChange={(e) => setFrameworkId(e.target.value)}>
-          {frameworks.map((f) => (
-            <option key={f.id} value={f.id}>{f.code}</option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="button"
-        className="btn btn-primary"
-        disabled={suggesting || !frameworkId}
-        onClick={onSuggest}
-      >
-        {suggesting ? 'กำลังวิเคราะห์…' : 'แนะนำตัวชี้วัด'}
-      </button>
-      {suggestMsg && <p className="field-hint" role="status">{suggestMsg}</p>}
-      {suggestErr && (
-        <div className="alert alert-error" role="alert">{suggestErr}</div>
+      {actErr && (
+        <div className="alert alert-error" role="alert">{actErr}</div>
       )}
     </main>
   );
 }
 
 function mappingSourceLabel(source: Mapping['mapping_source']): string {
-  return source === 'ai_suggested' ? 'แนะนำอัตโนมัติ' : 'ผูกด้วยมือ';
+  return source === 'ai_accepted' ? 'รับจากคำแนะนำ AI' : 'ผูกด้วยมือ';
 }
 
 function scanStatusLabel(status: string): string {
@@ -263,6 +228,7 @@ function scanStatusLabel(status: string): string {
     // no basis for that claim. The file is still downloadable; this label is the
     // disclosure that goes with it.
     case 'unscanned': return 'ยังไม่ได้สแกนไวรัส';
+    case 'sanitised': return 'ตรวจสอบแล้ว (ล้างส่วนที่เสี่ยงออก)';
     case 'blocked': return 'ถูกกักไว้ — พบปัญหา';
     default: return status;
   }
@@ -270,9 +236,9 @@ function scanStatusLabel(status: string): string {
 
 function mappingStatusLabel(status: string): string {
   switch (status) {
-    case 'suggested': return 'รอยืนยัน';
-    case 'confirmed': return 'ยืนยันแล้ว';
-    case 'rejected': return 'ถูกปฏิเสธ';
+    case 'owner_confirmed': return 'เจ้าของยืนยันแล้ว';
+    case 'validated': return 'รับรองแล้ว';
+    case 'returned': return 'ถูกส่งกลับ';
     case 'revoked': return 'ยกเลิกแล้ว';
     default: return status;
   }

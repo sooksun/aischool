@@ -12,6 +12,7 @@ import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
 import { replaceScoresAndRollup } from '@seip/database';
 import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+import { postEvidence } from '../../../tests/helpers/api-evidence.mjs';
 
 const created = trackSchools();
 
@@ -52,7 +53,7 @@ before(async () => {
   async function makeUser(label, role) {
     const password = `${label}-password-1234`;
     const user = await prisma.userAccount.create({
-      data: { email: `score-${label}-${randomUUID()}@x.io`, displayName: label, status: 'active', passwordHash: await argonHash(password) },
+      data: { person: { create: { displayName: 'fixture' } }, email: `score-${label}-${randomUUID()}@x.io`, displayName: label, status: 'active', passwordHash: await argonHash(password) },
     });
     await prisma.schoolMembership.create({
       data: { userId: user.id, schoolId: school.id, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
@@ -68,10 +69,10 @@ before(async () => {
 
   const teacherPassword = 'teacher-password-1234';
   teacherEvaluatee = await prisma.userAccount.create({
-    data: { email: `score-teacher-${randomUUID()}@x.io`, displayName: 'Teacher', status: 'active', passwordHash: await argonHash(teacherPassword) },
+    data: { person: { create: { displayName: 'fixture' } }, email: `score-teacher-${randomUUID()}@x.io`, displayName: 'Teacher', status: 'active', passwordHash: await argonHash(teacherPassword) },
   });
   const personnel = await prisma.personnelProfile.create({
-    data: { schoolId: school.id, userId: teacherEvaluatee.id, fullName: 'Teacher', positionRole: 'teacher', rankLevelCode: 'score_kru' },
+    data: { schoolId: school.id, userId: teacherEvaluatee.id, personId: teacherEvaluatee.personId, fullName: 'Teacher', positionRole: 'teacher', rankLevelCode: 'score_kru' },
   });
   teacherPersonnelId = personnel.id;
   await prisma.schoolMembership.create({
@@ -393,10 +394,7 @@ test('committee grant on evidence: an assigned evaluator can read their evaluate
   const cat = await prisma.evidenceCategory.upsert({
     where: { code: `score-cat-${Date.now()}` }, create: { code: `score-cat-${Date.now()}`, labelTh: 'x', allowedMimeTypes: ['application/pdf'] }, update: {},
   });
-  const createEvidence = await app.inject({
-    method: 'POST', url: '/api/v1/evidence', headers: auth(teacherToken),
-    payload: { category_id: cat.id, title: 'committee visibility test' },
-  });
+  const createEvidence = await postEvidence(app, teacherToken, { category_id: cat.id, title: 'committee visibility test' });
   assert.equal(createEvidence.statusCode, 201);
   const evidence = createEvidence.json();
 
@@ -405,7 +403,7 @@ test('committee grant on evidence: an assigned evaluator can read their evaluate
 
   const outsider = await (async () => {
     const password = 'outsider-password-1234';
-    const user = await prisma.userAccount.create({ data: { email: `score-outsider-${randomUUID()}@x.io`, displayName: 'Outsider', status: 'active', passwordHash: await argonHash(password) } });
+    const user = await prisma.userAccount.create({ data: { person: { create: { displayName: 'fixture' } }, email: `score-outsider-${randomUUID()}@x.io`, displayName: 'Outsider', status: 'active', passwordHash: await argonHash(password) } });
     await prisma.schoolMembership.create({ data: { userId: user.id, schoolId: school.id, role: 'evaluator', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
     const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: user.email, password } });
     return login.json().access_token;
@@ -462,7 +460,7 @@ test('committee seats require an eligible membership at the school, and the eval
   // Tracked explicitly: this account has no membership anywhere by design, so
   // school-scoped teardown cannot reach it.
   const foreign = created.addUser(await prisma.userAccount.create({
-    data: { email: `score-foreign-${randomUUID()}@x.io`, displayName: 'Foreign', status: 'active', passwordHash: 'x' },
+    data: { person: { create: { displayName: 'fixture' } }, email: `score-foreign-${randomUUID()}@x.io`, displayName: 'Foreign', status: 'active', passwordHash: 'x' },
   }));
   const crossSchool = await app.inject({
     method: 'POST', url: `/api/v1/rounds/${round.id}/assignments`, headers: auth(directorToken),

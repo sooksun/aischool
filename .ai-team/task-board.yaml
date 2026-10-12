@@ -1004,14 +1004,13 @@ tasks:
 
   - id: SEIP-P0-003
     title: "P0 week 2 — draft contract 4.0.0 (CCR-017) + internal AI contract"
-    status: review              # 2026-10-12 — draft done; BREAKING → owner approval required
+    status: done                # 2026-10-12 — owner approved; applied by SEIP-P1-001
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P0-001]
     decisions: [ADR-0010, ADR-0015, ADR-0016, ADR-0017, ADR-0018]
     primary_paths:
       - docs/reviews/CCR-017-contract-4.0.0.md
-      - docs/contracts/drafts/openapi-4.0.0.yaml
-      - docs/contracts/drafts/internal-ai-0.1.0.yaml
+      - docs/contracts/drafts/internal-ai-0.1.0.yaml   # openapi-4.0.0 draft applied → docs/contracts/openapi.yaml
       - scripts/security/check-contract-compatibility.mjs
     notes: >
       Draft only — nothing in force changes; apply in P1 after approval. 49 → 74
@@ -1024,7 +1023,7 @@ tasks:
       - Breaking list produced by the gate's own checker, recorded in the CCR     # DONE — 87
       - Permissions / error-code / event deltas and migration plan in the CCR     # DONE
       - Dart client compiles from the draft (swagger_parser spike)                # DONE — SEIP-P0-004
-      - Owner approves CCR-017                                                     # PENDING
+      - Owner approves CCR-017                                                     # DONE 2026-10-12
 
   - id: SEIP-P0-004
     title: "P0 week 2 — Dart client spike (swagger_parser) against contract 4.0.0 draft"
@@ -1097,3 +1096,43 @@ tasks:
       - Live sign-in against the real API                                          # DONE (host VM)
       - On an Android emulator (P0 exit wording)                                   # OPEN — needs a machine with an emulator
       - Gate green in CI                                                           # DONE — run 38313557183 (15/15)
+
+  - id: SEIP-P1-001
+    title: "P1 — apply contract 4.0.0 (CCR-017): person-owned evidence, upload sessions, two-tier mappings"
+    status: review              # 2026-10-12 — all local gates green; CI pending
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-003]
+    decisions: [ADR-0012, ADR-0015, ADR-0016, ADR-0017, ADR-0018]
+    primary_paths:
+      - docs/contracts/
+      - prisma/schema.prisma
+      - prisma/migrations/
+      - packages/database/src/repositories/
+      - apps/api/src/
+      - apps/worker/src/jobs/file-process.ts
+      - apps/web/src/
+      - tests/
+    notes: >
+      openapi 4.0.0 (74 ops) + permissions / error-codes / events 2.0.0 in force;
+      TS types and Dart client regenerated. Data model: Person; evidence owned by
+      a person with an origin school; mappings keyed on framework_version with
+      owner_confirmed → validated / returned / revoked; upload_session (single PUT
+      ≤16 MiB, else S3 multipart, server completes from ListParts);
+      idempotency_key; version columns for If-Match. Baseline migrations
+      regenerated (pre-production). API: authorizeEvidence (owner / origin-school
+      grant / committee; no route → RES-001), Idempotency-Key replay, If-Match,
+      23 phase-gated ops → 501 SYS-003, v2 scoring + reports behind
+      FEATURE_SCORING. Worker re-hashes stored originals (sha256_verified_at,
+      media_state). Web: upload sessions with per-part SHA-256 and resume,
+      validate / return / revoke on the evidence page, AI suggest button removed
+      (returns with P3). Deviations from the draft are listed in CCR-017
+      §Applied. Also fixed: the S3 conformance suite leaked its buckets and
+      exhausted SeaweedFS volumes on a long-lived dev store.
+    acceptance_criteria:
+      - "build, typecheck, lint, format, unit, contracts, ownership, dep-audit, secret-scan green"   # DONE (local)
+      - "contract compat: 95 breaking items accepted on the 2.6.0 → 4.0.0 major bump"               # DONE (local oasdiff)
+      - "test:backend 20, database 18, worker 23, api 85, security 9, storage 4, e2e 13"              # DONE (local, fresh DB)
+      - "dart client generate + analyze + test; mobile analyze + test"                                # DONE (local)
+      - CI green on the pushed commit                                                                 # OPEN
+      - "min_acr (acr ≥ 2 for validate / return / cross-person export) enforced"                     # OPEN — needs step-up auth (ADR-0014), P2
+      - "web hides v2 screens when FEATURE_SCORING=false"                                            # OPEN — web has no flag yet; production keeps the default off

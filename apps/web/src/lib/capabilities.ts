@@ -20,9 +20,9 @@ export type UiCapability =
   | 'viewReports'
   /** createReport */
   | 'createReports'
-  /** actOnMapping school-level confirm/reject (not teacher own-revoke) */
+  /** actOnMapping validate / return (not the owner's own-revoke) */
   | 'governMappings'
-  /** createEvidence / initiateFileUpload / completeFileUpload */
+  /** createEvidence / createUpload / completeUpload */
   | 'submitEvidence'
   /** listMembers / inviteMember / endMembership (CCR-014) */
   | 'manageMembers';
@@ -42,9 +42,10 @@ export const CAPABILITY_ROLES: Record<UiCapability, readonly Role[]> = {
   viewReports: ['teacher', 'deputy', 'director', 'school_admin', 'evaluator', 'area_admin'],
   // createReport
   createReports: ['director', 'school_admin'],
-  // actOnMapping: director + school_admin (school scope)
-  governMappings: ['director', 'school_admin'],
-  // createEvidence, initiateFileUpload, completeFileUpload — every role that owns
+  // actOnMapping validate/return: director (school) + evaluator (committee).
+  // school_admin manages members, not evidence judgements (permissions 2.0.0).
+  governMappings: ['director', 'evaluator'],
+  // createEvidence, createUpload, completeUpload — every role that owns
   // evidence. evaluator and area_admin are absent from the matrix row: they read
   // others' evidence (committee / area-r) but never submit their own.
   submitEvidence: ['teacher', 'deputy', 'director', 'school_admin'],

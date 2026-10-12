@@ -224,6 +224,9 @@ jobs:
       S3_SECRET_KEY: seip_ci_only_change_me
       S3_REGION: us-east-1
       JWT_SECRET: ci-only-secret-not-a-real-credential-min32
+      # v2 committee scoring + reports (ADR-0017) stay frozen in product but are
+      # exercised here, so the frozen code keeps passing its tests (CCR-017).
+      FEATURE_SCORING: "true"
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
@@ -350,6 +353,9 @@ jobs:
       S3_SECRET_KEY: seip_ci_only_change_me
       S3_REGION: us-east-1
       JWT_SECRET: ci-only-secret-not-a-real-credential-min32
+      # v2 committee scoring + reports (ADR-0017) stay frozen in product but are
+      # exercised here, so the frozen code keeps passing its tests (CCR-017).
+      FEATURE_SCORING: "true"
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
@@ -399,6 +405,9 @@ jobs:
       S3_SECRET_KEY: seip_ci_only_change_me
       S3_REGION: us-east-1
       JWT_SECRET: ci-only-secret-not-a-real-credential-min32
+      # v2 committee scoring + reports (ADR-0017) stay frozen in product but are
+      # exercised here, so the frozen code keeps passing its tests (CCR-017).
+      FEATURE_SCORING: "true"
       PORT: "3011"
       # NODE_ENV deliberately NOT set at job level: `npm ci` under
       # NODE_ENV=production skips devDependencies, so the install/build step had

@@ -3,16 +3,20 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const EVENTS_VERSION = '1.3.0';
+export const EVENTS_VERSION = '2.0.0';
 
 export type EventType =
   | 'evidence.created'
   | 'evidence.file.registered'
   | 'evidence.file.scan_completed'
-  | 'evidence.mapping.suggested'
-  | 'evidence.mapping.confirmed'
-  | 'evidence.mapping.rejected'
-  | 'evidence.mapping.revoked'
+  | 'evidence.file.verified'
+  | 'analysis.completed'
+  | 'analysis.failed'
+  | 'mapping.owner_confirmed'
+  | 'mapping.validated'
+  | 'mapping.returned'
+  | 'mapping.revoked'
+  | 'export.ready'
   | 'assignment.created'
   | 'assignment.scores.submitted'
   | 'assignment.completed'
@@ -23,7 +27,7 @@ export type EventType =
 
 export interface Event_evidence_created {
   evidence_id: string;
-  owner_personnel_id: string;
+  owner_person_id: string;
   category_code: string;
 }
 
@@ -40,31 +44,57 @@ export interface Event_evidence_file_scan_completed {
   scan_status: 'clean' | 'unscanned' | 'blocked';
 }
 
-export interface Event_evidence_mapping_suggested {
-  mapping_id: string;
+export interface Event_evidence_file_verified {
   evidence_id: string;
-  indicator_id: string;
-  mapping_source: 'human' | 'ai_suggested';
+  file_id: string;
+  sha256_matched: boolean;
 }
 
-export interface Event_evidence_mapping_confirmed {
-  mapping_id: string;
+export interface Event_analysis_completed {
+  analysis_id: string;
   evidence_id: string;
-  indicator_id: string;
-  confirmed_by_user_id: string;
+  status: 'succeeded' | 'degraded';
+  suggestion_count: number;
 }
 
-export interface Event_evidence_mapping_rejected {
-  mapping_id: string;
+export interface Event_analysis_failed {
+  analysis_id: string;
   evidence_id: string;
-  indicator_id: string;
-  rationale: string | null;
+  error_code: string;
 }
 
-export interface Event_evidence_mapping_revoked {
+export interface Event_mapping_owner_confirmed {
   mapping_id: string;
   evidence_id: string;
   indicator_id: string;
+  mapping_source: 'ai_accepted' | 'manual';
+}
+
+export interface Event_mapping_validated {
+  mapping_id: string;
+  evidence_id: string;
+  indicator_id: string;
+  validated_by_user_id: string;
+  validator_role: 'director' | 'committee';
+}
+
+export interface Event_mapping_returned {
+  mapping_id: string;
+  evidence_id: string;
+  indicator_id: string;
+  validated_by_user_id: string;
+}
+
+export interface Event_mapping_revoked {
+  mapping_id: string;
+  evidence_id: string;
+  indicator_id: string;
+}
+
+export interface Event_export_ready {
+  export_id: string;
+  kind: 'dpa_pack' | 'pa2_workbook' | 'portfolio_portable';
+  person_id: string | null;
 }
 
 export interface Event_assignment_created {
@@ -104,8 +134,7 @@ export interface Event_report_generated {
 
 export interface Event_ai_suggestion_created {
   evidence_id: string;
-  mapping_ids: string[];
-  provider: 'local_heuristic';
+  analysis_id: string;
   suggestion_count: number;
 }
 
@@ -121,10 +150,14 @@ export interface EventPayloadMap {
   'evidence.created': Event_evidence_created;
   'evidence.file.registered': Event_evidence_file_registered;
   'evidence.file.scan_completed': Event_evidence_file_scan_completed;
-  'evidence.mapping.suggested': Event_evidence_mapping_suggested;
-  'evidence.mapping.confirmed': Event_evidence_mapping_confirmed;
-  'evidence.mapping.rejected': Event_evidence_mapping_rejected;
-  'evidence.mapping.revoked': Event_evidence_mapping_revoked;
+  'evidence.file.verified': Event_evidence_file_verified;
+  'analysis.completed': Event_analysis_completed;
+  'analysis.failed': Event_analysis_failed;
+  'mapping.owner_confirmed': Event_mapping_owner_confirmed;
+  'mapping.validated': Event_mapping_validated;
+  'mapping.returned': Event_mapping_returned;
+  'mapping.revoked': Event_mapping_revoked;
+  'export.ready': Event_export_ready;
   'assignment.created': Event_assignment_created;
   'assignment.scores.submitted': Event_assignment_scores_submitted;
   'assignment.completed': Event_assignment_completed;

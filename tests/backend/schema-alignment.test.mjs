@@ -35,6 +35,9 @@ const EXPECTED_TABLES = [
   'evidence',
   'evidence_file',
   'evidence_indicator_mapping',
+  'person', // ADR-0015: evidence belongs to a person, not a school
+  'upload_session',
+  'idempotency_key',
   'evaluation_assignment',
   'committee_member',
   'indicator_score', // IndicatorScore + ChallengeScore merged (DB-001 decision)
@@ -78,23 +81,25 @@ test('ChallengeScore has no separate table (merged into indicator_score)', async
 
 test('operational tables that need tenancy carry school_id', async () => {
   // From entity-dictionary + module rules: school-scoped operational aggregates.
-  const needSchoolId = [
-    'personnel_profile',
-    'evaluation_cycle',
-    'performance_agreement',
-    'evidence',
-    'evidence_indicator_mapping',
-    'evaluation_assignment',
-    'report',
-    'approval',
-  ];
-  for (const table of needSchoolId) {
+  // Evidence is person-owned (ADR-0015); its school anchor is the ORIGIN school,
+  // which grants (director / area-r) resolve against.
+  const needSchoolColumn = {
+    personnel_profile: 'school_id',
+    evaluation_cycle: 'school_id',
+    performance_agreement: 'school_id',
+    evidence: 'origin_school_id',
+    evidence_indicator_mapping: 'school_id',
+    evaluation_assignment: 'school_id',
+    report: 'school_id',
+    approval: 'school_id',
+  };
+  for (const [table, column] of Object.entries(needSchoolColumn)) {
     const r = await q(
       `SELECT 1 FROM information_schema.columns
-       WHERE table_schema = current_schema() AND table_name = ? AND column_name = 'school_id'`,
-      [table],
+       WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
+      [table, column],
     );
-    assert.equal(r.length, 1, `${table} must have school_id for tenancy`);
+    assert.equal(r.length, 1, `${table} must have ${column} for tenancy`);
   }
 });
 
@@ -113,7 +118,12 @@ test('DB constraint objects from constraints migration are present', async () =>
     'membership_scope_ids',
     'user_email_lowercase',
     'workload_gate_not_scored',
-    'mapping_confirmed_has_actor',
+    'mapping_validated_has_actor',
+    'mapping_returned_has_note',
+    'evidence_kind_payload',
+    'evidence_performed_ordered',
+    'evidence_semester_range',
+    'upload_session_sizes',
     'round_result_percent_range',
   ]) {
     assert.ok(names.has(need), `missing CHECK constraint ${need}`);
@@ -124,7 +134,8 @@ test('DB constraint objects from constraints migration are present', async () =>
   );
   const idx = new Map(indexes.map((r) => [r.index_name, r.indexdef]));
   // Partial unique indexes (ADR-0012 §3) — not generated key columns or triggers.
-  assert.match(idx.get('evidence_indicator_mapping_active_uk') ?? '', /UNIQUE.*NULLS NOT DISTINCT.*WHERE/);
+  assert.match(idx.get('evidence_indicator_mapping_active_uk') ?? '', /UNIQUE.*\(evidence_id, indicator_id, framework_version_id\).*WHERE/);
+  assert.match(idx.get('evidence_owner_client_uuid_uk') ?? '', /UNIQUE/);
   assert.match(idx.get('evaluation_cycle_pa_uk') ?? '', /UNIQUE.*WHERE/);
 
   const gen = await q(

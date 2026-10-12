@@ -49,6 +49,49 @@ test.describe('depth: evidence upload', () => {
   });
 });
 
+test.describe('depth: two-tier mapping (ADR-0015, CCR-017)', () => {
+  test('teacher maps an indicator at upload; director validates it on the evidence page', async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page, creds.teacher.email, creds.teacher.password);
+    await expectLoggedInShell(page);
+    await page.getByRole('link', { name: 'ส่งหลักฐานใหม่' }).click();
+    await page.locator('#file-input').setInputFiles({
+      name: 'e2e-mapped.pdf', mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n'),
+    });
+    await expect(page.locator('#category-label')).toBeVisible({ timeout: 15_000 });
+    const lessonPlan = page.getByRole('radio', { name: /แผนการจัดการเรียนรู้/ });
+    if (await lessonPlan.isVisible().catch(() => false)) await lessonPlan.click();
+    else await page.getByRole('radio').first().click();
+    await page.locator('#title-input').fill('E2E mapped evidence');
+    await page.getByRole('button', { name: 'ถัดไป' }).click();
+
+    // Pick the first indicator chip — the owner's confirmation (tier 1).
+    const chips = page.getByRole('group', { name: 'ตัวชี้วัด' }).getByRole('button');
+    await expect(chips.first()).toBeVisible({ timeout: 15_000 });
+    await chips.first().click();
+    await page.getByRole('button', { name: 'ถัดไป' }).click();
+    await page.getByRole('button', { name: 'ยืนยันส่ง' }).click();
+    await expect(page.getByText(/ส่งหลักฐานสำเร็จ/)).toBeVisible({ timeout: 45_000 });
+    const idText = await page.getByText(/รหัสหลักฐาน/).textContent();
+    const evidenceId = idText!.split(':').pop()!.trim();
+
+    // The owner sees it awaiting validation, with their own revoke affordance.
+    await page.goto(`/evidence/${evidenceId}`);
+    await expect(page.getByText(/เจ้าของยืนยันแล้ว/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'รับรอง' })).toHaveCount(0);
+
+    // Tier 2: the director validates.
+    await page.context().clearCookies();
+    await page.evaluate(() => sessionStorage.clear());
+    await login(page, creds.director.email, creds.director.password);
+    await expect(page.getByRole('link', { name: 'รายงาน PA' })).toBeVisible({ timeout: 20_000 });
+    await page.goto(`/evidence/${evidenceId}`);
+    await page.getByRole('button', { name: 'รับรอง' }).click();
+    await expect(page.getByText(/รับรองแล้ว/)).toBeVisible({ timeout: 15_000 });
+  });
+});
+
 test.describe('depth: session refresh (SEC-002 / CCR-008)', () => {
   test('corrupted access token is rotated via refresh; shell stays usable', async ({ page }) => {
     await login(page, creds.teacher.email, creds.teacher.password);

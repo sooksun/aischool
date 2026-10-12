@@ -15,10 +15,13 @@ process.env.NODE_ENV = 'test';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import yaml from 'js-yaml';
 import { createPrismaClient } from '../../prisma/client.mjs';
 import { hash as argonHash } from '@node-rs/argon2';
 import { grantFor, isExempt } from '@seip/backend-shared';
 import { buildServer } from '../../apps/api/dist/server.js';
+import { PHASE_GATED_OPERATIONS } from '../../apps/api/dist/routes/phase-gated.js';
 import { cleanupSchools, trackSchools } from '../helpers/db-cleanup.mjs';
 
 const created = trackSchools();
@@ -29,7 +32,7 @@ const ROLES = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'ar
 const tokenFor = {};
 const userIdFor = {};
 let secondEvaluatorUserId;
-let school, area, evidenceId, indicatorId, mappingId, frameworkId, deletableEvidenceId, categoryId;
+let school, area, evidenceId, indicatorId, mappingId, frameworkId, categoryId, uploadId;
 let cycleId, roundId, assignmentId, teacherPersonnelId, agreementId;
 
 before(async () => {
@@ -50,7 +53,7 @@ before(async () => {
   for (const role of ROLES) {
     const password = `perm-test-${role}-password`;
     const user = await prisma.userAccount.create({
-      data: { email: `perm-${role}-${randomUUID()}@x.io`, displayName: role, status: 'active', passwordHash: await argonHash(password) },
+      data: { person: { create: { displayName: 'fixture' } }, email: `perm-${role}-${randomUUID()}@x.io`, displayName: role, status: 'active', passwordHash: await argonHash(password) },
     });
     if (role === 'area_admin') {
       // Area-scoped: schoolId is NULL by design (permissions.yaml scope: area),
@@ -62,7 +65,7 @@ before(async () => {
     } else {
       await prisma.schoolMembership.create({ data: { userId: user.id, schoolId: school.id, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
       if (role !== 'school_admin' && role !== 'evaluator') {
-        await prisma.personnelProfile.create({ data: { schoolId: school.id, userId: user.id, fullName: role, positionRole: 'teacher', rankLevelCode: 'perm_kru' } });
+        await prisma.personnelProfile.create({ data: { schoolId: school.id, userId: user.id, personId: user.personId, fullName: role, positionRole: 'teacher', rankLevelCode: 'perm_kru' } });
       }
     }
     const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: user.email, password } });
@@ -75,7 +78,7 @@ before(async () => {
   // director membership at the school — 2026-07-18 audit fix), and the per-role
   // fixture has only one of each. A second evaluator account fills seat 3.
   const secondEvaluator = await prisma.userAccount.create({
-    data: { email: `perm-evaluator2-${randomUUID()}@x.io`, displayName: 'evaluator2', status: 'active', passwordHash: await argonHash('perm-test-evaluator2-password') },
+    data: { person: { create: { displayName: 'fixture' } }, email: `perm-evaluator2-${randomUUID()}@x.io`, displayName: 'evaluator2', status: 'active', passwordHash: await argonHash('perm-test-evaluator2-password') },
   });
   await prisma.schoolMembership.create({
     data: { userId: secondEvaluator.id, schoolId: school.id, role: 'evaluator', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
@@ -89,8 +92,15 @@ before(async () => {
     where: { code: `perm-cat-${Date.now()}` }, create: { code: `perm-cat-${Date.now()}`, labelTh: 'x', allowedMimeTypes: ['application/pdf'] }, update: {},
   });
   categoryId = category.id;
-  const create = await app.inject({ method: 'POST', url: '/api/v1/evidence', headers: { authorization: `Bearer ${tokenFor.teacher}` }, payload: { category_id: category.id, title: 'perm sweep evidence' } });
+  const create = await app.inject({ method: 'POST', url: '/api/v1/evidence', headers: { authorization: `Bearer ${tokenFor.teacher}`, 'idempotency-key': randomUUID() }, payload: evidenceBody(category.id, 'perm sweep evidence') });
+  assert.equal(create.statusCode, 201, `setup: evidence fixture — ${create.body}`);
   evidenceId = create.json().id;
+
+  // A real, open upload session on the teacher's evidence, so the upload ops
+  // reach the ownership check instead of 404ing on a random id.
+  const upload = await app.inject({ method: 'POST', url: '/api/v1/uploads', headers: { authorization: `Bearer ${tokenFor.teacher}`, 'idempotency-key': randomUUID() }, payload: uploadBody() });
+  assert.equal(upload.statusCode, 201, `setup: upload fixture — ${upload.body}`);
+  uploadId = upload.json().id;
 
   const fw = created.addFramework(await prisma.frameworkVersion.upsert({
     where: { code: `perm-fw-${process.pid}` }, create: { code: `perm-fw-${process.pid}`, roleFamily: 'teacher', legalRef: 'x', revisionYear: 9999, status: 'draft', effectiveFrom: new Date() }, update: {},
@@ -100,7 +110,8 @@ before(async () => {
   const indicator = await prisma.indicator.create({ data: { domainId: domain.id, frameworkVersionId: fw.id, code: `I-${randomUUID()}`, nameTh: 'i', sortOrder: 1, isScored: true, indicatorKind: 'standard' } });
   indicatorId = indicator.id;
 
-  const mapping = await app.inject({ method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, headers: { authorization: `Bearer ${tokenFor.teacher}` }, payload: { indicator_id: indicatorId } });
+  const mapping = await app.inject({ method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, headers: { authorization: `Bearer ${tokenFor.teacher}`, 'idempotency-key': randomUUID() }, payload: { indicator_id: indicatorId } });
+  assert.equal(mapping.statusCode, 201, `setup: mapping fixture — ${mapping.body}`);
   mappingId = mapping.json().id;
 
   // evaluator holds 'committee' grants on getEvidence/listEvidenceMappings — like
@@ -161,6 +172,13 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+function evidenceBody(categoryId, title) {
+  return { category_id: categoryId, title, kind: 'file', contains_learners: 'unknown', client_uuid: randomUUID() };
+}
+function uploadBody() {
+  return { evidence_id: evidenceId, filename: 'x.pdf', content_type: 'application/pdf', byte_size: 10, checksum_sha256: 'a'.repeat(64) };
+}
+
 // operationId -> how to build a minimal, resource-valid request. Kept separate
 // from apps/api's own route table on purpose: this is the test's independent
 // understanding of the contract's shape, not a re-export of the implementation's.
@@ -194,34 +212,38 @@ const OPERATIONS = () => ({
   getFramework: { method: 'GET', url: `/api/v1/frameworks/${frameworkId}` },
   listEvidenceCategories: { method: 'GET', url: '/api/v1/evidence-categories' },
   listEvidence: { method: 'GET', url: '/api/v1/evidence' },
-  createEvidence: { method: 'POST', url: '/api/v1/evidence', payload: { category_id: randomUUID(), title: 'x' } },
+  // Random category → VAL-002 for granted roles, never PERM-001.
+  createEvidence: { method: 'POST', url: '/api/v1/evidence', payload: evidenceBody(randomUUID(), 'x') },
   getEvidence: { method: 'GET', url: `/api/v1/evidence/${evidenceId}` },
+  // No If-Match on purpose: authorization runs first, so a granted owner gets
+  // 428 RES-005 (not a permission outcome) and the fixture is never mutated.
   updateEvidence: { method: 'PATCH', url: `/api/v1/evidence/${evidenceId}`, payload: { title: 'y' } },
-  // No static url: deleteEvidence gets a FRESH, real, teacher-owned throwaway
-  // resource per role tested (built in the sweep loop below) — a random/missing
-  // id would 404 before the ownership check ever runs, and reusing one real id
-  // across roles would let an early role's 204 delete it out from under a later
-  // role's check (see the sweep's DELETABLE handling).
-  deleteEvidence: { method: 'DELETE', url: null },
-  initiateFileUpload: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/files/initiate`, payload: { content_type: 'application/pdf', byte_size: 10, checksum_sha256: 'a'.repeat(64), original_filename: 'x.pdf' } },
-  // completeFileUpload and getEvidenceFileDownloadUrl were both absent from this
-  // sweep until 2026-07-19 with no justification comment — the audit flagged
-  // them as the only unswept matrix rows besides the deliberately-excluded
-  // getAssignmentResults, and both sit on the PDPA upload/download surface.
-  // A random fileId yields RES-001 for granted roles, never PERM-001, which is
-  // all this sweep needs (same philosophy as createMapping/getReport).
-  completeFileUpload: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/files/${randomUUID()}/complete`, payload: { content_type: 'application/pdf', byte_size: 10, checksum_sha256: 'a'.repeat(64), original_filename: 'x.pdf' } },
+  deleteEvidence: { method: 'DELETE', url: `/api/v1/evidence/${evidenceId}` },
+  // Upload sessions (CCR-017). createUpload opens a fresh session per granted
+  // owner; the rest act on the fixture session. abortUpload sorts last among
+  // them.
+  createUpload: { method: 'POST', url: '/api/v1/uploads', payload: uploadBody() },
+  getUpload: { method: 'GET', url: `/api/v1/uploads/${uploadId}` },
+  // single_put session → VAL-002 for a granted owner.
+  signUploadParts: { method: 'POST', url: `/api/v1/uploads/${uploadId}/part-urls`, payload: { part_numbers: [1] } },
+  // Nothing uploaded → UPL-008 for a granted owner (and the session stays open).
+  completeUpload: { method: 'POST', url: `/api/v1/uploads/${uploadId}/complete`, payload: { part_count: 1 } },
+  // A fresh teacher-owned session per role: the owner's abort ends the session,
+  // and a later role must still meet a live one to prove ITS disposition.
+  abortUpload: { method: 'DELETE', urlFor: async () => {
+    const fresh = await app.inject({ method: 'POST', url: '/api/v1/uploads', headers: { authorization: `Bearer ${tokenFor.teacher}`, 'idempotency-key': randomUUID() }, payload: uploadBody() });
+    return `/api/v1/uploads/${fresh.json().id}`;
+  } },
+  // A random fileId yields RES-001 for granted roles, never PERM-001.
   getEvidenceFileDownloadUrl: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/files/${randomUUID()}/download-url` },
   listEvidenceMappings: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/mappings` },
-  createMapping: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, payload: { indicator_id: randomUUID() } }, // random indicator: expected to fail VAL-002 for granted roles, never PERM-001
-  // Missing framework/cycle → AI-001 for granted roles (not PERM-001).
-  suggestMappings: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings/suggest`, payload: {} },
+  createMapping: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, payload: { indicator_id: randomUUID() } }, // random indicator: VAL-002 for granted roles, never PERM-001
   listMappings: { method: 'GET', url: '/api/v1/mappings' },
-  // 'revoke' (not 'reject'): teacher's own-revoke grant permits ONLY revoke, and
-  // director/school_admin's 'school' grant permits any action — 'revoke' is the
-  // one action every granted role can legally perform, so it exercises "has grant"
-  // uniformly without a role-conditional payload.
-  actOnMapping: { method: 'PATCH', url: `/api/v1/mappings/${mappingId}`, payload: { action: 'revoke' } },
+  // Role-conditional action: an own-revoke grant permits only revoke, and a
+  // validator grant (school / committee) only validate / return. No If-Match, so
+  // a granted caller stops at 428 RES-005 after authorization and the fixture
+  // mapping is never changed.
+  actOnMapping: { method: 'PATCH', url: `/api/v1/mappings/${mappingId}`, payloadFor: (grant) => ({ action: grant === 'own-revoke' ? 'revoke' : 'validate' }) },
 
   listCycles: { method: 'GET', url: '/api/v1/cycles' },
   createCycle: { method: 'POST', url: '/api/v1/cycles', payload: { framework_version_id: frameworkId, fiscal_year: 9998, evaluation_kind: 'pa', title: 'sweep cycle', starts_on: '2026-01-01', ends_on: '2026-12-31' } },
@@ -295,25 +317,23 @@ const OPERATIONS = () => ({
 // grants but isn't OWNER_ROLE, denial is the CORRECT outcome (proves the
 // ownership boundary), not a matrix mismatch.
 const OWNER_ROLE = 'teacher';
+// Person-owned evidence (ADR-0015): a non-owner whose only route is an `own`
+// grant has NO route to the item at all, and gets RES-001 — the same answer as a
+// missing id, so the item's existence never leaks (apps/api/src/lib/evidence-access.ts).
+const EVIDENCE_OWN_OPS = new Set([
+  'getEvidence', 'updateEvidence', 'deleteEvidence', 'getEvidenceFileDownloadUrl',
+  'createUpload', 'getUpload', 'signUploadParts', 'completeUpload', 'abortUpload',
+  'listEvidenceMappings', 'createMapping', 'actOnMapping',
+]);
+// School-owned resources keyed on personnel: a non-owner holding the `own` grant
+// type is denied PERM-001 — the ownership boundary working, not a matrix gap.
 const OWN_SENSITIVE_OPS = new Set([
-  'getEvidence', 'updateEvidence', 'deleteEvidence', 'initiateFileUpload',
-  // Added 2026-07-19 with the sweep coverage itself. completeFileUpload carries
-  // the IDENTICAL matrix row to initiateFileUpload above (teacher/deputy/director
-  // all 'own'), and getEvidenceFileDownloadUrl gives deputy 'own' — so for every
-  // non-owner holding those grants, PERM-001 is the ownership boundary working,
-  // not a matrix mismatch. Enforcement was already correct; only the sweep's
-  // knowledge of it was missing, which is precisely what going unswept means.
-  'completeFileUpload', 'getEvidenceFileDownloadUrl',
-  'listEvidenceMappings', 'createMapping', 'suggestMappings', 'actOnMapping', 'getAssignment',
+  'getAssignment',
   // CCR-015. The evaluatee owns their ข้อตกลง: teacher/deputy/director all hold
-  // `own` on these, so for any of them who is not the fixture's owner, PERM-001
-  // is the ownership boundary working. Note createAgreement is deliberately
-  // included — a director filing on a teacher's behalf is denied by design (the
-  // director acknowledges, they do not author).
-  // getAgreement included, listAgreements deliberately NOT: a list with an `own`
-  // grant FILTERS rows (a deputy legitimately gets 200 with their own, possibly
-  // empty, set), while a detail read must DENY. Same distinction as
-  // listEvidence vs getEvidence above.
+  // `own` on these. createAgreement is deliberately included — a director filing
+  // on a teacher's behalf is denied by design (the director acknowledges, they do
+  // not author). listAgreements deliberately NOT: a list with an `own` grant
+  // FILTERS rows rather than denying.
   'getAgreement', 'createAgreement', 'updateAgreement', 'submitAgreement',
 ]);
 
@@ -328,21 +348,10 @@ test('every implemented operation x every role matches its permissions.yaml disp
     for (const role of ROLES) {
       const grant = grantFor(operationId, role);
 
-      let url = req.url;
-      if (operationId === 'deleteEvidence') {
-        // Fresh, real, teacher-owned resource per role — see the OPERATIONS
-        // comment above for why a shared or fake id can't test this correctly.
-        const throwaway = await app.inject({
-          method: 'POST', url: '/api/v1/evidence',
-          headers: { authorization: `Bearer ${tokenFor.teacher}` },
-          payload: { category_id: categoryId, title: `throwaway for deleteEvidence x ${role}` },
-        });
-        url = `/api/v1/evidence/${throwaway.json().id}`;
-      }
-
       const res = await app.inject({
-        method: req.method, url, headers: { authorization: `Bearer ${tokenFor[role]}`, 'x-school-id': school.id },
-        payload: req.payload,
+        method: req.method, url: req.urlFor ? await req.urlFor() : req.url,
+        headers: { authorization: `Bearer ${tokenFor[role]}`, 'x-school-id': school.id, 'idempotency-key': randomUUID() },
+        payload: req.payloadFor ? req.payloadFor(grant) : req.payload,
       });
       assertions++;
 
@@ -355,6 +364,13 @@ test('every implemented operation x every role matches its permissions.yaml disp
         // No grant at all: this role must never get past the permission check.
         if (res.statusCode !== 403 || body?.code !== 'PERM-001') {
           failures.push(`${operationId} x ${role}: expected 403 PERM-001 (no grant), got ${res.statusCode} ${body?.code ?? ''}`);
+        }
+      } else if ((grant === 'own' || grant === 'own-revoke') && EVIDENCE_OWN_OPS.has(operationId) && role !== OWNER_ROLE
+        && !(role === 'evaluator' || role === 'director')) {
+        // Own-type grant, not the owner, and no committee seat over the owner:
+        // no route to the item at all.
+        if (res.statusCode !== 404 || body?.code !== 'RES-001') {
+          failures.push(`${operationId} x ${role}: has '${grant}' but isn't the owner — expected 404 RES-001, got ${res.statusCode} ${body?.code ?? ''}`);
         }
       } else if ((grant === 'own' || grant === 'own-revoke') && OWN_SENSITIVE_OPS.has(operationId) && role !== OWNER_ROLE) {
         // Holds the grant TYPE but isn't the fixture's owner — must still be
@@ -373,16 +389,20 @@ test('every implemented operation x every role matches its permissions.yaml disp
     }
   }
 
-  // 43 of the 44 matrix rows. The one exclusion is getAssignmentResults, whose
-  // temporal rule is explained and separately covered above. Raise this number
-  // whenever a row is added — a sweep that silently covers less than the matrix
-  // is how completeFileUpload and getEvidenceFileDownloadUrl went unswept.
-  assert.ok(assertions >= 43 * 6, `sweep should cover at least 43 operations x 6 roles, got ${assertions} assertions`);
+  // Every SERVED matrix row is swept, except getAssignmentResults (temporal rule,
+  // covered in scoring-flow). Phase-gated rows answer 501 to everyone and are
+  // covered by the last test in this file. Derived from the matrix itself rather
+  // than a hand-kept count — a sweep that silently covers less than the matrix is
+  // how completeFileUpload and getEvidenceFileDownloadUrl once went unswept.
+  const matrixOps = Object.keys(yaml.load(readFileSync(new URL('../../docs/contracts/permissions.yaml', import.meta.url), 'utf8')).matrix);
+  const unswept = matrixOps.filter((op) => !(op in ops) && !PHASE_GATED_OPERATIONS.includes(op) && op !== 'getAssignmentResults');
+  assert.deepEqual(unswept, [], `matrix rows with no sweep entry: ${unswept.join(', ')}`);
+  assert.equal(assertions, Object.keys(ops).length * ROLES.length);
   assert.deepEqual(failures, [], `${failures.length} mismatch(es) between permissions.yaml and enforcement:\n${failures.join('\n')}`);
 });
 
 test('area_admin is read-only: every write operation denies it even where director/school_admin are granted', async () => {
-  const writeOps = ['createEvidence', 'updateEvidence', 'deleteEvidence', 'initiateFileUpload', 'createMapping', 'actOnMapping'];
+  const writeOps = ['createEvidence', 'updateEvidence', 'deleteEvidence', 'createUpload', 'completeUpload', 'createMapping', 'actOnMapping'];
   const ops = OPERATIONS();
   for (const operationId of writeOps) {
     const grant = grantFor(operationId, 'area_admin');
@@ -408,12 +428,12 @@ test('X-School-Id header behavior: single membership ignores it safely; multi-me
     headers: { authorization: `Bearer ${tokenFor.teacher}`, 'x-school-id': otherSchool.id },
   });
   assert.equal(ignored.statusCode, 200);
-  assert.ok(ignored.json().items.every((i) => i.school_id === school.id), "must resolve to the caller's real school, not the header");
+  assert.ok(ignored.json().items.every((i) => i.origin_school_id === school.id), "must resolve to the caller's real school, not the header");
 
   // Multi-membership user: NOW the header is load-bearing, and a value that
   // matches neither membership must be rejected outright.
   const multiPassword = 'multi-school-password-1234';
-  const multiUser = await prisma.userAccount.create({ data: { email: `perm-multi-${randomUUID()}@x.io`, displayName: 'Multi', status: 'active', passwordHash: await argonHash(multiPassword) } });
+  const multiUser = await prisma.userAccount.create({ data: { person: { create: { displayName: 'fixture' } }, email: `perm-multi-${randomUUID()}@x.io`, displayName: 'Multi', status: 'active', passwordHash: await argonHash(multiPassword) } });
   await prisma.schoolMembership.create({ data: { userId: multiUser.id, schoolId: school.id, role: 'teacher', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
   await prisma.schoolMembership.create({ data: { userId: multiUser.id, schoolId: otherSchool.id, role: 'teacher', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
   // Staff at BOTH schools. Required because listEvidence is the probe below and
@@ -426,7 +446,7 @@ test('X-School-Id header behavior: single membership ignores it safely; multi-me
   // silently vanished". See tests/security/own-scope-null-personnel.test.mjs.
   for (const schoolId of [school.id, otherSchool.id]) {
     await prisma.personnelProfile.create({
-      data: { schoolId, userId: multiUser.id, fullName: 'Multi', positionRole: 'teacher', rankLevelCode: 'perm_kru' },
+      data: { schoolId, userId: multiUser.id, personId: multiUser.personId, fullName: 'Multi', positionRole: 'teacher', rankLevelCode: 'perm_kru' },
     });
   }
   const multiLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: multiUser.email, password: multiPassword } });
@@ -446,4 +466,15 @@ test('X-School-Id header behavior: single membership ignores it safely; multi-me
     headers: { authorization: `Bearer ${multiToken}`, 'x-school-id': otherSchool.id },
   });
   assert.equal(accepted.statusCode, 200);
+});
+
+test('every phase-gated operation answers 501 SYS-003 to an authenticated caller (CCR-017)', async () => {
+  const { PHASE_GATED_ROUTES } = await import('../../apps/api/dist/routes/phase-gated.js');
+  assert.ok(PHASE_GATED_OPERATIONS.length >= 20);
+  for (const [method, path, operationId] of PHASE_GATED_ROUTES) {
+    const url = '/api/v1' + path.replace(/:[A-Za-z]+/g, randomUUID());
+    const res = await app.inject({ method: method.toUpperCase(), url, headers: { authorization: `Bearer ${tokenFor.teacher}` }, payload: method === 'get' || method === 'delete' ? undefined : {} });
+    assert.equal(res.statusCode, 501, `${operationId}: ${res.statusCode} ${res.body}`);
+    assert.equal(res.json().code, 'SYS-003');
+  }
 });

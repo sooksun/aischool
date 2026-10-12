@@ -48,6 +48,15 @@ export async function getPersonnelForUser(userId: string, schoolId: string) {
   });
 }
 
+/** The active staff row of a person at a school, or null — used when a school
+ * admin acts on behalf of a person (createEvidence owner_person_id). */
+export async function getPersonnelInSchoolByPerson(schoolId: string, personId: string) {
+  return prisma.personnelProfile.findFirst({
+    where: { schoolId, personId, status: 'active' },
+    select: { id: true, personId: true },
+  });
+}
+
 export async function getSchoolAreaId(schoolId: string): Promise<string | null> {
   const school = await prisma.school.findUnique({ where: { id: schoolId }, select: { areaId: true } });
   return school?.areaId ?? null;
@@ -211,7 +220,7 @@ export async function inviteMember(input: InviteMemberInput): Promise<InviteMemb
   return prisma.$transaction(async (tx) => {
     const existing = await tx.userAccount.findUnique({
       where: { email },
-      select: { id: true, passwordHash: true, status: true },
+      select: { id: true, passwordHash: true, status: true, personId: true },
     });
 
     if (existing) {
@@ -232,9 +241,9 @@ export async function inviteMember(input: InviteMemberInput): Promise<InviteMemb
         ? await tx.userAccount.update({
             where: { id: existing.id },
             data: { inviteTokenHash: input.inviteTokenHash, inviteExpiresAt: input.inviteExpiresAt },
-            select: { id: true, status: true },
+            select: { id: true, status: true, personId: true },
           })
-        : { id: existing.id, status: existing.status }
+        : { id: existing.id, status: existing.status, personId: existing.personId }
       : await tx.userAccount.create({
           data: {
             email,
@@ -242,9 +251,20 @@ export async function inviteMember(input: InviteMemberInput): Promise<InviteMemb
             status: 'invited',
             inviteTokenHash: input.inviteTokenHash,
             inviteExpiresAt: input.inviteExpiresAt,
+            // The account belongs to a person from the start (ADR-0015): the
+            // portfolio is theirs, not the school's or the account's.
+            person: { create: { displayName: input.displayName } },
           },
-          select: { id: true, status: true },
+          select: { id: true, status: true, personId: true },
         });
+
+    // Accounts created before persons existed (none in production; kept honest)
+    // get their person on first need, so a personnel profile always has one.
+    const personId = user.personId ?? (await tx.userAccount.update({
+      where: { id: user.id },
+      data: { person: { create: { displayName: input.displayName } } },
+      select: { personId: true },
+    })).personId!;
 
     const membership = await tx.schoolMembership.create({
       data: {
@@ -263,6 +283,7 @@ export async function inviteMember(input: InviteMemberInput): Promise<InviteMemb
         data: {
           schoolId: input.schoolId,
           userId: user.id,
+          personId,
           fullName: input.personnel.fullName,
           employeeCode: input.personnel.employeeCode ?? null,
           positionRole: input.personnel.positionRole,

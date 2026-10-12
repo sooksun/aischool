@@ -57,10 +57,10 @@ async function fixture(deletedAt) {
     update: {},
   });
   const user = await prisma.userAccount.create({
-    data: { email: `gc-${randomUUID().slice(0, 8)}@example.com`, displayName: 'GC', status: 'active', passwordHash: 'x' },
+    data: { email: `gc-${randomUUID().slice(0, 8)}@example.com`, displayName: 'GC', status: 'active', passwordHash: 'x', person: { create: { displayName: 'GC' } } },
   });
   const personnel = await prisma.personnelProfile.create({
-    data: { schoolId: school.id, userId: user.id, fullName: 'GC Teacher', positionRole: 'teacher', rankLevelCode: 'gc_kru' },
+    data: { schoolId: school.id, userId: user.id, personId: user.personId, fullName: 'GC Teacher', positionRole: 'teacher', rankLevelCode: 'gc_kru' },
   });
   const cat = await prisma.evidenceCategory.upsert({
     where: { code: 'other_document' },
@@ -69,7 +69,7 @@ async function fixture(deletedAt) {
   });
   const evidence = await prisma.evidence.create({
     data: {
-      schoolId: school.id, ownerPersonnelId: personnel.id, uploadedByUserId: user.id,
+      originSchoolId: school.id, ownerPersonId: personnel.personId, uploadedByUserId: user.id,
       categoryId: cat.id, title: 'gc test', status: 'active', deletedAt,
     },
   });

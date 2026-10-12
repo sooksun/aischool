@@ -52,7 +52,7 @@ function computePartPercent(items: { rubricLevel: number; maxPoints: number | nu
   return (earned / totalWeight) * 100;
 }
 
-export const scoringRoutes: FastifyPluginAsync = async (app) => {
+export const scoringRoutes: FastifyPluginAsync<{ featureScoring?: boolean }> = async (app, { featureScoring = false }) => {
   app.get('/rounds/:roundId/assignments', { config: { operationId: 'listAssignments' } }, async (request) => {
     const auth = request.auth!;
     const { roundId } = z.object({ roundId: z.string().uuid() }).parse(request.params);
@@ -202,6 +202,9 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
       challenge: serializeChallenge(assignment.agreement?.challenges[0]),
     };
   });
+
+  // v2 (ADR-0017): committee scoring is frozen behind FEATURE_SCORING.
+  if (!featureScoring) return;
 
   app.put('/assignments/:assignmentId/my-scores', { config: { operationId: 'submitMyScores' } }, async (request) => {
     const auth = request.auth!;

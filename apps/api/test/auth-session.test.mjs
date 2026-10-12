@@ -25,7 +25,7 @@ before(async () => {
 
   email = `session-${randomUUID()}@x.io`;
   const user = await prisma.userAccount.create({
-    data: { email, displayName: 'Session', status: 'active', passwordHash: await argonHash(password) },
+    data: { person: { create: { displayName: 'fixture' } }, email, displayName: 'Session', status: 'active', passwordHash: await argonHash(password) },
   });
   const school = created.add(await prisma.school.create({ data: { code: `session-${randomUUID()}`, name: 'Session School' } }));
   await prisma.schoolMembership.create({
@@ -128,7 +128,7 @@ test('refresh rejects garbage (AUTH-001), expired tokens (AUTH-002), and logout 
   // Tracked explicitly: deliberately a member of nothing, so school-scoped
   // teardown cannot reach it.
   created.addUser(await prisma.userAccount.create({
-    data: { email: attackerEmail, displayName: 'Attacker', status: 'active', passwordHash: await argonHash(attackerPassword) },
+    data: { person: { create: { displayName: 'fixture' } }, email: attackerEmail, displayName: 'Attacker', status: 'active', passwordHash: await argonHash(attackerPassword) },
   }));
   const attackerLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: attackerEmail, password: attackerPassword } });
   assert.equal(attackerLogin.statusCode, 200);

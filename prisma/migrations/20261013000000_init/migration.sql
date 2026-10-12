@@ -43,16 +43,40 @@ CREATE TYPE "AgreementStatus" AS ENUM ('draft', 'submitted', 'acknowledged');
 CREATE TYPE "EvidenceStatus" AS ENUM ('draft', 'active', 'archived', 'rejected');
 
 -- CreateEnum
-CREATE TYPE "ScanStatus" AS ENUM ('pending', 'clean', 'unscanned', 'blocked');
+CREATE TYPE "ScanStatus" AS ENUM ('pending', 'clean', 'sanitised', 'unscanned', 'blocked');
 
 -- CreateEnum
 CREATE TYPE "StorageProvider" AS ENUM ('s3_compatible');
 
 -- CreateEnum
-CREATE TYPE "MappingSource" AS ENUM ('human', 'ai_suggested');
+CREATE TYPE "MappingSource" AS ENUM ('ai_accepted', 'manual');
 
 -- CreateEnum
-CREATE TYPE "MappingStatus" AS ENUM ('suggested', 'confirmed', 'rejected', 'revoked');
+CREATE TYPE "EvidenceKind" AS ENUM ('file', 'link', 'note');
+
+-- CreateEnum
+CREATE TYPE "PerformedDateSource" AS ENUM ('teacher', 'exif', 'ai_suggested_confirmed');
+
+-- CreateEnum
+CREATE TYPE "ContainsLearners" AS ENUM ('unknown', 'yes', 'no');
+
+-- CreateEnum
+CREATE TYPE "FileRole" AS ENUM ('original', 'review_720p', 'audio_16k', 'audio_proxy', 'keyframe', 'poster', 'ocr_pdf', 'blurred', 'redacted', 'dpa_ready');
+
+-- CreateEnum
+CREATE TYPE "MediaState" AS ENUM ('uploading', 'verifying', 'processing', 'ready', 'failed');
+
+-- CreateEnum
+CREATE TYPE "UploadProtocol" AS ENUM ('single_put', 's3_multipart');
+
+-- CreateEnum
+CREATE TYPE "UploadStatus" AS ENUM ('open', 'completing', 'completed', 'aborted', 'expired');
+
+-- CreateEnum
+CREATE TYPE "MappingStatus" AS ENUM ('owner_confirmed', 'validated', 'returned', 'revoked');
+
+-- CreateEnum
+CREATE TYPE "ValidatorRole" AS ENUM ('director', 'committee');
 
 -- CreateEnum
 CREATE TYPE "AssignmentStatus" AS ENUM ('pending', 'in_progress', 'completed', 'void');
@@ -87,8 +111,19 @@ CREATE TABLE "school" (
 );
 
 -- CreateTable
+CREATE TABLE "person" (
+    "id" UUID NOT NULL,
+    "display_name" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'active',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "person_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "user_account" (
     "id" UUID NOT NULL,
+    "person_id" UUID,
     "email" TEXT NOT NULL,
     "display_name" TEXT NOT NULL,
     "password_hash" TEXT,
@@ -143,6 +178,7 @@ CREATE TABLE "personnel_profile" (
     "id" UUID NOT NULL,
     "school_id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
+    "person_id" UUID NOT NULL,
     "employee_code" TEXT,
     "full_name" TEXT NOT NULL,
     "position_role" "RoleFamily" NOT NULL,
@@ -300,15 +336,28 @@ CREATE TABLE "agreement_challenge" (
 -- CreateTable
 CREATE TABLE "evidence" (
     "id" UUID NOT NULL,
-    "school_id" UUID NOT NULL,
-    "owner_personnel_id" UUID NOT NULL,
+    "owner_person_id" UUID NOT NULL,
+    "controller_area_id" UUID,
+    "origin_school_id" UUID NOT NULL,
     "uploaded_by_user_id" UUID NOT NULL,
     "category_id" UUID NOT NULL,
+    "kind" "EvidenceKind" NOT NULL DEFAULT 'file',
     "title" VARCHAR(300) NOT NULL,
     "description" TEXT,
+    "link_url" TEXT,
+    "note_text" TEXT,
     "status" "EvidenceStatus" NOT NULL DEFAULT 'draft',
     "captured_at" TIMESTAMP(3),
+    "performed_from" DATE,
+    "performed_to" DATE,
+    "performed_date_source" "PerformedDateSource",
+    "academic_year_be" INTEGER,
+    "semester" INTEGER,
+    "contains_learners" "ContainsLearners" NOT NULL DEFAULT 'unknown',
+    "client_uuid" UUID,
+    "version" INTEGER NOT NULL DEFAULT 1,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted_at" TIMESTAMP(3),
 
     CONSTRAINT "evidence_pkey" PRIMARY KEY ("id")
@@ -324,6 +373,14 @@ CREATE TABLE "evidence_file" (
     "byte_size" BIGINT NOT NULL,
     "checksum_sha256" TEXT NOT NULL,
     "duration_seconds" INTEGER,
+    "duration_ms" INTEGER,
+    "role" "FileRole" NOT NULL DEFAULT 'original',
+    "parent_file_id" UUID,
+    "sha256_verified_at" TIMESTAMP(3),
+    "page_count" INTEGER,
+    "width" INTEGER,
+    "height" INTEGER,
+    "media_state" "MediaState" NOT NULL DEFAULT 'uploading',
     "original_filename" VARCHAR(255) NOT NULL,
     "scan_status" "ScanStatus" NOT NULL DEFAULT 'pending',
     "scanned_at" TIMESTAMP(3),
@@ -372,16 +429,56 @@ CREATE TABLE "evidence_indicator_mapping" (
     "school_id" UUID NOT NULL,
     "evidence_id" UUID NOT NULL,
     "indicator_id" UUID NOT NULL,
-    "cycle_id" UUID,
-    "mapping_source" "MappingSource" NOT NULL DEFAULT 'human',
-    "status" "MappingStatus" NOT NULL DEFAULT 'suggested',
-    "rationale" TEXT,
-    "mapped_by_user_id" UUID NOT NULL,
-    "confirmed_by_user_id" UUID,
-    "mapped_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "confirmed_at" TIMESTAMP(3),
+    "framework_version_id" UUID NOT NULL,
+    "mapping_source" "MappingSource" NOT NULL,
+    "status" "MappingStatus" NOT NULL DEFAULT 'owner_confirmed',
+    "ai_suggestion_id" UUID,
+    "note" TEXT,
+    "owner_confirmed_by_user_id" UUID NOT NULL,
+    "owner_confirmed_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "validated_by_user_id" UUID,
+    "validated_at" TIMESTAMP(3),
+    "validator_role" "ValidatorRole",
+    "return_note" TEXT,
+    "locator_snapshot" JSONB,
+    "version" INTEGER NOT NULL DEFAULT 1,
+    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "evidence_indicator_mapping_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "upload_session" (
+    "id" UUID NOT NULL,
+    "evidence_id" UUID NOT NULL,
+    "file_id" UUID NOT NULL,
+    "protocol" "UploadProtocol" NOT NULL,
+    "s3_upload_id" TEXT,
+    "part_size" INTEGER NOT NULL,
+    "part_count" INTEGER NOT NULL,
+    "byte_size" BIGINT NOT NULL,
+    "checksum_sha256" TEXT NOT NULL,
+    "status" "UploadStatus" NOT NULL DEFAULT 'open',
+    "created_by_user_id" UUID NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "upload_session_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "idempotency_key" (
+    "id" UUID NOT NULL,
+    "actor_user_id" UUID NOT NULL,
+    "key" UUID NOT NULL,
+    "operation_id" TEXT NOT NULL,
+    "request_hash" TEXT NOT NULL,
+    "status_code" INTEGER NOT NULL,
+    "response" JSONB NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "idempotency_key_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -504,6 +601,9 @@ CREATE UNIQUE INDEX "school_code_key" ON "school"("code");
 CREATE INDEX "school_area_id_idx" ON "school"("area_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "user_account_person_id_key" ON "user_account"("person_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "user_account_email_key" ON "user_account"("email");
 
 -- CreateIndex
@@ -523,6 +623,9 @@ CREATE INDEX "school_membership_school_id_role_idx" ON "school_membership"("scho
 
 -- CreateIndex
 CREATE INDEX "personnel_profile_school_id_status_idx" ON "personnel_profile"("school_id", "status");
+
+-- CreateIndex
+CREATE INDEX "personnel_profile_person_id_idx" ON "personnel_profile"("person_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "personnel_profile_school_id_employee_code_key" ON "personnel_profile"("school_id", "employee_code");
@@ -567,7 +670,13 @@ CREATE UNIQUE INDEX "workload_declaration_agreement_id_round_id_key" ON "workloa
 CREATE UNIQUE INDEX "agreement_challenge_agreement_id_indicator_id_key" ON "agreement_challenge"("agreement_id", "indicator_id");
 
 -- CreateIndex
-CREATE INDEX "evidence_school_id_owner_personnel_id_deleted_at_idx" ON "evidence"("school_id", "owner_personnel_id", "deleted_at");
+CREATE INDEX "evidence_origin_school_id_deleted_at_idx" ON "evidence"("origin_school_id", "deleted_at");
+
+-- CreateIndex
+CREATE INDEX "evidence_owner_person_id_deleted_at_idx" ON "evidence"("owner_person_id", "deleted_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "evidence_owner_client_uuid_uk" ON "evidence"("owner_person_id", "client_uuid");
 
 -- CreateIndex
 CREATE INDEX "evidence_file_evidence_id_idx" ON "evidence_file"("evidence_id");
@@ -595,6 +704,21 @@ CREATE INDEX "evidence_indicator_mapping_indicator_id_status_idx" ON "evidence_i
 
 -- CreateIndex
 CREATE INDEX "evidence_indicator_mapping_school_id_status_idx" ON "evidence_indicator_mapping"("school_id", "status");
+
+-- CreateIndex
+CREATE INDEX "evidence_indicator_mapping_evidence_id_status_idx" ON "evidence_indicator_mapping"("evidence_id", "status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "upload_session_file_id_key" ON "upload_session"("file_id");
+
+-- CreateIndex
+CREATE INDEX "upload_session_status_expires_at_idx" ON "upload_session"("status", "expires_at");
+
+-- CreateIndex
+CREATE INDEX "idempotency_key_expires_at_idx" ON "idempotency_key"("expires_at");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "idempotency_key_actor_user_id_key_key" ON "idempotency_key"("actor_user_id", "key");
 
 -- CreateIndex
 CREATE INDEX "evaluation_assignment_school_id_status_idx" ON "evaluation_assignment"("school_id", "status");
@@ -636,6 +760,9 @@ CREATE INDEX "audit_event_entity_type_entity_id_idx" ON "audit_event"("entity_ty
 ALTER TABLE "school" ADD CONSTRAINT "school_area_id_fkey" FOREIGN KEY ("area_id") REFERENCES "area"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "user_account" ADD CONSTRAINT "user_account_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "person"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "refresh_token" ADD CONSTRAINT "refresh_token_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user_account"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -652,6 +779,9 @@ ALTER TABLE "personnel_profile" ADD CONSTRAINT "personnel_profile_school_id_fkey
 
 -- AddForeignKey
 ALTER TABLE "personnel_profile" ADD CONSTRAINT "personnel_profile_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "user_account"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "personnel_profile" ADD CONSTRAINT "personnel_profile_person_id_fkey" FOREIGN KEY ("person_id") REFERENCES "person"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "personnel_profile" ADD CONSTRAINT "personnel_profile_rank_level_code_fkey" FOREIGN KEY ("rank_level_code") REFERENCES "rank_level"("code") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -708,10 +838,13 @@ ALTER TABLE "agreement_challenge" ADD CONSTRAINT "agreement_challenge_agreement_
 ALTER TABLE "agreement_challenge" ADD CONSTRAINT "agreement_challenge_indicator_id_fkey" FOREIGN KEY ("indicator_id") REFERENCES "indicator"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "evidence" ADD CONSTRAINT "evidence_school_id_fkey" FOREIGN KEY ("school_id") REFERENCES "school"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "evidence" ADD CONSTRAINT "evidence_owner_person_id_fkey" FOREIGN KEY ("owner_person_id") REFERENCES "person"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "evidence" ADD CONSTRAINT "evidence_owner_personnel_id_fkey" FOREIGN KEY ("owner_personnel_id") REFERENCES "personnel_profile"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "evidence" ADD CONSTRAINT "evidence_controller_area_id_fkey" FOREIGN KEY ("controller_area_id") REFERENCES "area"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "evidence" ADD CONSTRAINT "evidence_origin_school_id_fkey" FOREIGN KEY ("origin_school_id") REFERENCES "school"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "evidence" ADD CONSTRAINT "evidence_uploaded_by_user_id_fkey" FOREIGN KEY ("uploaded_by_user_id") REFERENCES "user_account"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -732,13 +865,25 @@ ALTER TABLE "evidence_indicator_mapping" ADD CONSTRAINT "evidence_indicator_mapp
 ALTER TABLE "evidence_indicator_mapping" ADD CONSTRAINT "evidence_indicator_mapping_indicator_id_fkey" FOREIGN KEY ("indicator_id") REFERENCES "indicator"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "evidence_indicator_mapping" ADD CONSTRAINT "evidence_indicator_mapping_cycle_id_fkey" FOREIGN KEY ("cycle_id") REFERENCES "evaluation_cycle"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "evidence_indicator_mapping" ADD CONSTRAINT "evidence_indicator_mapping_framework_version_id_fkey" FOREIGN KEY ("framework_version_id") REFERENCES "framework_version"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "evidence_indicator_mapping" ADD CONSTRAINT "evidence_indicator_mapping_mapped_by_user_id_fkey" FOREIGN KEY ("mapped_by_user_id") REFERENCES "user_account"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "evidence_indicator_mapping" ADD CONSTRAINT "evidence_indicator_mapping_owner_confirmed_by_user_id_fkey" FOREIGN KEY ("owner_confirmed_by_user_id") REFERENCES "user_account"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "evidence_indicator_mapping" ADD CONSTRAINT "evidence_indicator_mapping_confirmed_by_user_id_fkey" FOREIGN KEY ("confirmed_by_user_id") REFERENCES "user_account"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "evidence_indicator_mapping" ADD CONSTRAINT "evidence_indicator_mapping_validated_by_user_id_fkey" FOREIGN KEY ("validated_by_user_id") REFERENCES "user_account"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "upload_session" ADD CONSTRAINT "upload_session_evidence_id_fkey" FOREIGN KEY ("evidence_id") REFERENCES "evidence"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "upload_session" ADD CONSTRAINT "upload_session_file_id_fkey" FOREIGN KEY ("file_id") REFERENCES "evidence_file"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "upload_session" ADD CONSTRAINT "upload_session_created_by_user_id_fkey" FOREIGN KEY ("created_by_user_id") REFERENCES "user_account"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "idempotency_key" ADD CONSTRAINT "idempotency_key_actor_user_id_fkey" FOREIGN KEY ("actor_user_id") REFERENCES "user_account"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "evaluation_assignment" ADD CONSTRAINT "evaluation_assignment_school_id_fkey" FOREIGN KEY ("school_id") REFERENCES "school"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

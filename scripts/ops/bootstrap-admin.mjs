@@ -92,7 +92,8 @@ try {
           select: { id: true },
         })
       : await tx.userAccount.create({
-          data: { email, displayName, passwordHash, status: 'active' },
+          // Every account belongs to a person (ADR-0015).
+          data: { email, displayName, passwordHash, status: 'active', person: { create: { displayName } } },
           select: { id: true },
         });
 

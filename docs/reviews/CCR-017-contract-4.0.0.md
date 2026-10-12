@@ -1,9 +1,9 @@
 # CCR-017: contract 4.0.0, built around the purpose: capture once, AI suggests in the background, the owner confirms
 
-Status: **PROPOSED 2026-10-12 — awaiting owner approval** (BREAKING; contract-policy.md requires approval before merge)
+Status: **APPROVED 2026-10-12 by the owner** (BREAKING). Application is SEIP-P1-001.
 Decisions: ADR-0010 (in-country AI), ADR-0015 (portfolio ownership), ADR-0016 (clients + contract 4.0), ADR-0017 (v1 scope), ADR-0018 (upload integrity)
 Phase: P0 weeks 2–3 (plan.md §7). Implementation follows approval and spans P1–P5.
-Drafts: [`docs/contracts/drafts/openapi-4.0.0.yaml`](../contracts/drafts/openapi-4.0.0.yaml) · [`docs/contracts/drafts/internal-ai-0.1.0.yaml`](../contracts/drafts/internal-ai-0.1.0.yaml)
+Applied as [`docs/contracts/openapi.yaml`](../contracts/openapi.yaml) (the 4.0.0 draft was removed on apply) · Draft: [`docs/contracts/drafts/internal-ai-0.1.0.yaml`](../contracts/drafts/internal-ai-0.1.0.yaml)
 
 ## Why this is one breaking release, not a series of minors
 
@@ -186,7 +186,37 @@ Operations are added as the phases need them. The 4.0.0 contract is applied in o
    - The internal AI contract is pull-only over mTLS, holds no database credentials, and gets redacted text.
 4. **Error and permission consistency.** Every new operation has a row in the permissions delta, and every non-2xx in the draft maps to a code in the error delta. `401` is on every operation, `403` on every scoped one, and `404` wherever a path id is resolved.
 
-## Open questions for the owner
+## Owner decision (2026-10-12)
+
+The owner approved CCR-017. Questions 2 and 3 below were not answered separately, so the drafted defaults stand. The owner can change either at any time; both are permission or grant rows, not contract shape.
+
+- **Q2:** director or school_admin may build another person's export, with acr ≥ 2.
+- **Q3:** the committee gets `view_derivative` by default, and the owner grants originals per item.
+
+## Applied (SEIP-P1-001, 2026-10-12)
+
+Steps 2 and 3 of the migration plan are done in one change on `claude/remote-control-5aclif`. `openapi.yaml` is 4.0.0 (74 operations), and permissions, error-codes and events are each 2.0.0. The TS types and the Dart client are regenerated from them.
+
+### What changed between the approved draft and what was applied
+
+None of these changes widens a grant or adds a breaking shape beyond the approved draft.
+
+- **`Evidence.controller_area_id` is nullable.** A school without an ESA has no area to name. The draft had it required.
+- **`UploadPartUrlsRequest.checksums_sha256` is new and optional.** It holds base64 SHA-256 values aligned with `part_numbers`. When present, each presigned part signs `x-amz-checksum-sha256`, and the store refuses a part whose bytes differ. The conformance suite and `evidence-flow.test.mjs` both prove this against SeaweedFS. Without it, the draft promised per-part integrity that a presign could not carry.
+- **Query parameters fixed:** `listEvidence` takes `owner_person_id`, and `listMappings` takes `framework_version_id`. The draft still named the 3.x `owner_personnel_id` and `cycle_id`.
+- **`createMapping` declares the 200 replay response,** like every other `Idempotency-Key` create.
+- **The baseline migration is folded, not appended.** Nothing is deployed (pre-production, ADR-0012), so `20261013000000_init` and `…0100_constraints` were regenerated rather than adding a third migration on top.
+- **`listAssignmentEvidence` is phase-gated (P4)** with the other 22 unbuilt operations. All 23 answer `501 SYS-003` after authentication. The permission sweep asserts every one of them.
+- **Validate and return are served now (P1),** not at P4–P5 as step 6 said. The two-tier mapping is the core of "upload once, reuse across indicators", and reports already read only `validated` mappings. Leaving validation unbuilt would have left reports empty.
+- **`min_acr` is declared but not enforced yet.** Step-up authentication (ADR-0014) lands with the Flutter login in P2. Until then a validate or return succeeds at acr 1. This is the one place where the served behaviour is weaker than the contract text, and it is recorded on the board.
+- **No separate `frozen` CI job.** The integration, permission and e2e jobs run with `FEATURE_SCORING=true`, so the v2 code keeps its tests. `apps/api/test/feature-flags.test.mjs` proves that with the flag off, the v2 routes are not registered.
+
+### Behaviour worth knowing
+
+- **Ownership is the person** (ADR-0015), so a teacher's portfolio survives a transfer. A caller whose only route to an item is an `own` grant they do not hold for that item gets `RES-001`, not `PERM-001`, so the item's existence never leaks. `PERM-001` remains for "you can see this school, but your role may not do this". An area_admin over the school's area counts as being able to see it.
+- **The worker re-hashes every stored original** against `checksum_sha256`. A match sets `sha256_verified_at` and `media_state=ready`. A mismatch blocks the file and sets `media_state=failed`.
+
+## Open questions for the owner (as asked)
 
 1. **Approve CCR-017 (breaking)?** If yes, the draft is applied in P1 (step 2), not now. PR #3 stays mergeable either way, because nothing in force changes.
 2. **`createExport` for another person:** the director or school_admin can build a teacher's DPA pack (with acr 2). Is that wanted, or should packs always be teacher-built?

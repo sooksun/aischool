@@ -45,6 +45,7 @@ describe('capabilitiesFromMemberships', () => {
     expect(c.viewReports).toBe(true);
     expect(c.manageCycles).toBe(false);
     expect(c.createReports).toBe(false);
+    expect(c.governMappings).toBe(true);
   });
 
   it('area_admin: view reports (listReports area-r), not create', () => {

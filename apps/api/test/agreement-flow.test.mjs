@@ -33,7 +33,7 @@ function auth(t) { return { authorization: `Bearer ${t}` }; }
 async function makeUser({ role, withPersonnel, schoolId }) {
   const email = `agr-${role}-${randomUUID()}@x.io`;
   const user = await prisma.userAccount.create({
-    data: { email, displayName: role, status: 'active', passwordHash: await argonHash(PASSWORD) },
+    data: { person: { create: { displayName: 'fixture' } }, email, displayName: role, status: 'active', passwordHash: await argonHash(PASSWORD) },
   });
   await prisma.schoolMembership.create({
     data: { userId: user.id, schoolId, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
@@ -41,7 +41,7 @@ async function makeUser({ role, withPersonnel, schoolId }) {
   let personnelId = null;
   if (withPersonnel) {
     const p = await prisma.personnelProfile.create({
-      data: { schoolId, userId: user.id, fullName: `${role} name`, positionRole: 'teacher', rankLevelCode: 'apply_adapt', status: 'active' },
+      data: { schoolId, userId: user.id, personId: user.personId, fullName: `${role} name`, positionRole: 'teacher', rankLevelCode: 'apply_adapt', status: 'active' },
     });
     personnelId = p.id;
   }

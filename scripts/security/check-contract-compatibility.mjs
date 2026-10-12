@@ -29,8 +29,17 @@ if (!baseFile || !headFile) {
   process.exit(2);
 }
 
+// Each spec is read exactly ONCE. Reading twice silently compared an EMPTY base
+// when a path was a pipe (`<(git show …)`): the version check consumed it and
+// oasdiff then saw nothing — "no breaking changes" for a 3.1.0 → 4.0.0 diff.
+const specs = new Map();
+const readSpec = (file) => {
+  if (!specs.has(file)) specs.set(file, readFileSync(file));
+  return specs.get(file);
+};
+
 function majorVersion(file) {
-  const doc = yaml.load(readFileSync(file, 'utf8'));
+  const doc = yaml.load(readSpec(file).toString('utf8'));
   const v = doc?.info?.version;
   if (!v) throw new Error(`${file}: info.version missing`);
   const major = Number(String(v).split('.')[0]);
@@ -45,12 +54,14 @@ const has = (cmd) => {
 
 function runOasdiff(base, head) {
   const OASDIFF_DIGEST = 'tufin/oasdiff@sha256:e7f1b7531e9bbb12d61fc28c4d2a59896a47ee4fb8159eef0ff7aa76804acfb6'; // pinned, SEC-REPO-2
-  if (has('oasdiff')) {
-    return spawnSync('oasdiff', ['breaking', base, head, '--format', 'json'], { encoding: 'utf8' });
-  }
   const dir = mkdtempSync(join(tmpdir(), 'oasdiff-'));
-  writeFileSync(join(dir, 'base.yaml'), readFileSync(base));
-  writeFileSync(join(dir, 'head.yaml'), readFileSync(head));
+  if (has('oasdiff')) {
+    writeFileSync(join(dir, 'base.yaml'), readSpec(base));
+    writeFileSync(join(dir, 'head.yaml'), readSpec(head));
+    return spawnSync('oasdiff', ['breaking', join(dir, 'base.yaml'), join(dir, 'head.yaml'), '--format', 'json'], { encoding: 'utf8' });
+  }
+  writeFileSync(join(dir, 'base.yaml'), readSpec(base));
+  writeFileSync(join(dir, 'head.yaml'), readSpec(head));
   return spawnSync(
     'docker', ['run', '--rm', '-v', `${dir}:/spec`, OASDIFF_DIGEST, 'breaking', '/spec/base.yaml', '/spec/head.yaml', '--format', 'json'],
     { encoding: 'utf8' },

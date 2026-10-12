@@ -21,6 +21,12 @@
 // what deactivation should do.
 //
 // Contract: PERM-001, matching the existing correct guard in reports.ts.
+//
+// ADR-0015 / CCR-017 moved evidence ownership from the personnel row to the
+// PERSON, so for listEvidence the scope is now the person, which survives a
+// transfer: the orphan below sees their own (empty) portfolio — still never the
+// victim's. The fail-closed case for evidence is now a caller with no person
+// record at all.
 process.env.NODE_ENV = 'test';
 
 import { test, before, after } from 'node:test';
@@ -37,7 +43,7 @@ const prisma = createPrismaClient();
 let app;
 let school, roundId;
 let victimEvidenceId, victimAssignmentId;
-let orphanToken;
+let orphanToken, personlessToken;
 
 const PASSWORD = 'own-scope-null-personnel-password';
 
@@ -59,21 +65,21 @@ before(async () => {
 
   // --- VICTIM: an ordinary active teacher whose data must stay private ---
   const victim = await prisma.userAccount.create({
-    data: {
+    data: { person: { create: { displayName: 'fixture' } },
       email: `nullpers-victim-${randomUUID()}@x.io`, displayName: 'Victim',
       status: 'active', passwordHash: await argonHash(PASSWORD),
     },
   });
   const victimPersonnel = await prisma.personnelProfile.create({
     data: {
-      schoolId: school.id, userId: victim.id, fullName: 'Victim Teacher',
+      schoolId: school.id, userId: victim.id, personId: victim.personId, fullName: 'Victim Teacher',
       positionRole: 'teacher', rankLevelCode: 'nullpers_kru',
     },
   });
   const evidence = await prisma.evidence.create({
     data: {
-      school: { connect: { id: school.id } },
-      owner: { connect: { id: victimPersonnel.id } },
+      originSchool: { connect: { id: school.id } },
+      owner: { connect: { id: victim.personId } },
       category: { connect: { id: category.id } },
       uploadedBy: { connect: { id: victim.id } },
       title: 'VICTIM PRIVATE EVIDENCE', status: 'active',
@@ -83,14 +89,14 @@ before(async () => {
 
   // --- ORPHAN CALLER: membership still active, personnel profile deactivated ---
   const orphan = await prisma.userAccount.create({
-    data: {
+    data: { person: { create: { displayName: 'fixture' } },
       email: `nullpers-orphan-${randomUUID()}@x.io`, displayName: 'Orphan',
       status: 'active', passwordHash: await argonHash(PASSWORD),
     },
   });
   await prisma.personnelProfile.create({
     data: {
-      schoolId: school.id, userId: orphan.id, fullName: 'Transferred Teacher',
+      schoolId: school.id, userId: orphan.id, personId: orphan.personId, fullName: 'Transferred Teacher',
       positionRole: 'teacher', rankLevelCode: 'nullpers_kru',
       status: 'inactive', // HR deactivation — transfer / retirement / suspension
     },
@@ -128,7 +134,7 @@ before(async () => {
   const evaluatorIds = [];
   for (let seat = 1; seat <= 3; seat += 1) {
     const evaluator = await prisma.userAccount.create({
-      data: {
+      data: { person: { create: { displayName: 'fixture' } },
         email: `nullpers-eval${seat}-${randomUUID()}@x.io`, displayName: `eval${seat}`,
         status: 'active', passwordHash: await argonHash(PASSWORD),
       },
@@ -163,6 +169,26 @@ before(async () => {
   });
   assert.equal(login.statusCode, 200, 'setup: an active membership must still authenticate');
   orphanToken = login.json().access_token;
+
+  // --- PERSONLESS CALLER: an account with no person record (pre-ADR-0015 shape) ---
+  const personless = await prisma.userAccount.create({
+    data: {
+      email: `nullpers-noperson-${randomUUID()}@x.io`, displayName: 'No Person',
+      status: 'active', passwordHash: await argonHash(PASSWORD),
+    },
+  });
+  await prisma.schoolMembership.create({
+    data: {
+      userId: personless.id, schoolId: school.id, role: 'teacher', membershipScope: 'school',
+      effectiveFrom: new Date('2020-01-01'), status: 'active',
+    },
+  });
+  const personlessLogin = await app.inject({
+    method: 'POST', url: '/api/v1/auth/login',
+    payload: { email: personless.email, password: PASSWORD },
+  });
+  assert.equal(personlessLogin.statusCode, 200);
+  personlessToken = personlessLogin.json().access_token;
 });
 
 after(async () => {
@@ -183,16 +209,35 @@ test('the fixture really does produce a null personnel context (guards the guard
   );
 });
 
-test('listEvidence: own-scoped caller with no personnel profile is denied, not widened', async () => {
+test('listEvidence: own scope is the caller\'s person — a deactivated profile sees only their own portfolio, never widened', async () => {
   const res = await app.inject({
     method: 'GET', url: '/api/v1/evidence',
     headers: { authorization: `Bearer ${orphanToken}`, 'x-school-id': school.id },
   });
-
-  const leaked = (res.json().items ?? []).some((e) => e.id === victimEvidenceId);
+  assert.equal(res.statusCode, 200, res.body);
+  const leaked = res.json().items.some((e) => e.id === victimEvidenceId);
   assert.equal(leaked, false, "own-scoped caller must never receive another owner's evidence");
+  assert.equal(res.json().items.length, 0);
+});
+
+test('listEvidence: own-scoped caller with no person record is denied, not widened', async () => {
+  const res = await app.inject({
+    method: 'GET', url: '/api/v1/evidence',
+    headers: { authorization: `Bearer ${personlessToken}`, 'x-school-id': school.id },
+  });
+  const leaked = (res.json().items ?? []).some((e) => e.id === victimEvidenceId);
+  assert.equal(leaked, false);
   assert.equal(res.statusCode, 403, 'must fail closed');
   assert.equal(res.json().code, 'PERM-001');
+});
+
+test('getEvidence: the victim\'s item is invisible (RES-001) to the orphan', async () => {
+  const res = await app.inject({
+    method: 'GET', url: `/api/v1/evidence/${victimEvidenceId}`,
+    headers: { authorization: `Bearer ${orphanToken}`, 'x-school-id': school.id },
+  });
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.json().code, 'RES-001');
 });
 
 test('listAssignments: own-scoped caller with no personnel profile is denied, not widened', async () => {

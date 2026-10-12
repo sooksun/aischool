@@ -3,7 +3,7 @@ process.env.NODE_ENV = 'test';
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createPrismaClient } from '../../../prisma/client.mjs';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import {
@@ -53,7 +53,7 @@ async function putObject(key, body, contentType) {
 
 const created = trackSchools();
 
-async function fixture(filename = 'lesson.pdf', contentType = 'application/pdf', declaredByteSize = null) {
+async function fixture(filename = 'lesson.pdf', contentType = 'application/pdf', declaredByteSize = null, declaredChecksum = null) {
   const school = await prisma.school.create({
     data: { code: `w-${randomUUID().slice(0, 8)}`, name: 'Worker School' },
   });
@@ -69,12 +69,14 @@ async function fixture(filename = 'lesson.pdf', contentType = 'application/pdf',
       displayName: 'W',
       status: 'active',
       passwordHash: 'x',
+      person: { create: { displayName: 'W' } },
     },
   });
   const personnel = await prisma.personnelProfile.create({
     data: {
       schoolId: school.id,
       userId: user.id,
+      personId: user.personId,
       fullName: 'Teacher W',
       positionRole: 'teacher',
       rankLevelCode: 'w_kru',
@@ -92,8 +94,8 @@ async function fixture(filename = 'lesson.pdf', contentType = 'application/pdf',
   });
   const evidence = await prisma.evidence.create({
     data: {
-      schoolId: school.id,
-      ownerPersonnelId: personnel.id,
+      originSchoolId: school.id,
+      ownerPersonId: personnel.personId,
       uploadedByUserId: user.id,
       categoryId: cat.id,
       title: 't',
@@ -111,7 +113,9 @@ async function fixture(filename = 'lesson.pdf', contentType = 'application/pdf',
     storageUri: key,
     contentType,
     byteSize: BigInt(declaredByteSize ?? body.length),
-    checksumSha256: 'a'.repeat(64),
+    // The worker re-hashes the stored object (CCR-017) — the declared checksum
+    // has to be the real one or the file is blocked as corrupted.
+    checksumSha256: declaredChecksum ?? createHash('sha256').update(body).digest('hex'),
     durationSeconds: null,
     originalFilename: filename,
     schoolId: school.id,
@@ -164,6 +168,25 @@ test('file.process blocks a file whose stored size does not match what was decla
   const updated = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
   assert.equal(updated.scanStatus, 'blocked', 'a size mismatch must never be served as clean');
   assert.equal(updated.scannedAt, null, 'refused on metadata alone — nothing read the bytes');
+});
+
+test('file.process re-hashes the stored bytes: a match is recorded, the file becomes ready', async () => {
+  const { file } = await fixture('hash-ok.pdf');
+  await runOnce(env, s3, { scheduleGc: false });
+  const updated = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
+  assert.ok(updated.sha256VerifiedAt, 'sha256_verified_at is what lets a client delete its local copy');
+  assert.equal(updated.mediaState, 'ready');
+  const verified = await prisma.outboxEvent.findMany({ where: { eventType: 'evidence.file.verified' } });
+  assert.ok(verified.some((e) => e.payload?.file_id === file.id), 'evidence.file.verified is emitted');
+});
+
+test('file.process blocks a file whose stored bytes do not hash to the declared checksum', async () => {
+  const { file } = await fixture('hash-bad.pdf', 'application/pdf', null, 'f'.repeat(64));
+  await runOnce(env, s3, { scheduleGc: false });
+  const updated = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
+  assert.equal(updated.scanStatus, 'blocked', 'corrupted bytes must never be served');
+  assert.equal(updated.sha256VerifiedAt, null);
+  assert.equal(updated.mediaState, 'failed');
 });
 
 test('file.process marks unscanned and publishes outbox after register', async () => {

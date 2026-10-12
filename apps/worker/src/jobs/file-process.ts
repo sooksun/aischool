@@ -1,11 +1,17 @@
-// Handles file.process jobs enqueued when completeFileUpload succeeds.
-// 1) HEAD object in MinIO — must exist and be the size that was declared
-// 2) Malware scan via clamd when SCAN_PROVIDER=clamav (ADR-0009)
-// 3) Emit evidence.file.scan_completed outbox + mark registered outbox published
+// Handles file.process jobs enqueued when an upload completes (completeUpload).
+// 1) HEAD the object — it must exist and be the size that was declared
+// 2) Re-hash it: SHA-256 of the stored bytes must equal the declared checksum
+//    (ADR-0018) — evidence.file.verified, and the sha256_verified_at receipt
+// 3) Malware scan via clamd when SCAN_PROVIDER=clamav (ADR-0009)
+// 4) Emit evidence.file.scan_completed + mark the registered outbox published
 import type { S3Client } from '@aws-sdk/client-s3';
+import { createHash } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import {
   getEvidenceFileById,
   setFileScanStatus,
+  markFileSha256Verified,
+  setFileMediaState,
   enqueueOutboxEvent,
   markOutboxPublished,
   prisma,
@@ -114,6 +120,14 @@ async function scanIfEnabled(
  * null is honest, an estimate is not (2026-07-18 audit).
  */
 
+/** SHA-256 (hex) of the stored object, streamed — never buffered whole. */
+async function sha256OfStoredObject(env: Env, s3: S3Client, key: string): Promise<string> {
+  const body = (await getObjectStream(s3, env.S3_BUCKET, key)) as Readable;
+  const hash = createHash('sha256');
+  for await (const chunk of body) hash.update(chunk as Buffer);
+  return hash.digest('hex');
+}
+
 export async function processFileJob(
   env: Env,
   s3: S3Client,
@@ -161,12 +175,31 @@ export async function processFileJob(
   // A stored object that is not the size it was declared to be is quarantined
   // regardless of its contents — and short-circuits the scan, because there is
   // nothing to learn from scanning a file we already refuse to serve.
-  const outcome: ScanOutcome = sizeMismatch
-    // Refused on metadata alone — no scanner involved, so no receipt, and a
+  // The declared checksum used to be recorded and never compared with anything
+  // (ADR-0018). Now the stored bytes are re-hashed: a mismatch is quarantined
+  // exactly like a size mismatch, and a match earns the sha256_verified_at receipt
+  // that offline clients wait for before deleting their local copy.
+  let hashMismatch = false;
+  if (!sizeMismatch) {
+    hashMismatch = (await sha256OfStoredObject(env, s3, file.storageUri)) !== file.checksumSha256;
+    if (!hashMismatch) await markFileSha256Verified(file.id);
+    await enqueueOutboxEvent({
+      eventType: 'evidence.file.verified',
+      schoolId: payload.school_id,
+      actorUserId: null,
+      payload: { evidence_id: payload.evidence_id, file_id: file.id, sha256_matched: !hashMismatch },
+    });
+  }
+
+  const outcome: ScanOutcome = sizeMismatch || hashMismatch
+    // Refused on integrity alone — no scanner involved, so no receipt, and a
     // re-scan will make the same judgement from the same evidence.
     ? { status: 'blocked', scanned: false }
     : await scanIfEnabled(env, s3, { id: file.id, storageUri: file.storageUri, byteSize: file.byteSize });
   await setFileScanStatus(file.id, outcome.status, { scanned: outcome.scanned });
+  // Renditions (720p review copy, audio proxy, OCR) arrive in P2/P3; until then
+  // a verified original is the whole of the item.
+  await setFileMediaState(file.id, sizeMismatch || hashMismatch ? 'failed' : 'ready');
   const scanStatus = outcome.status;
 
   await enqueueOutboxEvent({

@@ -6,11 +6,26 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Contract 4.0.0 is in force (SEIP-P1-001, in review):** the owner approved [CCR-017](../reviews/CCR-017-contract-4.0.0.md) on 2026-10-12, and it is applied.
+> - Evidence belongs to a **person**, not a school (ADR-0015).
+> - Uploads go through **upload sessions**: one PUT up to 16 MiB, S3 multipart above that, and the server completes the upload.
+> - Mappings are **two-tier**: the owner confirms, then the director or committee validates or returns, keyed on the framework version.
+> - Creates and edits take **Idempotency-Key** and **If-Match**.
+> - **23 operations are phase-gated** and answer 501 SYS-003 until their phase lands.
+> - v2 scoring and reports sit behind **`FEATURE_SCORING`**, which is off by default.
+> - The worker re-hashes every original against its declared SHA-256.
+>
+> All local gates and suites are green on a fresh DB. CI on the pushed commit is pending.
+>
+> Still open:
+> - `min_acr` is not enforced until step-up authentication lands in P2.
+> - The web has no FEATURE_SCORING switch yet.
+>
 > **Flutter skeleton (SEIP-P0-006):** `apps/mobile` signs in and reads `/auth/me` through the generated client — live test against the real API passes; emulator run still to do. **S3 conformance suite (SEIP-P0-005)** green on SeaweedFS.
 >
 > **Dart client spike passed (SEIP-P0-004):** swagger_parser generates, builds and analyses the 4.0.0 draft cleanly; new CI gate `dart client`.
 >
-> **Contract 4.0.0 drafted (SEIP-P0-003): [CCR-017](../reviews/CCR-017-contract-4.0.0.md) awaits owner approval** — breaking; drafts in `docs/contracts/drafts/`, applied in P1.
+> **Contract 4.0.0 drafted (SEIP-P0-003)** — approved 2026-10-12 and applied by SEIP-P1-001 (above).
 >
 > **P0 week 2 (SEIP-P0-002, in review):** Prisma 7.10 with the pg driver adapter — **13/13 CI green again** (run 38304129059). P0 exit criterion "green after Prisma 7" met.
 >

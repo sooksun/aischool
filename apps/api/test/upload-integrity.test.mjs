@@ -5,6 +5,7 @@
 // byte_size was checked against UPL-002 and then never compared to anything
 // real — declare 10 bytes, PUT a gigabyte. And the ว9 <=600s rule short-circuited
 // on `body.duration_seconds &&`, so OMITTING the field skipped the check
+// (contract 4.0.0 renamed the field duration_ms and moved it onto createUpload)
 // entirely, while the worker backfilled a fabricated value hard-clamped to <=600
 // that could therefore never trip it.
 process.env.NODE_ENV = 'test';
@@ -16,6 +17,7 @@ import { createPrismaClient } from '../../../prisma/client.mjs';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
 import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+import { postEvidence, postUpload, uploadFile } from '../../../tests/helpers/api-evidence.mjs';
 
 const created = trackSchools();
 
@@ -41,14 +43,14 @@ before(async () => {
   });
 
   const teacher = await prisma.userAccount.create({
-    data: {
+    data: { person: { create: { displayName: 'fixture' } },
       email: `integ-teacher-${randomUUID()}@x.io`, displayName: 'Teacher',
       status: 'active', passwordHash: await argonHash(PASSWORD),
     },
   });
   await prisma.personnelProfile.create({
     data: {
-      schoolId: school.id, userId: teacher.id, fullName: 'Teacher',
+      schoolId: school.id, userId: teacher.id, personId: teacher.personId, fullName: 'Teacher',
       positionRole: 'teacher', rankLevelCode: 'integ_kru',
     },
   });
@@ -77,10 +79,7 @@ before(async () => {
   });
 
   for (const [catId, target] of [[videoCat.id, 'video'], [pdfCat.id, 'pdf']]) {
-    const res = await app.inject({
-      method: 'POST', url: '/api/v1/evidence', headers: auth(teacherToken),
-      payload: { category_id: catId, title: `integrity ${target}` },
-    });
+    const res = await postEvidence(app, teacherToken, { category_id: catId, title: `integrity ${target}` });
     assert.equal(res.statusCode, 201);
     if (target === 'video') videoEvidenceId = res.json().id;
     else pdfEvidenceId = res.json().id;
@@ -93,41 +92,38 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-const initiate = (evidenceId, payload) => app.inject({
-  method: 'POST', url: `/api/v1/evidence/${evidenceId}/files/initiate`,
-  headers: auth(teacherToken), payload,
-});
+const initiate = (evidenceId, payload) => postUpload(app, teacherToken, { evidence_id: evidenceId, ...payload });
 
 const videoPayload = (over = {}) => ({
   content_type: 'video/mp4', byte_size: 1024,
-  checksum_sha256: 'a'.repeat(64), original_filename: 'clip.mp4', ...over,
+  checksum_sha256: 'a'.repeat(64), filename: 'clip.mp4', ...over,
 });
 
 test('UPL-003 still fires when a declared duration exceeds the cap', async () => {
-  const res = await initiate(videoEvidenceId, videoPayload({ duration_seconds: MAX_DURATION + 1 }));
+  const res = await initiate(videoEvidenceId, videoPayload({ duration_ms: (MAX_DURATION + 1) * 1000 }));
   assert.equal(res.statusCode, 422);
   assert.equal(res.json().code, 'UPL-003');
 });
 
-test('omitting duration_seconds on a capped video category is rejected, not skipped', async () => {
+test('omitting duration_ms on a capped video category is rejected, not skipped', async () => {
   const omitted = await initiate(videoEvidenceId, videoPayload());
   assert.equal(omitted.statusCode, 422, 'omitting the field must not bypass the duration rule');
   assert.equal(omitted.json().code, 'VAL-002');
 
-  const explicitNull = await initiate(videoEvidenceId, videoPayload({ duration_seconds: null }));
+  const explicitNull = await initiate(videoEvidenceId, videoPayload({ duration_ms: null }));
   assert.equal(explicitNull.statusCode, 422, 'an explicit null must not bypass it either');
   assert.equal(explicitNull.json().code, 'VAL-002');
 });
 
 test('a duration within the cap is still accepted', async () => {
-  const res = await initiate(videoEvidenceId, videoPayload({ duration_seconds: MAX_DURATION }));
+  const res = await initiate(videoEvidenceId, videoPayload({ duration_ms: MAX_DURATION * 1000 }));
   assert.equal(res.statusCode, 201);
 });
 
 test('the duration requirement is scoped to capped categories only', async () => {
   const res = await initiate(pdfEvidenceId, {
     content_type: 'application/pdf', byte_size: 512,
-    checksum_sha256: 'b'.repeat(64), original_filename: 'plan.pdf',
+    checksum_sha256: 'b'.repeat(64), filename: 'plan.pdf',
   });
   assert.equal(res.statusCode, 201, 'an uncapped category must not suddenly require duration');
 });
@@ -137,27 +133,9 @@ test('the duration requirement is scoped to capped categories only', async () =>
 // regresses to `clean`-only, no evidence is downloadable at all.
 test('download gate: unscanned is served, pending and blocked are not', async () => {
   const content = Buffer.from('%PDF-1.4 gate probe');
-  const res = await initiate(pdfEvidenceId, {
-    content_type: 'application/pdf', byte_size: content.length,
-    checksum_sha256: createHash('sha256').update(content).digest('hex'),
-    original_filename: 'gate.pdf',
-  });
-  const target = res.json();
-  const put = await fetch(target.upload_url, {
-    method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: content,
-  });
-  assert.ok(put.ok, 'a truthful upload must still succeed');
-
-  const complete = await app.inject({
-    method: 'POST', url: `/api/v1/evidence/${pdfEvidenceId}/files/${target.file_id}/complete`,
-    headers: auth(teacherToken),
-    payload: {
-      checksum_sha256: createHash('sha256').update(content).digest('hex'),
-      content_type: 'application/pdf', byte_size: content.length, original_filename: 'gate.pdf',
-    },
-  });
-  assert.equal(complete.statusCode, 200);
-  assert.equal(complete.json().scan_status, 'pending', 'not yet processed by the worker');
+  const { file } = await uploadFile(app, teacherToken, pdfEvidenceId, content, { filename: 'gate.pdf' });
+  assert.equal(file.scan_status, 'pending', 'not yet processed by the worker');
+  const target = { file_id: file.id };
 
   const url = () => app.inject({
     method: 'GET',
@@ -186,16 +164,15 @@ test('storage rejects a PUT whose real size differs from the declared byte_size'
     content_type: 'application/pdf',
     byte_size: declared.length, // the honest-looking number that passes UPL-002
     checksum_sha256: createHash('sha256').update(declared).digest('hex'),
-    original_filename: 'lie.pdf',
+    filename: 'lie.pdf',
   });
   assert.equal(res.statusCode, 201);
 
-  const put = await fetch(res.json().upload_url, {
-    method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: actual,
-  });
+  const { single_put: req } = res.json();
+  const put = await fetch(req.url, { method: 'PUT', headers: req.headers, body: actual });
   assert.equal(
     put.ok, false,
-    `MinIO accepted ${actual.length} bytes against a presign declaring ${declared.length} — ` +
+    `storage accepted ${actual.length} bytes against a presign declaring ${declared.length} — ` +
     'ContentLength is not part of the signature',
   );
 });

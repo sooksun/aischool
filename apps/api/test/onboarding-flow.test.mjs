@@ -41,7 +41,7 @@ before(async () => {
 
   adminEmail = `onb-admin-${randomUUID()}@x.io`;
   const admin = await prisma.userAccount.create({
-    data: { email: adminEmail, displayName: 'Admin', status: 'active', passwordHash: await argonHash(adminPassword) },
+    data: { person: { create: { displayName: 'fixture' } }, email: adminEmail, displayName: 'Admin', status: 'active', passwordHash: await argonHash(adminPassword) },
   });
   await prisma.schoolMembership.create({
     data: { userId: admin.id, schoolId: school.id, role: 'school_admin', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
@@ -50,7 +50,7 @@ before(async () => {
   // A second admin at a DIFFERENT school, for the tenancy tests.
   otherAdminEmail = `onb-other-admin-${randomUUID()}@x.io`;
   const otherAdmin = await prisma.userAccount.create({
-    data: { email: otherAdminEmail, displayName: 'Other Admin', status: 'active', passwordHash: await argonHash(adminPassword) },
+    data: { person: { create: { displayName: 'fixture' } }, email: otherAdminEmail, displayName: 'Other Admin', status: 'active', passwordHash: await argonHash(adminPassword) },
   });
   await prisma.schoolMembership.create({
     data: { userId: otherAdmin.id, schoolId: otherSchool.id, role: 'school_admin', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
@@ -230,7 +230,7 @@ test('inviting an email that already has a password does NOT issue a token', asy
 
   const victimEmail = `onb-victim-${randomUUID()}@x.io`;
   const victim = await prisma.userAccount.create({
-    data: { email: victimEmail, displayName: 'Victim', status: 'active', passwordHash: await argonHash('victim-original-password') },
+    data: { person: { create: { displayName: 'fixture' } }, email: victimEmail, displayName: 'Victim', status: 'active', passwordHash: await argonHash('victim-original-password') },
   });
   const beforeHash = victim.passwordHash;
 

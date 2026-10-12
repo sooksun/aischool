@@ -18,6 +18,9 @@ export interface AuthedRequest {
   /** Resolved per CCR-003 — null if ambiguous/absent and the route needs one. */
   currentSchoolId: string | null;
   personnel: { id: string; positionRole: 'teacher' | 'administrator'; rankLevelCode: string } | null;
+  /** The person this account belongs to (ADR-0015) — the owner key of a
+   * portfolio. Null only for an account that has no person yet. */
+  personId: string | null;
 }
 
 declare module 'fastify' {
@@ -57,7 +60,7 @@ export const authPlugin: FastifyPluginAsync<{ env: Env }> = fp(async (app: Fasti
     const currentSchoolId = await resolveCurrentSchool(request, tenancy);
     const personnel = currentSchoolId ? await getPersonnelForUser(userId, currentSchoolId) : null;
 
-    request.auth = { userId, tenancy, currentSchoolId, personnel };
+    request.auth = { userId, tenancy, currentSchoolId, personnel, personId: user.personId ?? null };
   });
 });
 

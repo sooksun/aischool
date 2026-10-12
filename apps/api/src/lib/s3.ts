@@ -6,6 +6,12 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  ListPartsCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
   HeadBucketCommand,
   CreateBucketCommand,
 } from '@aws-sdk/client-s3';
@@ -125,4 +131,78 @@ export async function presignDownload(
     downloadUrl,
     expiresAt: new Date(Date.now() + DOWNLOAD_URL_TTL_SECONDS * 1000),
   };
+}
+
+// ─────────────────── multipart (ADR-0016 §5, CCR-017) ───────────────────
+// Rules from the conformance suite (tests/storage, ADR-0013):
+//  - NO ChecksumAlgorithm on create: SeaweedFS's ListParts returns no part
+//    checksums, so a full-object-checksum complete fails InvalidRequest.
+//  - a part checksum, when the client supplies one, is a SIGNED header — the
+//    store then verifies that part's bytes against it.
+//  - the SERVER completes from its own ListParts; clients never read ETags.
+
+export async function createMultipartUpload(client: S3Client, bucket: string, key: string, contentType: string): Promise<string> {
+  const res = await client.send(new CreateMultipartUploadCommand({ Bucket: bucket, Key: key, ContentType: contentType }));
+  if (!res.UploadId) throw new Error('store returned no UploadId');
+  return res.UploadId;
+}
+
+export async function presignUploadPart(
+  client: S3Client, bucket: string, key: string, uploadId: string, partNumber: number, checksumSha256?: string,
+): Promise<{ url: string; headers: Record<string, string>; expiresAt: Date }> {
+  const command = new UploadPartCommand({
+    Bucket: bucket, Key: key, UploadId: uploadId, PartNumber: partNumber,
+    ...(checksumSha256 ? { ChecksumSHA256: checksumSha256 } : {}),
+  });
+  const url = await getSignedUrl(client, command, {
+    expiresIn: UPLOAD_URL_TTL_SECONDS,
+    ...(checksumSha256
+      ? { signableHeaders: new Set(['x-amz-checksum-sha256']), unhoistableHeaders: new Set(['x-amz-checksum-sha256']) }
+      : {}),
+  });
+  return {
+    url,
+    headers: checksumSha256 ? { 'x-amz-checksum-sha256': checksumSha256 } : {},
+    expiresAt: new Date(Date.now() + UPLOAD_URL_TTL_SECONDS * 1000),
+  };
+}
+
+/** Part numbers the store already holds, ascending (the resume point). */
+export async function listUploadedParts(client: S3Client, bucket: string, key: string, uploadId: string) {
+  const parts: { PartNumber: number; ETag: string; Size: number }[] = [];
+  let marker: string | undefined;
+  for (;;) {
+    const res = await client.send(new ListPartsCommand({ Bucket: bucket, Key: key, UploadId: uploadId, PartNumberMarker: marker }));
+    for (const p of res.Parts ?? []) {
+      if (p.PartNumber && p.ETag) parts.push({ PartNumber: p.PartNumber, ETag: p.ETag, Size: p.Size ?? 0 });
+    }
+    if (!res.IsTruncated) break;
+    marker = res.NextPartNumberMarker;
+  }
+  return parts.sort((a, b) => a.PartNumber - b.PartNumber);
+}
+
+export async function completeMultipartFromListing(
+  client: S3Client, bucket: string, key: string, uploadId: string, parts: { PartNumber: number; ETag: string }[],
+): Promise<void> {
+  await client.send(new CompleteMultipartUploadCommand({
+    Bucket: bucket, Key: key, UploadId: uploadId,
+    MultipartUpload: { Parts: parts.map(({ PartNumber, ETag }) => ({ PartNumber, ETag })) },
+  }));
+}
+
+export async function abortMultipartUpload(client: S3Client, bucket: string, key: string, uploadId: string): Promise<void> {
+  await client.send(new AbortMultipartUploadCommand({ Bucket: bucket, Key: key, UploadId: uploadId }));
+}
+
+/** Size of a stored object, or null when it is not there. */
+export async function storedObjectSize(client: S3Client, bucket: string, key: string): Promise<number | null> {
+  try {
+    const res = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return res.ContentLength ?? 0;
+  } catch (e) {
+    const status = (e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (status === 404 || (e as { name?: string }).name === 'NotFound') return null;
+    throw e;
+  }
 }

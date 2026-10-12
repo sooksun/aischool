@@ -3,6 +3,8 @@ export { writeAuditEvent, type AuditWrite } from './audit.js';
 export * from './repositories/identity.js';
 export * from './repositories/taxonomy.js';
 export * from './repositories/evidence.js';
+export * from './repositories/uploads.js';
+export * from './repositories/idempotency.js';
 export * from './repositories/mappings.js';
 export * from './repositories/cycles.js';
 export * from './repositories/scoring.js';

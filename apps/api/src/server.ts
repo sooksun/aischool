@@ -13,6 +13,7 @@ import { scoringRoutes } from './routes/scoring.js';
 import { reportRoutes } from './routes/reports.js';
 import { memberRoutes } from './routes/members.js';
 import { agreementRoutes } from './routes/agreements.js';
+import { phaseGatedRoutes } from './routes/phase-gated.js';
 import { createS3Client, ensureBucket } from './lib/s3.js';
 import { configureLoginRateLimiterFromEnv, configureInviteRateLimiterFromEnv } from './lib/login-rate-limit.js';
 
@@ -47,8 +48,12 @@ export async function buildServer() {
     await v1.register(evidenceRoutes, { env });
     await v1.register(mappingRoutes);
     await v1.register(cycleRoutes);
-    await v1.register(scoringRoutes);
-    await v1.register(reportRoutes);
+    // v2 (x-seip-feature: v2, ADR-0017) — frozen, served only behind the flag.
+    // listAssignments/createAssignment/getAssignment/listAssignmentEvidence are
+    // v1 (committee set-up and view) and register regardless.
+    await v1.register(scoringRoutes, { featureScoring: env.FEATURE_SCORING });
+    if (env.FEATURE_SCORING) await v1.register(reportRoutes);
+    await v1.register(phaseGatedRoutes);
     await v1.register(memberRoutes);
     await v1.register(agreementRoutes);
   }, { prefix: '/api/v1' });

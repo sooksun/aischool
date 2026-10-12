@@ -1,4 +1,4 @@
-// Integration: createReport + report.generate worker + suggestMappings (local_heuristic).
+// Integration: createReport + report.generate worker over VALIDATED mappings; AI analysis phase-gated (P3).
 process.env.NODE_ENV = 'test';
 
 import { test, before, after } from 'node:test';
@@ -20,7 +20,7 @@ let school;
 let teacherToken;
 let directorToken;
 let teacherPersonnelId;
-let frameworkId;
+
 let cycleId;
 let evidenceId;
 let indicatorIds = [];
@@ -50,7 +50,7 @@ before(async () => {
 
   const teacherPass = 'teacher-pass-1234';
   const teacher = await prisma.userAccount.create({
-    data: {
+    data: { person: { create: { displayName: 'fixture' } },
       email: `rpt-teacher-${randomUUID()}@x.io`,
       displayName: 'Teacher',
       status: 'active',
@@ -70,7 +70,7 @@ before(async () => {
   const personnel = await prisma.personnelProfile.create({
     data: {
       schoolId: school.id,
-      userId: teacher.id,
+      userId: teacher.id, personId: teacher.personId,
       fullName: 'ครูทดสอบ',
       positionRole: 'teacher',
       rankLevelCode: 'teacher_kru',
@@ -80,7 +80,7 @@ before(async () => {
 
   const directorPass = 'director-pass-1234';
   const director = await prisma.userAccount.create({
-    data: {
+    data: { person: { create: { displayName: 'fixture' } },
       email: `rpt-director-${randomUUID()}@x.io`,
       displayName: 'Director',
       status: 'active',
@@ -121,7 +121,7 @@ before(async () => {
       effectiveFrom: new Date(),
     },
   }));
-  frameworkId = fw.id;
+
   const domain = await prisma.evaluationDomain.create({
     data: {
       frameworkVersionId: fw.id,
@@ -173,9 +173,12 @@ before(async () => {
   const ev = await app.inject({
     method: 'POST',
     url: '/api/v1/evidence',
-    headers: { authorization: `Bearer ${teacherToken}`, 'x-school-id': school.id },
+    headers: { authorization: `Bearer ${teacherToken}`, 'x-school-id': school.id, 'idempotency-key': randomUUID() },
     payload: {
       category_id: category.id,
+      kind: 'file',
+      contains_learners: 'unknown',
+      client_uuid: randomUUID(),
       title: 'แผนการจัดการเรียนรู้ Active Learning ชั้น ม.2',
       description: 'บันทึกการสอนและการประเมินผลผู้เรียน',
     },
@@ -190,48 +193,39 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test('suggestMappings creates ai_suggested rows without auto-confirm', async () => {
+test('AI analysis is phase-gated (SYS-003) until the in-country pipeline lands (P3)', async () => {
   const res = await app.inject({
     method: 'POST',
-    url: `/api/v1/evidence/${evidenceId}/mappings/suggest`,
+    url: `/api/v1/evidence/${evidenceId}/analysis`,
     headers: { authorization: `Bearer ${teacherToken}`, 'x-school-id': school.id },
-    payload: { framework_version_id: frameworkId, max_suggestions: 3 },
   });
-  assert.equal(res.statusCode, 200, res.body);
-  const body = res.json();
-  assert.equal(body.provider, 'local_heuristic');
-  assert.ok(body.items.length >= 1, 'expected at least one suggestion');
-  for (const m of body.items) {
-    assert.equal(m.mapping_source, 'ai_suggested');
-    assert.equal(m.status, 'suggested');
+  assert.equal(res.statusCode, 501, res.body);
+  assert.equal(res.json().code, 'SYS-003');
+});
+
+test('only VALIDATED mappings reach the report: owner confirms, director validates', async () => {
+  const headers = (token) => ({ authorization: `Bearer ${token}`, 'x-school-id': school.id });
+  const mapped = [];
+  for (const indicatorId of indicatorIds.slice(0, 2)) {
+    const res = await app.inject({
+      method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`,
+      headers: { ...headers(teacherToken), 'idempotency-key': randomUUID() },
+      payload: { indicator_id: indicatorId },
+    });
+    assert.equal(res.statusCode, 201, res.body);
+    mapped.push(res.json());
   }
-
-  // teacher cannot confirm (own-revoke only)
-  const confirm = await app.inject({
-    method: 'PATCH',
-    url: `/api/v1/mappings/${body.items[0].id}`,
-    headers: { authorization: `Bearer ${teacherToken}`, 'x-school-id': school.id },
-    payload: { action: 'confirm' },
+  // The first is validated; the second stays owner_confirmed and must NOT appear.
+  const v = await app.inject({
+    method: 'PATCH', url: `/api/v1/mappings/${mapped[0].id}`,
+    headers: { ...headers(directorToken), 'if-match': `"${mapped[0].version}"` },
+    payload: { action: 'validate' },
   });
-  assert.equal(confirm.statusCode, 403);
-
-  const directorConfirm = await app.inject({
-    method: 'PATCH',
-    url: `/api/v1/mappings/${body.items[0].id}`,
-    headers: { authorization: `Bearer ${directorToken}`, 'x-school-id': school.id },
-    payload: { action: 'confirm' },
-  });
-  assert.equal(directorConfirm.statusCode, 200, directorConfirm.body);
-  assert.equal(directorConfirm.json().status, 'confirmed');
+  assert.equal(v.statusCode, 200, v.body);
+  assert.equal(v.json().status, 'validated');
 });
 
 test('createReport enqueues worker; runOnce fills payload and section refs', async () => {
-  // Ensure mapping has cycle for report section eligibility
-  await prisma.evidenceIndicatorMapping.updateMany({
-    where: { evidenceId, status: 'confirmed' },
-    data: { cycleId },
-  });
-
   const create = await app.inject({
     method: 'POST',
     url: '/api/v1/reports',
@@ -282,7 +276,7 @@ test('createReport enqueues worker; runOnce fills payload and section refs', asy
   assert.equal(detail.payload.generation_status, 'ready');
   assert.equal(detail.payload.template_code, 'PA2_s');
   assert.ok(Array.isArray(detail.section_refs));
-  assert.ok(detail.section_refs.length >= 1, 'confirmed mapping should become section ref');
+  assert.equal(detail.section_refs.length, 1, 'exactly the validated mapping becomes a section ref — owner_confirmed alone does not');
 
   const list = await app.inject({
     method: 'GET',
