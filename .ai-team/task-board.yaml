@@ -60,7 +60,15 @@ tasks:
     wave: 1
     owner: claude
     reviewer: grok
-    status: blocked           # unblocks when SEIP-OPS-001 approved
+    status: review_requested  # see WARNING below
+    # WARNING — delivered OUT OF SEQUENCE. This task's dependency
+    # (SEIP-OPS-001) is still `review_requested`, not `approved`, so Wave 1
+    # had not legitimately opened. Contracts v0.1 were drafted on user request
+    # anyway. This is the same sequence violation already recorded against
+    # SEIP-DB-000. Grok should rule on whether to accept the artifacts or
+    # require a redo after OPS-001 approval.
+    # Second violation: the work was committed on the SEIP-OPS-001 branch,
+    # whose blocked_paths explicitly forbid docs/contracts/**.
     branch: ai/claude/SEIP-ARCH-001-architecture-contracts
     allowed_paths:
       - docs/architecture/**

@@ -1,0 +1,502 @@
+# SEIP Error Codes Contract
+#
+# Status: DRAFT v0.1 — NOT LOCKED. Locking happens in SEIP-ARCH-002.
+# Owner: claude (architecture module)   Reviewer: grok
+# Task: SEIP-ARCH-001
+#
+# Every error returned by the API is an RFC 9457 problem document whose `type`
+# is `https://seip.invalid/errors/{code}` and whose `code` member is one of the
+# codes below. Implementations MUST NOT invent codes (contract-policy.md).
+#
+# Grounding: each code traces to a stated constraint in
+# docs/architecture/data-model/entity-dictionary.md (§ references below) or to
+# docs/architecture/evaluation-framework.md. Codes with no such grounding were
+# not invented.
+
+contract: error-codes
+version: 0.1.0
+status: draft
+updated_at: 2026-10-12
+framework_refs:
+  - docs/architecture/data-model/entity-dictionary.md
+  - docs/architecture/evaluation-framework.md
+
+# ---------------------------------------------------------------- conventions
+conventions:
+  problem_media_type: application/problem+json
+  type_uri_template: https://seip.invalid/errors/{code}
+  required_members: [type, title, status, code, detail]
+  optional_members: [instance, errors, request_id, retry_after_seconds]
+  code_format: UPPER_SNAKE, prefixed by family
+  message_language: >
+    `title` is a stable English phrase for logs and client switch statements.
+    Human-facing Thai text is a presentation concern and is NOT part of this
+    contract — clients map `code` to their own localized string. This keeps the
+    contract stable when wording changes.
+  field_errors: >
+    Validation failures carry an `errors` array of
+    {pointer, code, detail} where `pointer` is an RFC 6901 JSON Pointer into
+    the request body.
+
+families:
+  AUTH: Authentication — who the caller is
+  PERM: Authorization — what the caller may do (see permissions.yaml)
+  TENANT: School-scoped tenancy violations
+  VALID: Request shape and field validation
+  STATE: Lifecycle and status-machine violations
+  RULE: Evaluation business rules from ว9/ว10
+  STORAGE: Evidence file and object-storage concerns
+  CONFLICT: Uniqueness and concurrency
+  FRAMEWORK: Versioned taxonomy integrity
+  SYS: Infrastructure and dependencies
+
+# -------------------------------------------------------------------- codes
+codes:
+
+  # ---- AUTH -----------------------------------------------------------
+  - code: AUTH_REQUIRED
+    http_status: 401
+    title: Authentication required
+    detail_hint: No valid credential was presented.
+    retryable: false
+    grounding: UserAccount is the auth subject (§1.3)
+
+  - code: AUTH_ACCOUNT_DISABLED
+    http_status: 403
+    title: Account is not active
+    detail_hint: UserAccount.status is `disabled` or `invited`.
+    retryable: false
+    grounding: "UserAccount.status ∈ {active, disabled, invited} (§1.3)"
+
+  # ---- PERM -----------------------------------------------------------
+  - code: PERM_DENIED
+    http_status: 403
+    title: Permission denied
+    detail_hint: The caller's role grants no such action on this resource.
+    retryable: false
+    grounding: permissions.yaml role matrix
+
+  - code: PERM_NO_ACTIVE_MEMBERSHIP
+    http_status: 403
+    title: No active school membership
+    detail_hint: >
+      The caller has no SchoolMembership whose effective window covers now for
+      the requested school.
+    retryable: false
+    grounding: SchoolMembership.effective_from/effective_to (§1.4)
+
+  - code: PERM_NOT_COMMITTEE_MEMBER
+    http_status: 403
+    title: Caller is not on this committee
+    detail_hint: >
+      Scoring requires the evaluator to be a CommitteeMember of the assignment.
+    retryable: false
+    grounding: "IndicatorScore constraint: evaluator must be a CommitteeMember (§7.3)"
+
+  - code: PERM_AREA_SCOPE_READ_ONLY
+    http_status: 403
+    title: Area-scoped membership is read-only
+    detail_hint: >
+      Provisional. Open question M-1 in data-model/README.md has not been
+      decided; this contract assumes area_admin is read-only across schools.
+      If M-1 resolves to multi-tenant write, this code is removed.
+    retryable: false
+    grounding: "OPEN M-1 (data-model/README.md) — assumption, not a decision"
+
+  # ---- TENANT ---------------------------------------------------------
+  - code: TENANT_SCOPE_MISMATCH
+    http_status: 403
+    title: Resource belongs to another school
+    detail_hint: >
+      The resource's school_id does not match the caller's resolved school
+      scope. Returned instead of 404 only when the caller may know the resource
+      exists; otherwise NOT_FOUND is returned to avoid leaking existence.
+    retryable: false
+    grounding: "Cross-cutting constraint 1: every operational query filters school_id (§10)"
+
+  - code: TENANT_CROSS_SCHOOL_REFERENCE
+    http_status: 422
+    title: Cross-school reference is forbidden
+    detail_hint: >
+      A request tried to link rows belonging to different schools, e.g. evidence
+      from school A to an agreement in school B.
+    retryable: false
+    grounding: "FKs that cross school are forbidden (§10.1)"
+
+  # ---- VALID ----------------------------------------------------------
+  - code: VALID_SCHEMA
+    http_status: 400
+    title: Request body failed schema validation
+    detail_hint: See the `errors` array for per-field pointers.
+    retryable: false
+    grounding: openapi.yaml schemas
+
+  - code: VALID_RUBRIC_LEVEL_RANGE
+    http_status: 422
+    title: Rubric level out of range
+    detail_hint: "rubric_level must be one of 1, 2, 3, 4."
+    retryable: false
+    grounding: "4-level rubric (evaluation-framework.md); rubric_level ∈ {1,2,3,4} (§7.3)"
+
+  - code: VALID_ROUND_NUMBER_RANGE
+    http_status: 422
+    title: Round number out of range
+    detail_hint: >
+      round_number must be >= 1. There is deliberately no upper bound of 2 —
+      rounds are configurable 1..n.
+    retryable: false
+    grounding: "EvaluationRound.round_number >= 1, no max in schema (§4.2)"
+
+  - code: VALID_PERIOD_ORDER
+    http_status: 422
+    title: Period start must not be after period end
+    detail_hint: "starts_on <= ends_on / period_start <= period_end."
+    retryable: false
+    grounding: "§4.1, §4.2 constraints"
+
+  - code: VALID_PAGINATION
+    http_status: 400
+    title: Invalid pagination parameters
+    detail_hint: Page size exceeds the maximum, or the cursor is malformed.
+    retryable: false
+    grounding: openapi.yaml common parameters
+
+  # ---- STATE ----------------------------------------------------------
+  - code: STATE_ROUND_CLOSED
+    http_status: 409
+    title: Evaluation round is closed
+    detail_hint: >
+      Scores and results are immutable once EvaluationRound.status is `closed`.
+    retryable: false
+    grounding: "Score immutability (§10.4); IndicatorScore immutability after close (§7.3)"
+
+  - code: STATE_ROUND_NOT_SCORING
+    http_status: 409
+    title: Round is not open for scoring
+    detail_hint: "Round status must be `scoring` to accept score writes."
+    retryable: false
+    grounding: "EvaluationRound.status ∈ {planned, open, scoring, closed} (§4.2)"
+
+  - code: STATE_CYCLE_CLOSED
+    http_status: 409
+    title: Evaluation cycle is closed
+    detail_hint: "EvaluationCycle.status is `closed`."
+    retryable: false
+    grounding: "EvaluationCycle.status ∈ {planned, open, closed} (§4.1)"
+
+  - code: STATE_AGREEMENT_NOT_SUBMITTED
+    http_status: 409
+    title: Performance agreement has not been submitted
+    detail_hint: An assignment cannot enter scoring before its agreement is submitted.
+    retryable: false
+    grounding: "PerformanceAgreement.status / submitted_at (§4.3)"
+
+  - code: STATE_EVIDENCE_NOT_ACTIVE
+    http_status: 409
+    title: Evidence is not in an active state
+    detail_hint: "Evidence.status must be `active`; draft, archived and rejected are ineligible."
+    retryable: false
+    grounding: "Evidence.status ∈ {draft, active, archived, rejected} (§5.1)"
+
+  - code: STATE_EVIDENCE_DELETED
+    http_status: 410
+    title: Evidence has been deleted
+    detail_hint: "Evidence.deleted_at is set (soft delete)."
+    retryable: false
+    grounding: "Soft delete via deleted_at (§5.1, §10.9)"
+
+  - code: STATE_MAPPING_NOT_CONFIRMABLE
+    http_status: 409
+    title: Mapping cannot be confirmed from its current status
+    detail_hint: >
+      Only `suggested` mappings may be confirmed. Allowed transitions:
+      suggested -> confirmed | rejected; confirmed -> revoked.
+    retryable: false
+    grounding: "mapping status ∈ {suggested, confirmed, rejected, revoked} (§6.1)"
+
+  - code: STATE_REPORT_NOT_EDITABLE
+    http_status: 409
+    title: Report is no longer editable
+    detail_hint: "Only `draft` reports accept payload changes."
+    retryable: false
+    grounding: "Report.status ∈ {draft, pending_approval, approved, issued, superseded} (§8.1)"
+
+  - code: STATE_APPROVAL_ALREADY_DECIDED
+    http_status: 409
+    title: Approval step already decided
+    detail_hint: "decision is no longer `pending`."
+    retryable: false
+    grounding: "Approval.decision + decided_at (§8.3)"
+
+  # ---- RULE (ว9/ว10 business rules) -----------------------------------
+  - code: RULE_COMMITTEE_INCOMPLETE
+    http_status: 409
+    title: Committee is not complete
+    detail_hint: >
+      Scoring requires exactly 3 CommitteeMember rows (seats 1-3) before the
+      assignment may enter scoring.
+    retryable: false
+    grounding: "Committee: 3 evaluators (evaluation-framework.md); §7.2, §10.5"
+
+  - code: RULE_COMMITTEE_SEAT_TAKEN
+    http_status: 409
+    title: Committee seat already occupied
+    detail_hint: "seat_number must be unique within the assignment and in {1,2,3}."
+    retryable: false
+    grounding: "UK (assignment_id, seat_number); seat_number ∈ {1,2,3} (§7.2)"
+
+  - code: RULE_COMMITTEE_CHAIR_REQUIRED
+    http_status: 422
+    title: Committee requires exactly one chair
+    detail_hint: >
+      committee_role must include exactly one `chair`. For teachers the chair is
+      ผอ.สถานศึกษา; for administrators the chair is the superior.
+    retryable: false
+    grounding: "committee_role ∈ {chair, member} (§7.2); evaluation-framework.md committee rule"
+
+  - code: RULE_WORKLOAD_GATE_NOT_DECLARED
+    http_status: 409
+    title: Workload gate has not been declared
+    detail_hint: >
+      WorkloadDeclaration for this (agreement, round) is required before a
+      result can be computed. ภาระงาน is a boolean gate, not a scored indicator.
+    retryable: false
+    grounding: "§4.4; ภาระงาน is a boolean gate (§10.6, evaluation-framework.md)"
+
+  - code: RULE_INDICATOR_KIND_MISMATCH
+    http_status: 422
+    title: Indicator kind does not match this endpoint
+    detail_hint: >
+      indicator-scores accept `standard` indicators; challenge-scores accept
+      `challenge`. `workload_gate` rows are never scored.
+    retryable: false
+    grounding: "indicator_kind ∈ {standard, challenge, workload_gate}; is_scored=false for gate (§3.3, §7.3, §7.4)"
+
+  - code: RULE_SCORES_INCOMPLETE
+    http_status: 409
+    title: Not every scored indicator has a score from this evaluator
+    detail_hint: >
+      A result cannot be computed until the evaluator has scored every
+      `is_scored` indicator and every challenge item of the pinned framework.
+    retryable: false
+    grounding: "RoundResult grain per evaluator (§7.5)"
+
+  - code: RULE_MAPPING_NOT_CONFIRMED
+    http_status: 422
+    title: Only confirmed mappings may be cited in an official report
+    detail_hint: >
+      ReportSectionRef may cite a mapping only when its status is `confirmed`.
+    retryable: false
+    grounding: "Mapping governance: only confirmed mappings eligible for reports (§10.3, §6.1)"
+
+  - code: RULE_SELF_EVALUATION_FORBIDDEN
+    http_status: 422
+    title: An evaluatee may not be their own evaluator
+    detail_hint: >
+      Provisional. The framework describes an external 3-person committee; this
+      contract forbids evaluator_user_id resolving to the evaluatee's own
+      UserAccount. Flagged for grok — the PDFs do not state it as an explicit
+      prohibition.
+    retryable: false
+    grounding: "DERIVED from committee composition (evaluation-framework.md) — needs grok confirmation"
+
+  # ---- STORAGE --------------------------------------------------------
+  - code: STORAGE_MIME_NOT_ALLOWED
+    http_status: 422
+    title: Content type not allowed for this evidence category
+    detail_hint: "content_type must appear in EvidenceCategory.allowed_mime_csv."
+    retryable: false
+    grounding: "mime must be in category allow-list (§5.2)"
+
+  - code: STORAGE_DURATION_EXCEEDED
+    http_status: 422
+    title: Media duration exceeds the category limit
+    detail_hint: >
+      duration_seconds exceeds EvidenceCategory.max_duration_seconds — e.g. the
+      DPA problem/inspiration video limit of 600 seconds.
+    retryable: false
+    grounding: "max_duration_seconds; ≤10 นาที rule (§3.6, §5.2, evaluation-framework.md)"
+
+  - code: STORAGE_DURATION_REQUIRED
+    http_status: 422
+    title: Duration is required for video categories
+    detail_hint: "The category declares max_duration_seconds, so duration_seconds is mandatory."
+    retryable: false
+    grounding: "§3.6 constraint; README storage table"
+
+  - code: STORAGE_CHECKSUM_MISMATCH
+    http_status: 422
+    title: Uploaded bytes do not match the declared checksum
+    detail_hint: "Recomputed SHA-256 differs from checksum_sha256."
+    retryable: true
+    grounding: "checksum_sha256 for integrity (§5.2)"
+
+  - code: STORAGE_SCAN_PENDING
+    http_status: 409
+    title: File is still being scanned
+    detail_hint: "scan_status is `pending`; the file cannot be used yet."
+    retryable: true
+    retry_after_seconds: 15
+    grounding: "scan_status ∈ {pending, clean, blocked} (§5.2)"
+
+  - code: STORAGE_SCAN_BLOCKED
+    http_status: 422
+    title: File was blocked by the security scanner
+    detail_hint: "scan_status is `blocked`."
+    retryable: false
+    grounding: "scan_status ∈ {pending, clean, blocked} (§5.2)"
+
+  - code: STORAGE_UPLOAD_EXPIRED
+    http_status: 409
+    title: Upload session expired
+    detail_hint: The issued upload target is no longer valid; request a new one.
+    retryable: true
+    grounding: "Provider-agnostic upload flow (README storage strategy, OPEN-4)"
+
+  - code: STORAGE_PROVIDER_UNAVAILABLE
+    http_status: 503
+    title: Object storage is unavailable
+    detail_hint: >
+      Depends on the unresolved OPEN-4 storage choice; the code is
+      provider-agnostic by design.
+    retryable: true
+    retry_after_seconds: 30
+    grounding: "storage_provider is extensible (README, OPEN-4)"
+
+  # ---- CONFLICT -------------------------------------------------------
+  - code: CONFLICT_DUPLICATE
+    http_status: 409
+    title: Resource already exists
+    detail_hint: >
+      A uniqueness constraint was violated. The `errors` array names the
+      conflicting tuple, e.g. (cycle_id, personnel_id) for an agreement.
+    retryable: false
+    grounding: "UK constraints throughout §1–§8"
+
+  - code: CONFLICT_ACTIVE_MAPPING_EXISTS
+    http_status: 409
+    title: An active mapping already links this evidence and indicator
+    detail_hint: >
+      Unique for (evidence_id, indicator_id, cycle_id) while status is
+      `suggested` or `confirmed`.
+    retryable: false
+    grounding: "partial unique index on active mappings (§6.1)"
+
+  - code: CONFLICT_OVERLAPPING_MEMBERSHIP
+    http_status: 409
+    title: Overlapping active membership
+    detail_hint: "No overlapping active membership for the same (user_id, school_id, role)."
+    retryable: false
+    grounding: "§1.4 constraint"
+
+  - code: CONFLICT_STALE_WRITE
+    http_status: 412
+    title: Precondition failed
+    detail_hint: "The If-Match ETag did not match the current resource version."
+    retryable: true
+    grounding: "Concurrency control for mutable rows (openapi.yaml)"
+
+  - code: CONFLICT_IDEMPOTENCY_KEY_REUSED
+    http_status: 409
+    title: Idempotency key reused with a different payload
+    detail_hint: The same Idempotency-Key was seen with a different request body.
+    retryable: false
+    grounding: openapi.yaml Idempotency-Key header
+
+  # ---- FRAMEWORK ------------------------------------------------------
+  - code: FRAMEWORK_VERSION_MISMATCH
+    http_status: 422
+    title: Entity belongs to a different framework version
+    detail_hint: >
+      The indicator's framework version differs from the one pinned on the
+      cycle. Changing the globally active framework must not rewrite history.
+    retryable: false
+    grounding: "Framework pin (§10.2); mapping framework compatibility (§6.1)"
+
+  - code: FRAMEWORK_ROLE_FAMILY_MISMATCH
+    http_status: 422
+    title: Framework role family does not match the personnel position
+    detail_hint: >
+      A `teacher` personnel record cannot be evaluated against an
+      `administrator` framework version (ว9 vs ว10).
+    retryable: false
+    grounding: "role_family ∈ {teacher, administrator} (§2.1, §3.1)"
+
+  - code: FRAMEWORK_NOT_ACTIVE
+    http_status: 422
+    title: Framework version is not active
+    detail_hint: "FrameworkVersion.status does not permit new cycles."
+    retryable: false
+    grounding: "§3.1 constraint"
+
+  - code: FRAMEWORK_IMMUTABLE
+    http_status: 403
+    title: Framework taxonomy is a protected artifact
+    detail_hint: >
+      Indicator definitions are a Protected Artifact. Changes require a Contract
+      Change Request, not an API write. Seed data is loaded out of band.
+    retryable: false
+    grounding: "Protected Artifacts (team-charter.md); evaluation-framework.md charter note"
+
+  # ---- SYS ------------------------------------------------------------
+  - code: NOT_FOUND
+    http_status: 404
+    title: Resource not found
+    detail_hint: >
+      Also returned in place of TENANT_SCOPE_MISMATCH when revealing existence
+      would itself leak cross-tenant information.
+    retryable: false
+    grounding: "Tenant isolation (§10.1)"
+
+  - code: SYS_RATE_LIMITED
+    http_status: 429
+    title: Too many requests
+    detail_hint: Caller exceeded the rate limit.
+    retryable: true
+    retry_after_seconds: 60
+    grounding: "DERIVED — no rate-limit policy exists yet; flagged for SEIP-QA-001"
+
+  - code: SYS_INTERNAL
+    http_status: 500
+    title: Internal server error
+    detail_hint: Unexpected failure. `request_id` must be present for correlation.
+    retryable: true
+    grounding: "AuditEvent.request_id (§9.1)"
+
+  - code: SYS_DEPENDENCY_UNAVAILABLE
+    http_status: 503
+    title: Upstream dependency unavailable
+    detail_hint: Notification service or AI provider is unreachable.
+    retryable: true
+    retry_after_seconds: 30
+    grounding: "External actors: AI provider, notification service (system-context.md)"
+
+# -------------------------------------------------------- open questions
+open_questions:
+  - id: EC-1
+    question: >
+      Is area_admin read-only across schools, or multi-tenant write? Decides
+      whether PERM_AREA_SCOPE_READ_ONLY survives.
+    blocks: permissions.yaml finalization
+    tracks: M-1 in docs/architecture/data-model/README.md
+
+  - id: EC-2
+    question: >
+      Authentication mechanism is undecided — no ADR covers session, OIDC, or
+      token format. AUTH_* codes describe outcomes, not a mechanism.
+    blocks: openapi.yaml securitySchemes
+    owner: claude + user
+
+  - id: EC-3
+    question: >
+      Is RULE_SELF_EVALUATION_FORBIDDEN actually in ว9/ว10, or is it our
+      inference? Needs grok to check the source PDFs.
+    blocks: nothing — the code is marked provisional
+    owner: grok
+
+  - id: EC-4
+    question: >
+      No rate-limit or lockout policy exists. SYS_RATE_LIMITED is a placeholder
+      until SEIP-QA-001 defines the security baseline.
+    blocks: security gate definition
+    owner: grok

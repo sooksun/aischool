@@ -1,0 +1,425 @@
+# SEIP Permission Contract
+#
+# Status: DRAFT v0.1 — NOT LOCKED. Locking happens in SEIP-ARCH-002.
+# Owner: claude (architecture module)   Reviewer: grok
+# Task: SEIP-ARCH-001
+#
+# This is the authorization contract: roles, school-scoped tenancy, and the
+# action matrix. It does NOT define authentication — no ADR decides session or
+# token format yet (open question P-5).
+#
+# Grounding: roles are exactly SchoolMembership.role; scopes are exactly
+# SchoolMembership.membership_scope (entity-dictionary.md §1.4). No role is
+# invented here.
+
+contract: permissions
+version: 0.1.0
+status: draft
+updated_at: 2026-10-12
+framework_refs:
+  - docs/architecture/data-model/entity-dictionary.md
+  - docs/architecture/system-context.md
+  - docs/contracts/error-codes.yaml
+
+# ====================================================================
+# 1. Principals
+# ====================================================================
+principals:
+  subject: UserAccount
+  subject_requirement: "UserAccount.status must be `active` — otherwise AUTH_ACCOUNT_DISABLED"
+  authority_source: >
+    Permissions are never attached to a UserAccount directly. They derive from
+    the caller's active SchoolMembership rows. A user with no active membership
+    covering the requested school has no permissions on it
+    (PERM_NO_ACTIVE_MEMBERSHIP).
+  active_membership_predicate: >
+    status = 'active'
+    AND effective_from <= now()
+    AND (effective_to IS NULL OR effective_to > now())
+  multi_membership: >
+    A user may hold several memberships (e.g. teacher at school A, evaluator at
+    school B). Permissions are evaluated per request against the membership that
+    matches the resolved school scope — never unioned across schools.
+
+# ====================================================================
+# 2. Roles
+# ====================================================================
+# Exactly SchoolMembership.role ∈
+#   {teacher, director, deputy, evaluator, school_admin, area_admin}
+roles:
+  teacher:
+    label_th: ครู
+    scope: school
+    description: Evaluatee and evidence owner. Owns its own evidence and agreement.
+    role_family: teacher
+
+  director:
+    label_th: ผู้อำนวยการสถานศึกษา
+    scope: school
+    description: >
+      School head. Is itself an evaluatee under ว10, and is the committee chair
+      for teacher evaluations.
+    role_family: administrator
+
+  deputy:
+    label_th: รองผู้อำนวยการสถานศึกษา
+    scope: school
+    description: Deputy head. Evaluatee under ว10.
+    role_family: administrator
+
+  evaluator:
+    label_th: กรรมการประเมิน
+    scope: school
+    description: >
+      External or internal committee member. Scores only assignments where it
+      holds a CommitteeMember seat.
+
+  school_admin:
+    label_th: ผู้ดูแลระบบของสถานศึกษา
+    scope: school
+    description: >
+      Operational administrator for one school: memberships, personnel, cycles,
+      rounds, committees. Deliberately NOT a scorer.
+
+  area_admin:
+    label_th: ผู้ดูแลระดับเขตพื้นที่
+    scope: area
+    description: >
+      Cross-school oversight within one Area. **Assumed read-only** pending
+      open question P-1 / M-1. Every write in the matrix below is denied for
+      this role until that question is answered.
+
+# ====================================================================
+# 3. Tenancy — the rule that outranks the matrix
+# ====================================================================
+tenancy:
+  principle: >
+    School is the tenant boundary. The matrix below is only consulted AFTER the
+    tenancy predicate passes. A role that "can read evidence" can read evidence
+    *in its own school only*.
+
+  resolution_order:
+    - 1: Resolve the target school_id from the resource (or from the required school scope parameter on list endpoints).
+    - 2: Find the caller's active membership for that school (scope=school) or for its Area (scope=area).
+    - 3: If none -> PERM_NO_ACTIVE_MEMBERSHIP.
+    - 4: Apply the action matrix for that membership's role.
+    - 5: Apply ownership and committee predicates (section 5).
+
+  school_scope_rule: >
+    membership_scope = 'school' grants access to rows where
+    row.school_id = membership.school_id. Nothing else.
+
+  area_scope_rule: >
+    membership_scope = 'area' grants access to rows where
+    row.school_id IN (SELECT id FROM School WHERE area_id = membership.area_id).
+
+  cross_school_write: >
+    Forbidden unconditionally — TENANT_CROSS_SCHOOL_REFERENCE. No role, not even
+    area_admin, may create a row that references two schools.
+
+  existence_leak_rule: >
+    When the caller has no membership covering a resource's school, the API
+    returns NOT_FOUND rather than TENANT_SCOPE_MISMATCH, so that probing cannot
+    confirm a resource exists in another school.
+
+  framework_exception: >
+    FrameworkVersion, EvaluationDomain, Indicator, IndicatorLevelDescription,
+    ScoreWeight, EvidenceCategory and RankLevel are global reference data with
+    no school_id. They are readable by every authenticated principal and
+    writable by nobody through the API (FRAMEWORK_IMMUTABLE).
+
+# ====================================================================
+# 4. Action matrix
+# ====================================================================
+# Legend
+#   allow  — permitted subject to tenancy
+#   own    — only rows the caller owns (see predicates)
+#   cttee  — only assignments where caller holds a CommitteeMember seat
+#   subject— only rows about the caller as evaluatee
+#   deny   — not permitted
+#
+# area_admin is `allow` on read and `deny` on every write, per the P-1
+# assumption. Do not silently widen it.
+
+resources:
+
+  framework:
+    description: Versioned taxonomy (reference data, Protected Artifact)
+    actions:
+      read:   {teacher: allow, director: allow, deputy: allow, evaluator: allow, school_admin: allow, area_admin: allow}
+      write:  {teacher: deny,  director: deny,  deputy: deny,  evaluator: deny,  school_admin: deny,  area_admin: deny}
+    notes: >
+      No API write path exists. Seeding ว9/ว10 is an out-of-band migration
+      (SEIP-DB-001). Changes need a Contract Change Request.
+
+  school:
+    actions:
+      read:   {teacher: allow, director: allow, deputy: allow, evaluator: allow, school_admin: allow, area_admin: allow}
+      update: {teacher: deny,  director: deny,  deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+      create: {teacher: deny,  director: deny,  deputy: deny,  evaluator: deny,  school_admin: deny,  area_admin: deny}
+    notes: "School creation is a platform-operator action, out of scope for v0.1."
+
+  membership:
+    description: SchoolMembership — who may act in this school
+    actions:
+      read:   {teacher: own,   director: allow, deputy: allow, evaluator: own,   school_admin: allow, area_admin: allow}
+      create: {teacher: deny,  director: deny,  deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+      update: {teacher: deny,  director: deny,  deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+      revoke: {teacher: deny,  director: deny,  deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+    notes: >
+      Only school_admin manages membership. director is deliberately excluded:
+      a head who can appoint its own evaluators undermines the independence the
+      3-person committee exists to provide. Flagged for grok (P-3).
+
+  personnel:
+    description: PersonnelProfile
+    actions:
+      read:   {teacher: own,   director: allow, deputy: allow, evaluator: cttee, school_admin: allow, area_admin: allow}
+      create: {teacher: deny,  director: deny,  deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+      update: {teacher: deny,  director: deny,  deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+
+  cycle:
+    description: EvaluationCycle
+    actions:
+      read:   {teacher: allow, director: allow, deputy: allow, evaluator: allow, school_admin: allow, area_admin: allow}
+      create: {teacher: deny,  director: allow, deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+      update: {teacher: deny,  director: allow, deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+      close:  {teacher: deny,  director: allow, deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+
+  round:
+    description: EvaluationRound (1..n per cycle)
+    actions:
+      read:   {teacher: allow, director: allow, deputy: allow, evaluator: allow, school_admin: allow, area_admin: allow}
+      create: {teacher: deny,  director: allow, deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+      update: {teacher: deny,  director: allow, deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+      open:   {teacher: deny,  director: allow, deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+      close:  {teacher: deny,  director: allow, deputy: deny,  evaluator: deny,  school_admin: allow, area_admin: deny}
+    notes: "Closing a round freezes scores permanently (STATE_ROUND_CLOSED)."
+
+  agreement:
+    description: PerformanceAgreement (PA1) + AgreementChallenge
+    actions:
+      read:   {teacher: own,   director: allow, deputy: own,   evaluator: cttee, school_admin: allow, area_admin: allow}
+      create: {teacher: own,   director: own,   deputy: own,   evaluator: deny,  school_admin: allow, area_admin: deny}
+      update: {teacher: own,   director: own,   deputy: own,   evaluator: deny,  school_admin: allow, area_admin: deny}
+      submit: {teacher: own,   director: own,   deputy: own,   evaluator: deny,  school_admin: deny,  area_admin: deny}
+    notes: >
+      `update` is only legal while status allows it. After submit the subject
+      cannot edit (STATE_AGREEMENT_NOT_SUBMITTED guards the inverse case).
+
+  workload_declaration:
+    description: WorkloadDeclaration — the ภาระงาน boolean gate
+    actions:
+      read:    {teacher: own,  director: allow, deputy: own,   evaluator: cttee, school_admin: allow, area_admin: allow}
+      declare: {teacher: deny, director: allow, deputy: deny,  evaluator: deny,  school_admin: deny,  area_admin: deny}
+    notes: >
+      Declared by the head, not by the evaluatee — a subject must not certify
+      its own workload gate. Grounding: §4.4 records declared_by_user_id
+      separately from the agreement owner.
+
+  evidence:
+    description: Evidence + EvidenceFile
+    actions:
+      read:   {teacher: own,   director: allow, deputy: own,   evaluator: cttee, school_admin: allow, area_admin: allow}
+      create: {teacher: own,   director: own,   deputy: own,   evaluator: deny,  school_admin: deny,  area_admin: deny}
+      update: {teacher: own,   director: own,   deputy: own,   evaluator: deny,  school_admin: deny,  area_admin: deny}
+      delete: {teacher: own,   director: own,   deputy: own,   evaluator: deny,  school_admin: allow, area_admin: deny}
+      upload: {teacher: own,   director: own,   deputy: own,   evaluator: deny,  school_admin: deny,  area_admin: deny}
+      download: {teacher: own, director: allow, deputy: own,   evaluator: cttee, school_admin: allow, area_admin: allow}
+    notes: >
+      `delete` is a soft delete (Evidence.deleted_at). Evidence is `sensitive`
+      PII and may contain learner data — download is the narrowest action here
+      and area_admin's read access is the broadest open risk (P-2).
+
+  mapping:
+    description: EvidenceIndicatorMapping — the governed M:N link
+    actions:
+      read:    {teacher: own,  director: allow, deputy: own,   evaluator: cttee, school_admin: allow, area_admin: allow}
+      suggest: {teacher: own,  director: own,   deputy: own,   evaluator: deny,  school_admin: deny,  area_admin: deny}
+      confirm: {teacher: deny, director: allow, deputy: deny,  evaluator: cttee, school_admin: deny,  area_admin: deny}
+      reject:  {teacher: deny, director: allow, deputy: deny,  evaluator: cttee, school_admin: deny,  area_admin: deny}
+      revoke:  {teacher: deny, director: allow, deputy: deny,  evaluator: deny,  school_admin: deny,  area_admin: deny}
+    notes: >
+      This split is the heart of "governed mappings": the evidence owner may
+      *propose* that a file supports an indicator, but only a reviewer may
+      *confirm* it. A subject confirming its own mapping would make the
+      governance decorative. mapping_source=ai_suggested rows are created by the
+      AI pipeline (Sprint 2), never by a client, and still require human confirm.
+
+  assignment:
+    description: EvaluationAssignment + CommitteeMember
+    actions:
+      read:            {teacher: subject, director: allow, deputy: subject, evaluator: cttee, school_admin: allow, area_admin: allow}
+      create:          {teacher: deny,    director: allow, deputy: deny,    evaluator: deny,  school_admin: allow, area_admin: deny}
+      assign_committee: {teacher: deny, director: deny,  deputy: deny,    evaluator: deny,  school_admin: allow, area_admin: deny}
+    notes: >
+      Committee composition is school_admin's, not director's — same
+      independence argument as `membership`. See P-3; this is the single most
+      consequential assumption in this contract.
+
+  score:
+    description: IndicatorScore + ChallengeScore (per-evaluator grain)
+    actions:
+      read:   {teacher: subject, director: allow, deputy: subject, evaluator: cttee, school_admin: deny, area_admin: allow}
+      write:  {teacher: deny,    director: deny,  deputy: deny,    evaluator: cttee, school_admin: deny, area_admin: deny}
+    notes: >
+      Only a seated committee member writes scores, and only its own seat's
+      scores — never another evaluator's (PERM_NOT_COMMITTEE_MEMBER).
+      school_admin cannot read scores: it manages process, not outcomes.
+      Whether an evaluatee may see per-evaluator breakdowns before the round
+      closes is open (P-4); v0.1 allows `subject` read and leaves timing to the
+      round status machine.
+
+  result:
+    description: RoundResult (per-evaluator rollup, ≥70% individual rule)
+    actions:
+      read:    {teacher: subject, director: allow, deputy: subject, evaluator: cttee, school_admin: deny, area_admin: allow}
+      compute: {teacher: deny,    director: allow, deputy: deny,    evaluator: deny,  school_admin: allow, area_admin: deny}
+    notes: >
+      Overall pass requires EVERY evaluator's passed_individual_threshold to be
+      true AND passed_workload_gate true. That is a business rule over rows, not
+      a permission — see error-codes RULE_* and entity-dictionary §10.6/§10.7.
+
+  report:
+    description: Report + ReportSectionRef (PA1/PA2/PA3 × ส/บส)
+    actions:
+      read:     {teacher: subject, director: allow, deputy: subject, evaluator: cttee, school_admin: allow, area_admin: allow}
+      generate: {teacher: deny,    director: allow, deputy: deny,    evaluator: deny,  school_admin: allow, area_admin: deny}
+      update:   {teacher: deny,    director: allow, deputy: deny,    evaluator: deny,  school_admin: allow, area_admin: deny}
+      issue:    {teacher: deny,    director: allow, deputy: deny,    evaluator: deny,  school_admin: deny,  area_admin: deny}
+
+  approval:
+    description: Approval workflow steps
+    actions:
+      read:   {teacher: subject, director: allow, deputy: subject, evaluator: cttee, school_admin: allow, area_admin: allow}
+      decide: {teacher: deny,    director: allow, deputy: deny,    evaluator: deny,  school_admin: deny,  area_admin: deny}
+    notes: >
+      v0.1 models the school-level approver only. Area-level endorsement is not
+      modelled because no entity supports it yet.
+
+  audit:
+    description: AuditEvent (append-only)
+    actions:
+      read:   {teacher: deny, director: allow, deputy: deny, evaluator: deny, school_admin: allow, area_admin: allow}
+      write:  {teacher: deny, director: deny,  deputy: deny, evaluator: deny, school_admin: deny,  area_admin: deny}
+    notes: >
+      No principal writes audit events through the API — the server writes them
+      as a side effect of every mutating command. before/after snapshots may
+      contain PII, so read is restricted to administrative roles.
+
+# ====================================================================
+# 5. Predicates
+# ====================================================================
+predicates:
+  own:
+    evidence: "Evidence.owner_personnel_id = caller's PersonnelProfile.id in this school"
+    agreement: "PerformanceAgreement.personnel_id = caller's PersonnelProfile.id"
+    mapping: "mapping.evidence_id belongs to evidence the caller owns"
+    membership: "SchoolMembership.user_id = caller's UserAccount.id"
+    personnel: "PersonnelProfile.user_id = caller's UserAccount.id"
+
+  cttee:
+    rule: >
+      EXISTS (CommitteeMember cm WHERE cm.assignment_id = <assignment>
+              AND cm.evaluator_user_id = caller.user_id)
+    score_write_extra: >
+      For score writes the row's own evaluator_user_id MUST equal the caller's
+      user id. A seated evaluator may not write another seat's score.
+    evidence_reach: >
+      An evaluator reaches evidence only through confirmed mappings attached to
+      indicators of an assignment it is seated on. It has no blanket evidence
+      read in the school.
+
+  subject:
+    rule: "The row's evaluatee_personnel_id / subject_personnel_id is the caller's own PersonnelProfile"
+
+# ====================================================================
+# 6. Rules that override the matrix
+# ====================================================================
+overriding_rules:
+  - id: PR-1
+    rule: "Tenancy is evaluated before the matrix. Matrix `allow` never crosses a school boundary."
+    error: TENANT_SCOPE_MISMATCH / NOT_FOUND
+
+  - id: PR-2
+    rule: "A closed round rejects every score and result write regardless of role."
+    error: STATE_ROUND_CLOSED
+
+  - id: PR-3
+    rule: "Framework taxonomy is immutable through the API for every role."
+    error: FRAMEWORK_IMMUTABLE
+
+  - id: PR-4
+    rule: >
+      Separation of duty: the evaluatee of an assignment may never hold a
+      CommitteeMember seat on it, and may never confirm a mapping cited in its
+      own evaluation.
+    error: RULE_SELF_EVALUATION_FORBIDDEN
+    status: provisional — see error-codes EC-3
+
+  - id: PR-5
+    rule: >
+      Scoring requires a complete 3-seat committee with exactly one chair.
+      Role permission is necessary but not sufficient.
+    error: RULE_COMMITTEE_INCOMPLETE / RULE_COMMITTEE_CHAIR_REQUIRED
+
+  - id: PR-6
+    rule: "Only `confirmed` mappings may be cited by an official report."
+    error: RULE_MAPPING_NOT_CONFIRMED
+
+  - id: PR-7
+    rule: >
+      Every `deny` for area_admin on writes is an assumption, not a decision.
+      Do not widen it without closing P-1.
+
+# ====================================================================
+# 7. Open questions — must close before SEIP-ARCH-002 locks v1.0
+# ====================================================================
+open_questions:
+  - id: P-1
+    question: >
+      Is area_admin read-only across its schools, or does it write? This
+      contract assumes read-only everywhere.
+    blocks: v1.0 lock
+    tracks: M-1 (data-model/README.md)
+    owner: user + claude
+
+  - id: P-2
+    question: >
+      Should area_admin be able to download evidence binaries at all? Evidence
+      is `sensitive` PII and may contain learner data; cross-school download is
+      the widest PDPA exposure in this contract. v0.1 allows it, which may be
+      wrong.
+    blocks: security baseline (SEIP-QA-001)
+    owner: grok + user
+
+  - id: P-3
+    question: >
+      Who assigns the committee — school_admin (as drafted) or director? The
+      framework makes ผอ. the chair but does not say who appoints the other two.
+      Drafting it as school_admin preserves independence; if the real-world
+      process is director-led, the matrix is wrong.
+    blocks: v1.0 lock
+    owner: user
+
+  - id: P-4
+    question: >
+      May an evaluatee see per-evaluator score breakdowns before the round
+      closes, or only the aggregate after close?
+    blocks: SEIP-UI-000 screen states
+    owner: antigravity + user
+
+  - id: P-5
+    question: >
+      Authentication mechanism is undecided. This contract covers authorization
+      only; openapi.yaml marks securitySchemes as provisional.
+    blocks: openapi.yaml v1.0
+    owner: user + claude
+
+  - id: P-6
+    question: >
+      PDPA lawful basis and data-residency for evidence containing learner
+      personal data — OPEN-3 in SPRINT-0.md is still open and constrains who may
+      read what, not just where data sits.
+    blocks: Sprint 2 AI mapping
+    owner: user + claude

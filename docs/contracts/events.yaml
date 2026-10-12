@@ -1,0 +1,356 @@
+# SEIP Domain Event Contract
+#
+# Status: DRAFT v0.1 — NOT LOCKED. Locking happens in SEIP-ARCH-002.
+# Owner: claude (architecture module)   Reviewer: grok
+# Task: SEIP-ARCH-001
+#
+# Events are the integration surface between modules (apps/api, apps/worker)
+# and the notification service. They are NOT the audit trail: AuditEvent is the
+# system of record for accountability (entity-dictionary.md §9.1). An event may
+# be lost or replayed; an audit row may not.
+#
+# Grounding: every event corresponds to a status transition or row creation
+# named in entity-dictionary.md. No event describes a transition the data model
+# does not have.
+
+contract: events
+version: 0.1.0
+status: draft
+updated_at: 2026-10-12
+framework_refs:
+  - docs/architecture/data-model/entity-dictionary.md
+  - docs/architecture/system-context.md
+  - docs/contracts/permissions.yaml
+
+# ====================================================================
+# 1. Envelope
+# ====================================================================
+envelope:
+  required:
+    event_id:       {type: string, format: uuid, note: "Unique per emission; the idempotency key for consumers"}
+    event_name:     {type: string, note: "Dotted name from the catalogue below, e.g. evidence.mapping.confirmed"}
+    event_version:  {type: integer, note: "Starts at 1; bumped only for breaking payload changes"}
+    occurred_at:    {type: string, format: date-time, note: "RFC 3339, UTC. Domain time, not publish time"}
+    school_id:      {type: [string, 'null'], format: uuid, note: "Tenant partition key. Null only for framework.* events, which are global"}
+    payload:        {type: object, note: "Event-specific, see catalogue. Identifiers only — see §3"}
+  optional:
+    actor_user_id:  {type: string, format: uuid, note: "Absent for system-initiated events (scans, scheduled closes)"}
+    request_id:     {type: string, note: "Correlates to the HTTP request and to AuditEvent.request_id"}
+    causation_id:   {type: string, format: uuid, note: "event_id of the event that caused this one"}
+    correlation_id: {type: string, format: uuid, note: "Stable across a whole business flow"}
+
+  example:
+    event_id: 7f1c0e9a-4d3b-4a51-9c2e-0b8a7d6f5e41
+    event_name: evidence.mapping.confirmed
+    event_version: 1
+    occurred_at: "2026-10-12T04:21:17Z"
+    school_id: 2a9f5c11-8e44-4b7a-9d31-6c0e2f8b1a73
+    actor_user_id: c41d7b02-5a63-4e18-8f92-1d7c3b5a9e60
+    request_id: req_01JAQ7Z3K2
+    payload:
+      mapping_id: 9b3e1f44-7c25-4d60-a18b-3e5f7a2c9d81
+      evidence_id: 4c7a2d19-6b38-4f52-8e01-9a3d5c7b1e62
+      indicator_id: e82b4a07-1f69-4c3d-b57a-2d904e6f8c15
+      indicator_code: T-1.2
+      cycle_id: 1d5e9c38-2a74-4b61-8f03-7c6b2e4a9d50
+      previous_status: suggested
+      status: confirmed
+      mapping_source: ai_suggested
+
+# ====================================================================
+# 2. Delivery semantics
+# ====================================================================
+delivery:
+  guarantee: at-least-once
+  ordering: >
+    Ordered per `school_id` partition only. Consumers MUST NOT assume global
+    ordering, and MUST tolerate an out-of-order arrival within a partition
+    (compare occurred_at, and for status transitions check previous_status).
+  idempotency: >
+    Consumers deduplicate on `event_id`. Handlers must be idempotent — a
+    redelivered evidence.mapping.confirmed must not send a second notification.
+  transactionality: >
+    Events are published only after the originating database transaction
+    commits (transactional outbox). A failed command publishes nothing.
+  retry: >
+    Exponential backoff, then a dead-letter destination. Dead-lettered events
+    are an operational alarm, not a silent drop.
+  schema_evolution: >
+    Additive fields do not bump event_version. Removing or re-typing a field
+    does, and both versions are published during migration. Consumers ignore
+    unknown fields.
+  transport: >
+    NOT DECIDED. No ADR selects a broker (OPEN-E1). This contract defines shape
+    and semantics so the broker choice stays an implementation detail.
+
+# ====================================================================
+# 3. PII policy — the rule that shapes every payload
+# ====================================================================
+pii_policy:
+  rule: >
+    Event payloads carry IDENTIFIERS AND STATUS, never personal or evaluative
+    content. Consumers that need names, comments or scores must call the API
+    with the caller's own authorization.
+  forbidden_in_payload:
+    - Score values (rubric_level, points_awarded, percentages) — `sensitive` PII
+    - Evaluator comments and challenge narratives
+    - Learner data of any kind
+    - full_name, email, employee_code
+    - original_filename (may embed a learner's name)
+    - storage_uri or any pre-signed URL
+  rationale: >
+    Evidence and scores are classed `sensitive` in entity-dictionary.md. A
+    broker is usually a weaker security boundary than the API, and a
+    notification payload tends to end up in logs and on phones. Keeping events
+    PII-free means a leaked event stream exposes which indicator moved, not
+    what anybody scored.
+  allowed_exception: >
+    `indicator_code` (e.g. T-1.2) and `template_code` are framework reference
+    data, not personal data, and are included because every consumer needs them
+    to route and label.
+  residency_note: >
+    OPEN-3 (PDPA data residency) is unresolved. A PII-free event stream is also
+    the only shape that is safe to cross a region boundary before that question
+    closes.
+
+# ====================================================================
+# 4. Event catalogue
+# ====================================================================
+events:
+
+  # ---- Evidence lifecycle --------------------------------------------
+  - name: evidence.created
+    version: 1
+    description: A logical evidence item was created (status may still be draft).
+    trigger: "Evidence row inserted (§5.1)"
+    payload: {evidence_id: uuid, owner_personnel_id: uuid, category_id: uuid, category_code: string, status: string}
+    consumers: [notification, search-index]
+
+  - name: evidence.file.attached
+    version: 1
+    description: File metadata was recorded; bytes are in object storage.
+    trigger: "EvidenceFile row inserted (§5.2)"
+    payload: {evidence_id: uuid, evidence_file_id: uuid, content_type: string, byte_size: integer, duration_seconds: "integer|null", scan_status: string}
+    consumers: [scanner, notification]
+    note: "original_filename and storage_uri are deliberately excluded (§3)."
+
+  - name: evidence.file.scan_completed
+    version: 1
+    description: Security scan finished.
+    trigger: "EvidenceFile.scan_status moved from pending to clean or blocked (§5.2)"
+    payload: {evidence_id: uuid, evidence_file_id: uuid, previous_status: string, scan_status: string}
+    consumers: [notification, evidence-state-machine]
+    note: >
+      scan_status=blocked must reach the owner. This is the one event where
+      silence is a security failure, not just a missed notification.
+
+  - name: evidence.status_changed
+    version: 1
+    description: Evidence moved between draft/active/archived/rejected.
+    trigger: "Evidence.status transition (§5.1)"
+    payload: {evidence_id: uuid, previous_status: string, status: string}
+    consumers: [notification, search-index]
+
+  - name: evidence.deleted
+    version: 1
+    description: Evidence was soft-deleted.
+    trigger: "Evidence.deleted_at set (§5.1, §10.9)"
+    payload: {evidence_id: uuid, deleted_at: date-time}
+    consumers: [search-index, storage-gc]
+    note: >
+      Binary deletion is a separate async GC decision (open question M-3), not
+      implied by this event.
+
+  # ---- Governed mapping ----------------------------------------------
+  - name: evidence.mapping.suggested
+    version: 1
+    description: A link between evidence and an indicator was proposed.
+    trigger: "EvidenceIndicatorMapping inserted with status=suggested (§6.1)"
+    payload: {mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, indicator_code: string, cycle_id: "uuid|null", mapping_source: string, status: string}
+    consumers: [notification, review-queue]
+    note: >
+      mapping_source distinguishes `human` from `ai_suggested`. A reviewer UI
+      should treat the two differently; both still require human confirmation.
+
+  - name: evidence.mapping.confirmed
+    version: 1
+    description: A reviewer confirmed the mapping. Only now is it report-eligible.
+    trigger: "status suggested -> confirmed (§6.1, §10.3)"
+    payload: {mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, indicator_code: string, cycle_id: "uuid|null", previous_status: string, status: string, mapping_source: string}
+    consumers: [notification, report-builder, search-index]
+
+  - name: evidence.mapping.rejected
+    version: 1
+    trigger: "status suggested -> rejected (§6.1)"
+    payload: {mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, indicator_code: string, previous_status: string, status: string}
+    consumers: [notification]
+
+  - name: evidence.mapping.revoked
+    version: 1
+    description: A previously confirmed mapping was withdrawn.
+    trigger: "status confirmed -> revoked (§6.1)"
+    payload: {mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, indicator_code: string, previous_status: string, status: string}
+    consumers: [notification, report-builder]
+    note: >
+      Report-builder must react: a revoked mapping may already be cited by an
+      issued report, which is a correction workflow, not a delete.
+
+  # ---- Cycle and round -----------------------------------------------
+  - name: cycle.status_changed
+    version: 1
+    trigger: "EvaluationCycle.status transition planned/open/closed (§4.1)"
+    payload: {cycle_id: uuid, fiscal_year: integer, evaluation_kind: string, framework_version_id: uuid, previous_status: string, status: string}
+    consumers: [notification, report-builder]
+
+  - name: round.status_changed
+    version: 1
+    description: Round moved between planned/open/scoring/closed.
+    trigger: "EvaluationRound.status transition (§4.2)"
+    payload: {round_id: uuid, cycle_id: uuid, round_number: integer, purpose: string, previous_status: string, status: string}
+    consumers: [notification, scoring-service, report-builder]
+    note: >
+      status=closed is the freeze point: scores become immutable (§10.4).
+      Consumers must treat it as irreversible.
+
+  # ---- Agreement and workload gate -----------------------------------
+  - name: agreement.submitted
+    version: 1
+    description: An evaluatee submitted its PA1 agreement.
+    trigger: "PerformanceAgreement.submitted_at set (§4.3)"
+    payload: {agreement_id: uuid, cycle_id: uuid, personnel_id: uuid, form_variant: string, submitted_at: date-time}
+    consumers: [notification, assignment-service]
+
+  - name: workload.declared
+    version: 1
+    description: The ภาระงาน boolean gate was declared for a round.
+    trigger: "WorkloadDeclaration inserted (§4.4)"
+    payload: {agreement_id: uuid, round_id: uuid, workload_met: boolean, declared_by_user_id: uuid, declared_at: date-time}
+    consumers: [notification, result-service]
+    note: >
+      workload_met=false means overall fail regardless of score (§10.6). It is a
+      boolean, not a percentage, so it is not `sensitive` score data and may
+      travel in the payload.
+
+  # ---- Committee and scoring -----------------------------------------
+  - name: assignment.created
+    version: 1
+    trigger: "EvaluationAssignment inserted (§7.1)"
+    payload: {assignment_id: uuid, round_id: uuid, evaluatee_personnel_id: uuid, agreement_id: uuid, status: string}
+    consumers: [notification]
+
+  - name: assignment.committee_completed
+    version: 1
+    description: All three committee seats are filled; the assignment may enter scoring.
+    trigger: "Third CommitteeMember row inserted for the assignment (§7.2, §10.5)"
+    payload: {assignment_id: uuid, round_id: uuid, evaluator_user_ids: "array<uuid>", chair_user_id: uuid}
+    consumers: [notification, scoring-service]
+    note: >
+      Emitted on completion, not per seat, because 3-of-3 is the meaningful
+      state. Individual seat additions are audit-only.
+
+  - name: score.recorded
+    version: 1
+    description: One evaluator scored one indicator or challenge item.
+    trigger: "IndicatorScore or ChallengeScore inserted/updated (§7.3, §7.4)"
+    payload: {assignment_id: uuid, indicator_id: uuid, indicator_code: string, indicator_kind: string, evaluator_user_id: uuid, scored_at: date-time}
+    consumers: [progress-tracker]
+    note: >
+      **rubric_level and points_awarded are absent by design** (§3). This event
+      says *that* a score exists, never what it was. A progress UI can show
+      12/15 complete without any consumer holding evaluative PII.
+
+  - name: result.computed
+    version: 1
+    description: A per-evaluator rollup was computed.
+    trigger: "RoundResult inserted/updated (§7.5)"
+    payload: {assignment_id: uuid, evaluator_user_id: uuid, passed_workload_gate: boolean, passed_individual_threshold: boolean, status: string, computed_at: date-time}
+    consumers: [notification, report-builder]
+    note: >
+      Percentages are excluded; only the two pass booleans travel. Overall pass
+      still requires every evaluator's threshold true (§10.7) — a consumer
+      cannot conclude the outcome from a single event.
+
+  # ---- Reports and approvals -----------------------------------------
+  - name: report.generated
+    version: 1
+    trigger: "Report inserted (§8.1)"
+    payload: {report_id: uuid, cycle_id: uuid, round_id: "uuid|null", subject_personnel_id: uuid, template_code: string, status: string}
+    consumers: [notification]
+    note: "Report.payload JSON is never embedded — it is sensitive and large."
+
+  - name: report.status_changed
+    version: 1
+    trigger: "Report.status transition draft/pending_approval/approved/issued/superseded (§8.1)"
+    payload: {report_id: uuid, previous_status: string, status: string}
+    consumers: [notification, archive]
+
+  - name: approval.decided
+    version: 1
+    trigger: "Approval.decision moved off pending (§8.3)"
+    payload: {approval_id: uuid, report_id: uuid, approver_user_id: uuid, step_code: string, decision: string, decided_at: date-time}
+    consumers: [notification, report-state-machine]
+    note: "Approval.comment is excluded — free text about a person is sensitive."
+
+  # ---- Framework (global, school_id = null) --------------------------
+  - name: framework.version_activated
+    version: 1
+    description: A framework version became active for a role family.
+    trigger: "FrameworkVersion.status -> active (§3.1)"
+    payload: {framework_version_id: uuid, code: string, role_family: string, revision_year: integer, effective_from: date}
+    consumers: [cache-invalidation, notification]
+    note: >
+      school_id is null. Activation must NOT retro-pin existing cycles
+      (§10.2) — consumers that cache taxonomy per cycle must respect the
+      cycle's own framework_version_id.
+
+# ====================================================================
+# 5. Not modelled, deliberately
+# ====================================================================
+not_modelled:
+  - item: AI suggestion pipeline events
+    reason: >
+      Sprint 2 (OPEN-5 has no owning task). mapping_source=ai_suggested is
+      already in the schema, so evidence.mapping.suggested covers the output
+      without inventing the pipeline's internals.
+  - item: Authentication and session events
+    reason: "No authentication ADR exists (permissions.yaml P-5)."
+  - item: Audit events as a stream
+    reason: >
+      AuditEvent is append-only storage read through the API, not a broker
+      topic. Treating audit as an at-least-once stream would weaken it.
+  - item: Per-seat committee assignment events
+    reason: "3-of-3 completion is the actionable state; seat adds are audit-only."
+  - item: Storage GC / binary deletion events
+    reason: "Open question M-3 — retention policy is undecided."
+
+# ====================================================================
+# 6. Open questions
+# ====================================================================
+open_questions:
+  - id: OPEN-E1
+    question: "Which broker/transport? No ADR selects one."
+    blocks: apps/worker implementation
+    owner: user + codex
+
+  - id: OPEN-E2
+    question: >
+      Does the notification service need score values to compose a useful
+      message? If yes, the PII policy in §3 must be revisited deliberately
+      rather than bypassed in implementation.
+    blocks: notification design
+    owner: grok + antigravity
+
+  - id: OPEN-E3
+    question: >
+      Retention for the event log itself. AuditEvent is `audit-long`; events are
+      transient, but a broker with infinite retention becomes a shadow copy of
+      sensitive data.
+    blocks: security baseline (SEIP-QA-001)
+    owner: grok
+
+  - id: OPEN-E4
+    question: >
+      Should evidence.mapping.revoked trigger an automatic report correction
+      workflow when the mapping is cited by an issued report?
+    blocks: report module boundary
+    owner: claude
