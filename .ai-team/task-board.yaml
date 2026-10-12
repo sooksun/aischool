@@ -941,7 +941,7 @@ tasks:
   # ── Rethink 2026-10 (PRD v1.0, plan.md, ADR-0010–0018 accepted 2026-10-12) ──
   - id: SEIP-P0-001
     title: "P0 week 1 — rebaseline on PostgreSQL 18, SeaweedFS for MinIO, clean dependency audit"
-    status: review              # 2026-10-12 — all gates green locally; awaiting CI on PR #3 + owner review
+    status: review              # 2026-10-12 — 13/13 CI gates green (run 38230214195); awaiting owner review
     branch: claude/remote-control-5aclif   # PR #3 → develop (owner chose to fold L2 + P0 into it)
     dependencies: []
     decisions: [ADR-0012, ADR-0013]
@@ -973,4 +973,4 @@ tasks:
       - "test:backend 20, api 78, database 17, worker 21, security 6, e2e 12"     # DONE (local)
       - npm audit --audit-level=high clean                                         # DONE — 0 vulnerabilities
       - No MinIO image or MySQL reference left in CI / compose                     # DONE
-      - All CI gates green on GitHub Actions                                       # PENDING
+      - All CI gates green on GitHub Actions                                       # DONE — 13/13, run 38230214195 (first time for this codebase)

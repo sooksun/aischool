@@ -6,7 +6,7 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
-> **P0 week 1 (SEIP-P0-001, in review):** back on PostgreSQL 18 with non-superuser `seip_migrator`/`seip_app` roles (ADR-0012), SeaweedFS replaces MinIO (ADR-0013), dependency audit clean. All suites green locally; CI on PR #3 pending.
+> **P0 week 1 (SEIP-P0-001, in review):** back on PostgreSQL 18 with non-superuser `seip_migrator`/`seip_app` roles (ADR-0012), SeaweedFS replaces MinIO (ADR-0013), dependency audit clean. **13/13 CI gates green on PR #3 (run 38230214195) — the first fully green run of this codebase.**
 
 ### Previous phase
 **Sprint 1 — First production features** (opened 2026-07-17 when the ARCH-002 merge went green on develop, run `b5c6d6a`). Single-agent mode per ADR-0004.
