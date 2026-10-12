@@ -101,6 +101,27 @@ jobs:
             echo "::notice::dependency-audit not yet armed — arms when a lockfile lands"
           fi
 
+  dart-client:
+    name: "Gate: dart client"
+    runs-on: ubuntu-latest
+    # ADR-0016 §3: the Flutter app's client is generated from the same OpenAPI
+    # contract as the web types (swagger_parser). This proves the contract still
+    # generates, builds and analyses as Dart, and that the payloads the app leans
+    # on (sync batches, suggestions, upload sessions) decode. During P0 it targets
+    # the 4.0.0 draft (clients/dart/seip_api/swagger_parser.yaml).
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.5
+      - name: Generate, analyse, test
+        working-directory: clients/dart/seip_api
+        run: |
+          dart pub get
+          tool/generate.sh
+          dart analyze --fatal-infos
+          dart test
+
   # ---------- SELF-ARMING gates (activate when their subject exists) ----------
   format:
     name: "Gate: format"

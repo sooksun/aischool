@@ -77,7 +77,12 @@ Members, taxonomy, cycles/rounds, agreements (PA1 and ประเด็นท�
 | `redocly lint`, internal-ai-0.1.0 | valid |
 | `openapi-typescript@7` codegen | generates |
 | `oasdiff breaking` 3.1.0 → 4.0.0 (via `scripts/security/check-contract-compatibility.mjs`) | **87 breaking items**, accepted because the major version is bumped. Every one is on the evidence, mapping or upload surface: 30 enum additions, 25 + 13 removed response properties, 5 new required headers (`Idempotency-Key` / `If-Match`), 4 removed request properties, 3 removed paths, and 5 enum removals. **None** touches members, taxonomy, cycles, agreements or auth. |
-| Dart client (`swagger_parser`) | **not yet**: the P0 spike, next |
+| Dart client: swagger_parser 1.45.0 + retrofit_generator 10.2 + json_serializable 6.14 (SEIP-P0-004 spike) | **pass**: 16 clients, 74 requests and 170 models generate; `build_runner` builds; `dart analyze --fatal-infos` is clean; 4 decode tests pass. CI now runs this as `Gate: dart client`. The fallback (openapi-generator) is **not needed**. |
+
+### What the Dart spike changed in the draft
+
+1. **`SyncChange.data` (a `oneOf` with no discriminator) became one nullable property per entity.** swagger_parser compiled the oneOf, but as *try each type in order, take the first that parses*. That can bind a row to the wrong type when two schemas share their required fields. With `evidence` / `evidence_file` / `analysis` / `suggestion` / `mapping` / `notification` as separate fields, decoding is unambiguous in every generator, and a tombstone is simply all null.
+2. **`MemberInvite.personnel` was extracted to `MemberInvitePersonnel`.** Two inline `personnel` objects collided and produced a type called `Personnel2`. The wire shape is unchanged.
 
 ### Found while doing this: the contract gate could pass without checking anything
 
@@ -155,7 +160,7 @@ This contract has one consumer: the web app in this repository. ADR-0004 says si
 
 | Step | Phase | What |
 |---|---|---|
-| 1 | P0 wk 3 | Run the Dart client spike against the draft (`swagger_parser`, falling back to openapi-generator). Fold whatever it forces (oneOf handling in `SyncChange.data`, nullable enums) back into the draft. |
+| 1 | P0 wk 2 | **Done.** Dart client spike against the draft; two findings folded back (see above). |
 | 2 | P1 | Apply: move the draft over `openapi.yaml`, bump the other three contracts, regenerate the TS types, and land the data-model delta. The data-model delta covers `person` and `evidence` ownership, `framework_version_id` on mappings, `upload_session`, `idempotency_key` and `version` columns. Rewrite the evidence, mapping and upload routes, and move the web pages to the new types. |
 | 3 | P1 | `FEATURE_SCORING` flag. The v2 routes are registered only when it is true, and a `frozen` CI job runs their tests. |
 | 4 | P2 | Upload sessions and multipart, plus sync and devices, used by Flutter. |

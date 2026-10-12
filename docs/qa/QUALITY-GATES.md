@@ -162,6 +162,13 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## New gate 2026-10-12: `Gate: dart client` (14th)
+
+`clients/dart/seip_api`: swagger_parser generates the Flutter API client from the
+contract (the 4.0.0 draft during P0), then `build_runner`, `dart analyze
+--fatal-infos` and `dart test` (decode tests for sync batches, suggestions and
+upload sessions). Fails if the contract stops generating valid Dart.
+
 ## Gate defect fixed 2026-10-12: contract compatibility could pass unchecked
 
 `scripts/security/check-contract-compatibility.mjs` runs oasdiff via `docker run`

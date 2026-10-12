@@ -2856,34 +2856,7 @@ components:
         role:
           $ref: '#/components/schemas/Role'
         personnel:
-          description: 'Omit for a member who is not evaluated by this school (an external
-
-            committee `evaluator`). When present, `rank_level_code` must belong to
-
-            the same role family as `position_role` — a mismatch selects the wrong
-
-            framework''s rubric and is rejected with VAL-003.
-
-            '
-          type: object
-          required:
-          - full_name
-          - position_role
-          - rank_level_code
-          properties:
-            full_name:
-              type: string
-              minLength: 1
-              maxLength: 200
-            employee_code:
-              type:
-              - string
-              - 'null'
-              maxLength: 50
-            position_role:
-              $ref: '#/components/schemas/RoleFamily'
-            rank_level_code:
-              type: string
+          $ref: '#/components/schemas/MemberInvitePersonnel'
     MemberInviteResult:
       type: object
       description: The invite token appears here and nowhere else, ever.
@@ -5154,16 +5127,32 @@ components:
         updated_at:
           type: string
           format: date-time
-        data:
+        evidence:
           oneOf:
           - $ref: '#/components/schemas/Evidence'
+          - type: 'null'
+        evidence_file:
+          oneOf:
           - $ref: '#/components/schemas/EvidenceFile'
+          - type: 'null'
+        analysis:
+          oneOf:
           - $ref: '#/components/schemas/Analysis'
+          - type: 'null'
+        suggestion:
+          oneOf:
           - $ref: '#/components/schemas/Suggestion'
+          - type: 'null'
+        mapping:
+          oneOf:
           - $ref: '#/components/schemas/Mapping'
+          - type: 'null'
+        notification:
+          oneOf:
           - $ref: '#/components/schemas/Notification'
           - type: 'null'
-          description: The current row for op=upsert; null for op=delete (tombstone). Discriminate on `entity`.
+      description: For op=upsert exactly the property named by `entity` carries the current row; for op=delete all
+        entity properties are null.
     SyncChanges:
       type: object
       required:
@@ -5643,3 +5632,32 @@ components:
           type:
           - string
           - 'null'
+    MemberInvitePersonnel:
+      description: 'Omit for a member who is not evaluated by this school (an external
+
+        committee `evaluator`). When present, `rank_level_code` must belong to
+
+        the same role family as `position_role` — a mismatch selects the wrong
+
+        framework''s rubric and is rejected with VAL-003.
+
+        '
+      type: object
+      required:
+      - full_name
+      - position_role
+      - rank_level_code
+      properties:
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        employee_code:
+          type:
+          - string
+          - 'null'
+          maxLength: 50
+        position_role:
+          $ref: '#/components/schemas/RoleFamily'
+        rank_level_code:
+          type: string

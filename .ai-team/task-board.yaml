@@ -1023,5 +1023,30 @@ tasks:
       - Draft lints clean with the gate's linter and generates TS types           # DONE
       - Breaking list produced by the gate's own checker, recorded in the CCR     # DONE — 87
       - Permissions / error-code / event deltas and migration plan in the CCR     # DONE
-      - Dart client compiles from the draft (swagger_parser spike)                # NEXT — SEIP-P0-004
+      - Dart client compiles from the draft (swagger_parser spike)                # DONE — SEIP-P0-004
       - Owner approves CCR-017                                                     # PENDING
+
+  - id: SEIP-P0-004
+    title: "P0 week 2 — Dart client spike (swagger_parser) against contract 4.0.0 draft"
+    status: review              # 2026-10-12 — passes locally; CI gate added
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-003]
+    decisions: [ADR-0016]
+    primary_paths:
+      - clients/dart/seip_api/
+      - .github/workflows/ci.yml
+    notes: >
+      swagger_parser 1.45.0 + retrofit_generator 10.2.11 + json_serializable 6.14.1
+      on Dart 3.13.5: 16 clients / 74 requests / 170 models generate, build and
+      analyse clean (--fatal-infos); 4 decode tests pass. Fallback to
+      openapi-generator not needed. Two draft fixes folded back into CCR-017
+      (SyncChange per-entity fields instead of a discriminator-less oneOf;
+      MemberInvitePersonnel named). Generated code is not committed — CI and
+      tool/generate.sh regenerate it. New CI job "Gate: dart client" (14th gate).
+      retrofit_generator 9.x fails to compile against retrofit 4.10 (Parser enum
+      gained DartMappable) — pinned ^10.2.
+    acceptance_criteria:
+      - Client generated from the contract, not hand-written                      # DONE
+      - build_runner + dart analyze --fatal-infos clean                           # DONE
+      - Decode tests for sync / suggestion / upload session                       # DONE (4)
+      - Gate green in CI                                                           # PENDING

@@ -1,0 +1,4 @@
+.dart_tool/
+build/
+# Generated from the OpenAPI contract by tool/generate.sh (CI regenerates it).
+lib/src/generated/
