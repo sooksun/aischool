@@ -16,7 +16,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, unwrap, setAccessToken, setRefreshToken, setCurrentSchoolId, registerSessionHooks } from '../api/client';
 import type { components } from '../api/schema.generated';
-import { capabilitiesFromMemberships, type Capabilities } from '../lib/capabilities';
+import { capabilitiesFromMemberships, FEATURE_SCORING, type Capabilities } from '../lib/capabilities';
 
 type CurrentUser = components['schemas']['CurrentUser'];
 type Role = components['schemas']['Role'];
@@ -116,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const capabilities = useMemo(
-    () => capabilitiesFromMemberships(user?.memberships),
+    () => capabilitiesFromMemberships(user?.memberships, FEATURE_SCORING),
     [user],
   );
 

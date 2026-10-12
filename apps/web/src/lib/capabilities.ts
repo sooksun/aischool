@@ -66,9 +66,25 @@ const FALSE_CAPS: Capabilities = {
   manageMembers: false,
 };
 
-/** Pure: memberships → flags. Call once per user change (memoize in useAuth). */
+/**
+ * Affordances whose API routes exist only when FEATURE_SCORING=true (ADR-0017:
+ * v2 committee scoring + PA reports). With the flag off the server does not
+ * register submitMyScores / getAssignmentResults / the report ops, so the
+ * screens would be dead ends.
+ */
+export const V2_SCORING_CAPABILITIES: readonly UiCapability[] = ['scoreAsCommittee', 'viewReports', 'createReports'];
+
+/** Build-time switch, read from the same FEATURE_SCORING as the API (vite.config.ts). */
+export const FEATURE_SCORING: boolean = import.meta.env.VITE_FEATURE_SCORING === true;
+
+/**
+ * Pure: memberships → flags. Call once per user change (memoize in useAuth).
+ * `featureScoring` defaults to on so the role table can be tested on its own;
+ * useAuth passes the build's FEATURE_SCORING.
+ */
 export function capabilitiesFromMemberships(
   memberships: readonly Membership[] | null | undefined,
+  featureScoring = true,
 ): Capabilities {
   if (!memberships?.length) return { ...FALSE_CAPS };
 
@@ -79,6 +95,7 @@ export function capabilitiesFromMemberships(
   for (const cap of Object.keys(CAPABILITY_ROLES) as UiCapability[]) {
     out[cap] = CAPABILITY_ROLES[cap].some((r) => held.has(r));
   }
+  if (!featureScoring) for (const cap of V2_SCORING_CAPABILITIES) out[cap] = false;
   return out;
 }
 

@@ -12,6 +12,10 @@ COPY docs/contracts docs/contracts
 # Optional public API base; empty means same-origin /api (nginx reverse proxy).
 ARG VITE_API_BASE=
 ENV VITE_API_BASE=$VITE_API_BASE
+# Same switch as the api (ADR-0017). Must match the api's value, or the v2
+# screens either vanish while their routes exist or show up as dead ends.
+ARG FEATURE_SCORING=false
+ENV FEATURE_SCORING=$FEATURE_SCORING
 RUN npm run build --workspace apps/web
 
 FROM nginx:1.27-alpine AS runtime

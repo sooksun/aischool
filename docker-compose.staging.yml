@@ -119,6 +119,8 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_REGION: ${S3_REGION:-us-east-1}
+      # v2 scoring + reports (ADR-0017); the web build takes the same value.
+      FEATURE_SCORING: ${FEATURE_SCORING:-false}
     # Bind localhost only if you must hit the API without nginx during bring-up.
     ports:
       - "127.0.0.1:3001:3001"
@@ -197,6 +199,8 @@ services:
       args:
         # Empty = same-origin /api via nginx (recommended staging/on-prem shape).
         VITE_API_BASE: ${VITE_API_BASE:-}
+        # Baked into the SPA; keep equal to the api's FEATURE_SCORING (ADR-0017).
+        FEATURE_SCORING: ${FEATURE_SCORING:-false}
     restart: unless-stopped
     depends_on:
       - api

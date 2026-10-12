@@ -1099,7 +1099,7 @@ tasks:
 
   - id: SEIP-P1-001
     title: "P1 — apply contract 4.0.0 (CCR-017): person-owned evidence, upload sessions, two-tier mappings"
-    status: review              # 2026-10-12 — all local gates green; CI pending
+    status: review              # 2026-10-12 — CI green (run 38321728017); min_acr open (P2)
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P0-003]
     decisions: [ADR-0012, ADR-0015, ADR-0016, ADR-0017, ADR-0018]
@@ -1135,4 +1135,4 @@ tasks:
       - "dart client generate + analyze + test; mobile analyze + test"                                # DONE (local)
       - "CI green on the pushed commit"                                                               # DONE — run 38321728017 on 03f64b8, 15/15 jobs
       - "min_acr (acr ≥ 2 for validate / return / cross-person export) enforced"                     # OPEN — needs step-up auth (ADR-0014), P2
-      - "web hides v2 screens when FEATURE_SCORING=false"                                            # OPEN — web has no flag yet; production keeps the default off
+      - "web hides v2 screens when FEATURE_SCORING=false"                                            # DONE — vite.config reads the same FEATURE_SCORING; capabilities mask the v2 affordances

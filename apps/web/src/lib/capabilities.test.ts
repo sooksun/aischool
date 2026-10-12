@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capabilitiesFromMemberships, CAPABILITY_ROLES } from './capabilities';
+import { capabilitiesFromMemberships, CAPABILITY_ROLES, V2_SCORING_CAPABILITIES } from './capabilities';
 import type { components } from '../api/schema.generated';
 
 type Role = components['schemas']['Role'];
@@ -87,6 +87,23 @@ describe('capabilitiesFromMemberships', () => {
       expect(capabilitiesFromMemberships([m(role)]).manageMembers).toBe(false);
     }
     expect(capabilitiesFromMemberships([]).manageMembers).toBe(false);
+  });
+
+  // ADR-0017: with FEATURE_SCORING off the API does not register the v2 routes,
+  // so their screens must disappear rather than fail on every call.
+  it('FEATURE_SCORING off: hides the v2 scoring and report affordances only', () => {
+    const all = [m('director'), m('evaluator'), m('school_admin')];
+    const on = capabilitiesFromMemberships(all, true);
+    const off = capabilitiesFromMemberships(all, false);
+    for (const cap of V2_SCORING_CAPABILITIES) {
+      expect(on[cap]).toBe(true);
+      expect(off[cap]).toBe(false);
+    }
+    for (const cap of Object.keys(on) as (keyof typeof on)[]) {
+      if (!V2_SCORING_CAPABILITIES.includes(cap)) expect(off[cap]).toBe(on[cap]);
+    }
+    expect(off.manageCycles).toBe(true);
+    expect(off.governMappings).toBe(true);
   });
 
   it('CAPABILITY_ROLES lists only known Role values', () => {

@@ -15,11 +15,11 @@ School Evidence Intelligence Platform (SEIP)
 > - v2 scoring and reports sit behind **`FEATURE_SCORING`**, which is off by default.
 > - The worker re-hashes every original against its declared SHA-256.
 >
-> All local gates and suites are green on a fresh DB. CI on the pushed commit is pending.
+> All local gates and suites are green on a fresh DB, and so is CI.
 >
-> Still open:
-> - `min_acr` is not enforced until step-up authentication lands in P2.
-> - The web has no FEATURE_SCORING switch yet.
+> The web reads the same `FEATURE_SCORING` at build time and hides the scoring and report screens when it is off.
+>
+> Still open: `min_acr` is not enforced until step-up authentication lands in P2.
 >
 > **Flutter skeleton (SEIP-P0-006):** `apps/mobile` signs in and reads `/auth/me` through the generated client — live test against the real API passes; emulator run still to do. **S3 conformance suite (SEIP-P0-005)** green on SeaweedFS.
 >
