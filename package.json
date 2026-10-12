@@ -42,20 +42,18 @@
     "dev:worker": "npm run build:libs && npm run build --workspace apps/worker && npm run start --workspace apps/worker",
     "db:bootstrap": "psql -v ON_ERROR_STOP=1 -f scripts/db/bootstrap-roles.sql"
   },
-  "prisma": {
-    "seed": "node prisma/seed.mjs"
-  },
   "dependencies": {
-    "@prisma/client": "^6.19.3"
+    "@prisma/client": "7.10.0"
   },
   "devDependencies": {
     "@node-rs/argon2": "^2.0.2",
     "@playwright/test": "^1.51.0",
     "js-yaml": "^4.3.0",
     "pg": "^8.23.1",
-    "prisma": "^6.19.3"
+    "prisma": "7.10.0"
   },
   "overrides": {
-    "deepmerge-ts": "^8.0.0"
+    "deepmerge-ts": "^8.0.0",
+    "mysql2": "^3.24.5"
   }
 }

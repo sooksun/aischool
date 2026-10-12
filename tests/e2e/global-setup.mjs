@@ -16,7 +16,7 @@
 //     That one row was SEIP-BLOCK-002: nothing in the product could create it, so
 //     writing it here made the whole scoring path look reachable when it was not.
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../prisma/client.mjs';
 import { hash as argonHash } from '@node-rs/argon2';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -138,7 +138,7 @@ async function ensureUser(prisma, {
 }
 
 export default async function globalSetup() {
-  const prisma = new PrismaClient();
+  const prisma = createPrismaClient();
   try {
     await prisma.rankLevel.upsert({
       where: { code: 'apply_adapt' },

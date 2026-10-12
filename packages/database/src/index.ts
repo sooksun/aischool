@@ -1,4 +1,4 @@
-export { prisma } from './client.js';
+export { prisma, createPrismaClient } from './client.js';
 export { writeAuditEvent, type AuditWrite } from './audit.js';
 export * from './repositories/identity.js';
 export * from './repositories/taxonomy.js';

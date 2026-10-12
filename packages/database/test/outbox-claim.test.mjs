@@ -9,7 +9,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../../prisma/client.mjs';
 import {
   enqueueOutboxEvent,
   claimUnpublishedOutbox,
@@ -17,7 +17,7 @@ import {
   markOutboxPublished,
 } from '../dist/index.js';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const ids = [];
 
 async function seedEvent(eventType = 'test.outbox.claim') {

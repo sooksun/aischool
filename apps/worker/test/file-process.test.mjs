@@ -4,7 +4,7 @@ process.env.NODE_ENV = 'test';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../../prisma/client.mjs';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import {
   registerEvidenceFileWithWorkerJobs,
@@ -16,7 +16,7 @@ import {
 import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
 import { runOnce } from '../dist/loop.js';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const env = {
   DATABASE_URL: process.env.DATABASE_URL,
   S3_ENDPOINT: process.env.S3_ENDPOINT ?? 'http://localhost:9000',

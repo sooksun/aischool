@@ -22,7 +22,7 @@
  *   node scripts/ops/provision-school.mjs --code=SCH-001 --name="..." \
  *        --area-code=AREA-1 --area-name="สพป. เขต 1"
  */
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../prisma/client.mjs';
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -44,7 +44,7 @@ if (!code || !name) {
 }
 if (areaCode && !areaName) die('--area-code requires --area-name');
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 try {
   const existing = await prisma.school.findUnique({ where: { code }, select: { id: true, name: true } });

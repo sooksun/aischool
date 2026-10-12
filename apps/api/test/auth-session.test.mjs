@@ -6,7 +6,7 @@ process.env.NODE_ENV = 'test';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../../prisma/client.mjs';
 import { hash as argonHash } from '@node-rs/argon2';
 import { hashRefreshToken } from '@seip/auth';
 import { buildServer } from '../dist/server.js';
@@ -14,7 +14,7 @@ import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.
 
 const created = trackSchools();
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 let app;
 let email;
 const password = 'session-test-password-1234';

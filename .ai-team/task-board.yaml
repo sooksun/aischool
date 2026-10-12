@@ -974,3 +974,30 @@ tasks:
       - npm audit --audit-level=high clean                                         # DONE — 0 vulnerabilities
       - No MinIO image or MySQL reference left in CI / compose                     # DONE
       - All CI gates green on GitHub Actions                                       # DONE — 13/13, run 38230214195 (first time for this codebase)
+
+  - id: SEIP-P0-002
+    title: "P0 week 2 — Prisma 6.19 → 7.10 (ADR-0012 §5)"
+    status: review              # 2026-10-12 — all suites green locally; CI pending
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-001]
+    decisions: [ADR-0012]
+    primary_paths:
+      - prisma.config.ts
+      - prisma/client.mjs
+      - packages/database/src/client.ts
+      - prisma/schema.prisma
+    notes: >
+      Pinned exactly at 7.10.0 (npm `latest` is 8.0.0-rc). Connection URL moved
+      from schema.prisma to prisma.config.ts (migrate uses MIGRATE_DATABASE_URL
+      when set). The client now goes through @prisma/adapter-pg; all 18 direct
+      `new PrismaClient()` sites (tests, seed, ops scripts) use a factory instead.
+      Prisma 7's CLI drags in mysql2 3.15.3 (Studio) with a high advisory —
+      overridden to ^3.24.5; audit stays at 0. Also fixed a staging bug from
+      P0-001: Dockerfile.api's last stage is `migrate`, so the target-less `api`
+      build in docker-compose.staging.yml would have produced the migrate image.
+    acceptance_criteria:
+      - "build, typecheck, lint, format, unit green"                               # DONE
+      - "test:backend 20, api 78, database 17, worker 21, security 6, e2e 12"     # DONE (local, fresh DB)
+      - npm audit high clean                                                       # DONE — 0
+      - "api runtime image builds — NOT verifiable in this sandbox (npm inside docker build hits the session proxy: SELF_SIGNED_CERT_IN_CHAIN); CI does not build images"   # OPEN
+      - CI 13/13 green again after the upgrade (P0 exit criterion)                 # PENDING

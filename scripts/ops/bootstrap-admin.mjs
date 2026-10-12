@@ -26,7 +26,7 @@
  * visible to every process on the box via `ps` and lands in shell history.
  * Omit it and one is generated and printed once.
  */
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../prisma/client.mjs';
 import { hashPassword } from '@seip/auth';
 import { randomBytes } from 'node:crypto';
 
@@ -62,7 +62,7 @@ if (!password) {
   die(`SEIP_ADMIN_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters (matches the invite-accept policy)`);
 }
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 try {
   const school = await prisma.school.findUnique({ where: { code: schoolCode }, select: { id: true, name: true } });

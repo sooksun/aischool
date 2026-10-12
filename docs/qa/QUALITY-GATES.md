@@ -162,6 +162,18 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-12, local — P0-002 Prisma 7.10 upgrade)
+
+Same stack as below, fresh database (bootstrap → migrate as `seip_migrator` →
+seed as `seip_app`). Prisma 6.19.3 → **7.10.0** with `@prisma/adapter-pg`.
+
+| Command | Result |
+|---|---|
+| `build` · `typecheck` · `lint` · `format:check` · `test:unit` | pass |
+| `gate:dep-audit` | 0 vulnerabilities (mysql2 override for the Prisma 7 CLI) |
+| `test:backend` · api · database · worker · security | 20 · 78 · 17 · 21 · 6 — all pass |
+| `test:e2e` | 12/12 |
+
 ## Verified runs (2026-10-12, local — P0 rebaseline on PostgreSQL 18 + SeaweedFS)
 
 ADR-0012/0013. Stack: `pgvector/pgvector:pg18` with `seip_migrator` (migrations)
