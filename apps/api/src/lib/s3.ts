@@ -57,14 +57,32 @@ export function evidenceObjectKey(schoolId: string, evidenceId: string, fileId: 
   return `evidence/${schoolId}/${evidenceId}/${fileId}/${safe}`;
 }
 
+/**
+ * contentLength is signed, not decorative: it is listed in SignedHeaders, so the
+ * storage service itself rejects a PUT whose actual Content-Length differs from
+ * the byte_size the caller declared at initiate. Without it, UPL-002 checked a
+ * number the server then never compared against anything real — declare 10
+ * bytes, upload a gigabyte (2026-07-18 audit). The worker re-verifies the stored
+ * object afterwards as defence in depth, since this layer only binds clients
+ * that go through a presigned URL.
+ */
 export async function presignUpload(
   client: S3Client,
   bucket: string,
   key: string,
   contentType: string,
+  contentLength: number,
 ): Promise<PresignedUpload> {
-  const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType });
-  const uploadUrl = await getSignedUrl(client, command, { expiresIn: UPLOAD_URL_TTL_SECONDS });
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ContentType: contentType,
+    ContentLength: contentLength,
+  });
+  const uploadUrl = await getSignedUrl(client, command, {
+    expiresIn: UPLOAD_URL_TTL_SECONDS,
+    signableHeaders: new Set(['content-length', 'content-type']),
+  });
   return { uploadUrl, expiresAt: new Date(Date.now() + UPLOAD_URL_TTL_SECONDS * 1000) };
 }
 

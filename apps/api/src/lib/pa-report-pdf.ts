@@ -32,6 +32,9 @@ export interface PaReportPdfInput {
   /** Prefer typed ReportPayloadV1; unknown JSON is coerced. */
   payload: ReportPayloadV1 | Record<string, unknown> | unknown;
   sectionRefs: { sectionKey: string; evidenceId: string | null; mappingId: string | null; sortOrder: number }[];
+  /** CCR-016. Optional so existing callers keep compiling; when absent the PDF
+   * falls back to reading `status`, which is enough to state approved-or-not. */
+  approvals?: { decision: string; approverUserId: string; decidedAt: Date | null }[];
 }
 
 const TEMPLATE_TITLES: Record<string, string> = {
@@ -95,6 +98,34 @@ export async function buildPaReportPdf(input: PaReportPdfInput): Promise<Buffer>
     + 'ไม่ใช่แบบฟอร์มกระดาษ/ต้นฉบับลายเซ็น ก.ค.ศ. อย่างเป็นทางการ',
     { align: 'center' },
   );
+  doc.fillColor('#000');
+  doc.moveDown(0.6);
+
+  // CCR-016: approval state, stated on the document itself.
+  //
+  // The draft/review disclaimer above says this is not the official ก.ค.ศ. plate.
+  // It does not say whether anyone has actually endorsed the result, and a
+  // printed, plausible-looking PA report that nobody signed is precisely the
+  // artefact this project keeps having to catch. So the document says so.
+  const approvedRecord = input.approvals?.find((a) => a.decision === 'approved');
+  if (input.status === 'approved' && approvedRecord) {
+    const when = approvedRecord.decidedAt
+      ? new Date(approvedRecord.decidedAt).toLocaleDateString('th-TH')
+      : '—';
+    doc.fontSize(10).fillColor('#027a48').text(
+      `ผ่านการอนุมัติแล้ว เมื่อ ${when} (ผู้อนุมัติ: ${approvedRecord.approverUserId})`,
+      { align: 'center' },
+    );
+  } else if (input.status === 'approved') {
+    // Status says approved but no decision row came through — report the status
+    // without inventing an approver or a date.
+    doc.fontSize(10).fillColor('#027a48').text('ผ่านการอนุมัติแล้ว', { align: 'center' });
+  } else {
+    doc.fontSize(10).fillColor('#b42318').text(
+      'ยังไม่ผ่านการอนุมัติ — เอกสารนี้ยังไม่มีผลรับรอง',
+      { align: 'center' },
+    );
+  }
   doc.fillColor('#000');
   doc.moveDown(1);
 

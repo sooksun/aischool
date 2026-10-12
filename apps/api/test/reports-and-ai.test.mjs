@@ -9,6 +9,9 @@ import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
 import { runOnce } from '../../worker/dist/loop.js';
 import { S3Client } from '@aws-sdk/client-s3';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -36,9 +39,9 @@ before(async () => {
   const area = await prisma.area.create({
     data: { code: `rpt-area-${randomUUID()}`, name: 'Area' },
   });
-  school = await prisma.school.create({
+  school = created.add(await prisma.school.create({
     data: { code: `rpt-school-${randomUUID()}`, name: 'School', areaId: area.id },
-  });
+  }));
   await prisma.rankLevel.upsert({
     where: { code: 'teacher_kru' },
     create: { code: 'teacher_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 1 },
@@ -108,7 +111,7 @@ before(async () => {
   });
   directorToken = dLogin.json().access_token;
 
-  const fw = await prisma.frameworkVersion.create({
+  const fw = created.addFramework(await prisma.frameworkVersion.create({
     data: {
       code: `rpt-fw-${randomUUID()}`,
       roleFamily: 'teacher',
@@ -117,7 +120,7 @@ before(async () => {
       status: 'active',
       effectiveFrom: new Date(),
     },
-  });
+  }));
   frameworkId = fw.id;
   const domain = await prisma.evaluationDomain.create({
     data: {
@@ -182,6 +185,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
 });
@@ -244,7 +248,8 @@ test('createReport enqueues worker; runOnce fills payload and section refs', asy
   assert.equal(report.template_code, 'PA2_s');
 
   const job = await prisma.workerJob.findFirst({
-    where: { jobType: 'report.generate', payload: { path: ['report_id'], equals: report.id } },
+    // MySQL provider takes a JSONPath string here, not the Postgres array form (ADR-0008)
+    where: { jobType: 'report.generate', payload: { path: '$.report_id', equals: report.id } },
   });
   // Prisma JSON path filter may vary — fall back to scan
   const jobs = await prisma.workerJob.findMany({
@@ -253,8 +258,19 @@ test('createReport enqueues worker; runOnce fills payload and section refs', asy
   const match = jobs.find((j) => j.payload?.report_id === report.id);
   assert.ok(match, 'report.generate job should be enqueued');
 
-  // Process without S3 GC scheduling noise
-  await runOnce(env, fakeS3, { scheduleGc: false });
+  // Process without S3 GC scheduling noise.
+  //
+  // Loop until THIS job is claimed, rather than calling runOnce once. runOnce
+  // takes a single job off a queue that every other test file shares — node:test
+  // runs files in parallel processes, so a sibling's file.process job can be the
+  // one it picks, leaving this report at 'draft' and failing on a race that has
+  // nothing to do with reports. Flaked ~2 runs in 3 once the CCR-014/CCR-015
+  // suites were added and the queue got busier.
+  for (let i = 0; i < 25; i++) {
+    const stillPending = await prisma.workerJob.findUnique({ where: { id: match.id }, select: { status: true } });
+    if (stillPending?.status === 'succeeded') break;
+    await runOnce(env, fakeS3, { scheduleGc: false });
+  }
 
   const get = await app.inject({
     method: 'GET',

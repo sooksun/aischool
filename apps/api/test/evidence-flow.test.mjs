@@ -14,6 +14,9 @@ import { randomUUID, createHash } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+
+const created = trackSchools();
 
 const prisma = new PrismaClient();
 let app;
@@ -23,7 +26,7 @@ before(async () => {
   ({ app } = await buildServer());
   await app.ready();
 
-  school = await prisma.school.create({ data: { code: `flow-${randomUUID()}`, name: 'Flow School' } });
+  school = created.add(await prisma.school.create({ data: { code: `flow-${randomUUID()}`, name: 'Flow School' } }));
   await prisma.rankLevel.upsert({
     where: { code: 'flow_kru' }, create: { code: 'flow_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 }, update: {},
   });
@@ -51,11 +54,11 @@ before(async () => {
   });
   categoryId = cat.id;
 
-  const fw = await prisma.frameworkVersion.upsert({
+  const fw = created.addFramework(await prisma.frameworkVersion.upsert({
     where: { code: `flow-fw-${process.pid}` },
     create: { code: `flow-fw-${process.pid}`, roleFamily: 'teacher', legalRef: 'x', revisionYear: 9999, status: 'draft', effectiveFrom: new Date() },
     update: {},
-  });
+  }));
   frameworkId = fw.id;
   const domain = await prisma.evaluationDomain.create({ data: { frameworkVersionId: fw.id, code: `D-${randomUUID()}`, nameTh: 'd', sortOrder: 1, part: 'standards' } });
   const indicator = await prisma.indicator.create({ data: { domainId: domain.id, frameworkVersionId: fw.id, code: `I-${randomUUID()}`, nameTh: 'i', sortOrder: 1, isScored: true, indicatorKind: 'standard' } });
@@ -63,6 +66,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
 });
@@ -206,7 +210,7 @@ test('lazy download-url only when scan_status=clean (UPL-006); getEvidence never
 });
 
 test('cross-school access returns RES-001, never leaks existence', async () => {
-  const otherSchool = await prisma.school.create({ data: { code: `flow-other-${randomUUID()}`, name: 'Other' } });
+  const otherSchool = created.add(await prisma.school.create({ data: { code: `flow-other-${randomUUID()}`, name: 'Other' } }));
   const otherUser = await prisma.userAccount.create({ data: { email: `flow-other-${randomUUID()}@x.io`, displayName: 'Other', status: 'active', passwordHash: await argonHash('other-password-1234') } });
   await prisma.personnelProfile.create({ data: { schoolId: otherSchool.id, userId: otherUser.id, fullName: 'Other', positionRole: 'teacher', rankLevelCode: 'flow_kru' } });
   await prisma.schoolMembership.create({ data: { userId: otherUser.id, schoolId: otherSchool.id, role: 'teacher', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });

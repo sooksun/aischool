@@ -4,6 +4,20 @@
 # version: 1.2.0 — CCR-007 (additive): getReportPdf.
 # version: 1.3.0 — CCR-008 (additive): refreshToken + logout session lifecycle (SEC-AUTH-2).
 # version: 1.4.0 — CCR-010 (additive): getEvidenceFileDownloadUrl (lazy download, cleanup H2).
+# version: 1.5.0 — CCR-014 (additive): onboarding — listPersonnel, listMembers,
+#   inviteMember, endMembership + acceptInvite as the second unauthenticated
+#   operation. No new role: creating the first admin and creating schools need
+#   authority no role holds (area_admin is read-only across its area), and they
+#   ship as operator CLIs instead of a system_admin role that would rewrite every
+#   row below. See CCR-014 decisions 1 and 2.
+# version: 1.6.0 — CCR-015 (additive here; openapi is BREAKING at 3.0.0):
+#   performance agreements + ประเด็นท้าทาย. Note the asymmetry in the rows below —
+#   an evaluatee WRITES their own agreement but may never acknowledge it, and an
+#   evaluator READS it (to score the 40% it backs) but may never write it.
+# version: 1.7.0 — CCR-016 (additive): report approval. Same asymmetry once more —
+#   the subject READS the decision trail on their own report (listReportApprovals
+#   matches getReport) but only director/school_admin may decide, and neither may
+#   decide on their own report (route rule, not expressible here).
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 #
 # The api module is the sole enforcement point (module-boundaries.md).
@@ -12,7 +26,7 @@
 # This file is also a TEST FIXTURE (SECURITY-BASELINE SEC-TEN-5): permission tests
 # generate their cases from this matrix, so contract and enforcement cannot drift.
 
-version: 1.4.0
+version: 1.7.0
 status: locked
 locked_at: 2026-07-17
 
@@ -50,6 +64,16 @@ unauthenticated:
     the access token being expired is the normal reason to call this). Rotation
     with reuse detection per SEC-AUTH-2: a replayed (already-rotated) token
     revokes the whole family and fails AUTH-001 without revealing which case hit.
+  acceptInvite: >
+    CCR-014. The invite token in the body IS the credential: an `invited` account
+    has no password yet, so it cannot hold a bearer token, and by SEC-AUTH-3 it
+    could not authenticate even if it tried. Single-use — the stored hash is
+    cleared in the same transaction that writes the password. Unknown, expired
+    and already-used tokens all return AUTH-005 identically, so the endpoint is
+    never an oracle for which invites exist. Throttled on the login limiter
+    (SEC-AUTH-5) because a token is guessable in principle. Returns 204, never a
+    token pair, so `invited` → `active` stays enforced in exactly one place:
+    login.
 
 any_authenticated:
   getCurrentUser: >
@@ -64,6 +88,22 @@ any_authenticated:
 # Legend: own = only own records / self as subject; school = any record in own school;
 #         area-r = read-only across schools in area; committee = only if CommitteeMember of the assignment.
 matrix:
+  # members / personnel (CCR-014)
+  # listPersonnel is deliberately wider than the write operations: an evaluator
+  # must be able to see the name of the person they are scoring, and a director
+  # chairs committees. It returns identity only — no scores, evidence or
+  # agreements — so widening it does not widen access to evaluation data.
+  # area_admin keeps its read-only area grant here (personnel names are not more
+  # sensitive than the cycles and reports it can already read) and is absent from
+  # all three writes, where SEC-TEN-3 / PERM-004 apply.
+  # Roles with no grant are OMITTED, not set to null — grantFor() returns
+  # undefined for a missing key and resolveGrant throws PERM-001, so absence is
+  # the deny. Matches every other row below.
+  listPersonnel:           { director: school, evaluator: school, school_admin: school, area_admin: area-r }
+  listMembers:             { school_admin: school }
+  inviteMember:            { school_admin: school }
+  endMembership:           { school_admin: school }
+
   # taxonomy (reference data — readable by any authenticated member)
   listFrameworks:          { teacher: school, director: school, deputy: school, evaluator: school, school_admin: school, area_admin: area-r }
   getFramework:            { teacher: school, director: school, deputy: school, evaluator: school, school_admin: school, area_admin: area-r }
@@ -97,6 +137,24 @@ matrix:
     director: school
     school_admin: school
 
+  # agreements — แบบ PA1 + ประเด็นท้าทาย (CCR-015)
+  # The evaluatee owns the document: they write it, they submit it, they can never
+  # acknowledge it. `own` here means requireOwnership against the agreement's
+  # personnel_id, not merely holding the role — this is the record a career
+  # decision rests on.
+  # evaluator gets `committee` on reads only: they need the challenge text to score
+  # C.1/C.2.1/C.2.2 honestly, and no row below grants them any write.
+  listAgreements:          { teacher: own, deputy: own, director: school, school_admin: school, evaluator: committee, area_admin: area-r }
+  getAgreement:            { teacher: own, deputy: own, director: school, school_admin: school, evaluator: committee, area_admin: area-r }
+  createAgreement:         { teacher: own, deputy: own, director: own, school_admin: school }
+  updateAgreement:         { teacher: own, deputy: own, director: own, school_admin: school }
+  submitAgreement:         { teacher: own, deputy: own, director: own, school_admin: school }
+  # Deliberately NOT `own` for anyone: acknowledging is the director's signature on
+  # someone else's commitments. A director filing their own agreement (they are
+  # evaluatees under ว10 too) must be acknowledged by school_admin or another
+  # director — enforced in the route, since the matrix cannot express "not myself".
+  acknowledgeAgreement:    { director: school, school_admin: school }
+
   # scoring — committee of 3, per-evaluator records
   listAssignments:         { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }
   createAssignment:        { director: school, school_admin: school }
@@ -109,6 +167,13 @@ matrix:
   createReport:            { director: school, school_admin: school }
   getReport:               { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
   getReportPdf:            { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
+  # Trail is readable by everyone who can read the report itself — a subject who
+  # can see their score but not who endorsed it would be a strange transparency.
+  listReportApprovals:     { teacher: own, director: school, deputy: own, school_admin: school, evaluator: committee, area_admin: area-r }
+  # Deciding is director/school_admin only. evaluator is absent: they score, the
+  # chair endorses. area_admin is absent per SEC-TEN-3 (read-only).
+  approveReport:           { director: school, school_admin: school }
+  returnReport:            { director: school, school_admin: school }
 
 notes:
   - teacher:own on listEvidence means the default filter is owner=self and other owners are rejected.

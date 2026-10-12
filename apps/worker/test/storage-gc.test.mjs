@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { processStorageGc } from '../dist/jobs/storage-gc.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
 
 const prisma = new PrismaClient();
 const env = {
@@ -43,10 +44,13 @@ async function objectExists(key) {
  * soft-delete it at a controlled deletedAt. Mirrors file-process.test.mjs's
  * fixture() shape but skips registerEvidenceFileWithWorkerJobs (GC doesn't
  * need a worker_job/outbox row — it operates directly on evidence_file). */
+const created = trackSchools();
+
 async function fixture(deletedAt) {
   const school = await prisma.school.create({
     data: { code: `gc-${randomUUID().slice(0, 8)}`, name: 'GC School' },
   });
+  created.add(school.id);
   await prisma.rankLevel.upsert({
     where: { code: 'gc_kru' },
     create: { code: 'gc_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 },
@@ -82,6 +86,12 @@ async function fixture(deletedAt) {
 }
 
 after(async () => {
+  // These fixtures are soft-deleted by design, so they are invisible to the
+  // re-scan sweep — but they still accumulate in `evidence`/`evidence_file`
+  // forever, and the ones GC was asserted NOT to touch keep a live object in
+  // MinIO too. Cleaning the rows is what this helper does; the objects are left
+  // to the real storage.gc, which is the code under test here.
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await prisma.$disconnect();
 });
 

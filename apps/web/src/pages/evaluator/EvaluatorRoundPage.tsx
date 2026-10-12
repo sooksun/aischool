@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { api, unwrap } from '../../api/client';
+import { usePersonnel } from '../../lib/usePersonnel';
 import type { components } from '../../api/schema.generated';
 
 type Assignment = components['schemas']['Assignment'];
@@ -9,6 +10,7 @@ type Round = components['schemas']['Round'];
 
 export function EvaluatorRoundPage() {
   const { roundId } = useParams<{ roundId: string }>();
+  const { nameFor } = usePersonnel();
   const location = useLocation();
   const nav = (location.state as {
     round?: Round;
@@ -64,7 +66,7 @@ export function EvaluatorRoundPage() {
                 }}
                 className="evidence-card"
               >
-                <div className="title">ผู้รับการประเมิน: {a.evaluatee_personnel_id}</div>
+                <div className="title">ผู้รับการประเมิน: {nameFor(a.evaluatee_personnel_id)}</div>
                 <p className="field-hint">สถานะ: {a.status} · กรรมการ {a.committee.length}/3</p>
               </Link>
             </li>

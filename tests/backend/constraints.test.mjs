@@ -1,320 +1,342 @@
 // SEIP-DB-001 constraint tests — prove the database enforces the ว9/ว10 rules,
-// not just that the app intends to. Uses node:test + pg against the dev database
-// (docker-compose). These are the tests the "migration validation" gate will run.
+// not just that the app intends to. Uses node:test + mysql2 against the dev
+// database (Laragon MySQL, ADR-0008). These are the tests the "migration
+// validation" gate will run.
 //
 // Each test asserts a WRITE THAT SHOULD FAIL actually fails at the DB layer, and a
 // valid write succeeds. No ORM — raw SQL so we test the constraint, not Prisma.
+//
+// MySQL port notes (ADR-0008): ids are generated in JS (no RETURNING clause),
+// JSON replaces text[] for allowed_mime_types, and booleans read back as 0/1.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import pg from 'pg';
+import { randomUUID } from 'node:crypto';
+import mysql from 'mysql2/promise';
 
-const url = process.env.DATABASE_URL
-  ?? 'postgresql://seip:seip_dev_only@localhost:5433/seip?schema=public';
-const client = new pg.Client({ connectionString: url });
+const url = process.env.DATABASE_URL ?? 'mysql://root@localhost:3306/seip';
+let conn;
 
-// Expect a query to be rejected by the DB. A failed statement aborts the whole
-// transaction (Postgres 25P02), so wrap each attempt in a SAVEPOINT and roll back
-// to it — the surrounding test transaction stays usable for the valid-case insert.
+const uid = () => randomUUID();
+
+async function q(sql, params = []) {
+  const [rows] = await conn.query(sql, params);
+  return rows;
+}
+
+// Expect a statement to be rejected by the DB with a constraint-class error.
+// Unlike Postgres, a failed statement does not abort the MySQL transaction, so
+// no SAVEPOINT dance is needed — the surrounding test transaction stays usable.
+//   3819 CHECK violated · 1644 SIGNAL 45000 (append-only triggers) · 1062 dup key
+//   3105 write to generated column · 1048 NOT NULL · 1452 FK · 1264 out of range
 async function rejects(sql, params, label) {
-  await client.query('SAVEPOINT s');
   let threw = false;
   try {
-    await client.query(sql, params);
+    await conn.query(sql, params);
   } catch (e) {
     threw = true;
-    // 23xxx integrity, 0A000 feature-not-supported, 2Fxxx/P0001 raised, 428C9 generated-column write
-    assert.match(e.code, /^(23|0A|2F|P0|428C9)/, `${label}: unexpected error ${e.code} ${e.message}`);
-    await client.query('ROLLBACK TO SAVEPOINT s');
+    assert.ok(
+      [3819, 1644, 1062, 3105, 1048, 1452, 1264].includes(e.errno),
+      `${label}: unexpected error ${e.errno} ${e.message}`,
+    );
   }
   assert.ok(threw, `${label}: expected the write to be rejected, but it succeeded`);
-  await client.query('RELEASE SAVEPOINT s');
 }
 
 async function rollback() {
-  await client.query('ROLLBACK');
+  await conn.query('ROLLBACK');
 }
 
 before(async () => {
-  await client.connect();
+  conn = await mysql.createConnection(url);
 });
 after(async () => {
-  await client.end();
+  await conn.end();
 });
 
-test('rubric_level must be 1..4 (framework scoring model)', async (t) => {
-  await client.query('BEGIN');
-  t.after(rollback);
-  const fwId = (await client.query(
+async function mkFramework(code) {
+  const id = uid();
+  await q(
     `INSERT INTO framework_version (id, code, role_family, legal_ref, revision_year, status, effective_from)
-     VALUES (gen_random_uuid(), 't1-fw', 'teacher', 'ว9', 2564, 'active', '2021-05-20') RETURNING id`)).rows[0].id;
-  const dId = (await client.query(
+     VALUES (?, ?, 'teacher', 'ว9', 2564, 'active', '2021-05-20')`, [id, code]);
+  return id;
+}
+
+async function mkDomain(fwId, code = 'D1', part = 'standards', sort = 1) {
+  const id = uid();
+  await q(
     `INSERT INTO evaluation_domain (id, framework_version_id, code, name_th, sort_order, part)
-     VALUES (gen_random_uuid(), $1, 'D1', 'ด้าน1', 1, 'standards') RETURNING id`, [fwId])).rows[0].id;
-  const iId = (await client.query(
-    `INSERT INTO indicator (id, domain_id, framework_version_id, code, name_th, sort_order, is_scored, indicator_kind)
-     VALUES (gen_random_uuid(), $1, $2, 'T-1.1', 'x', 1, true, 'standard') RETURNING id`, [dId, fwId])).rows[0].id;
-  await client.query(
-    `INSERT INTO rank_level (code, role_family, label_th, sort_order) VALUES ('kru','teacher','ครู',2)
-     ON CONFLICT (code) DO NOTHING`);
+     VALUES (?, ?, ?, 'ด้าน', ?, ?)`, [id, fwId, code, sort, part]);
+  return id;
+}
+
+async function mkIndicator(dId, fwId, code, kind = 'standard', extra = {}) {
+  const id = uid();
+  await q(
+    `INSERT INTO indicator (id, domain_id, framework_version_id, code, name_th, sort_order, is_scored, indicator_kind, max_points)
+     VALUES (?, ?, ?, ?, 'x', 1, true, ?, ?)`, [id, dId, fwId, code, kind, extra.maxPoints ?? null]);
+  return id;
+}
+
+test('rubric_level must be 1..4 (framework scoring model)', async (t) => {
+  await conn.query('BEGIN');
+  t.after(rollback);
+  const fwId = await mkFramework('t1-fw');
+  const dId = await mkDomain(fwId);
+  const iId = await mkIndicator(dId, fwId, 'T-1.1');
+  await q(`INSERT IGNORE INTO rank_level (code, role_family, label_th, sort_order) VALUES ('kru','teacher','ครู',2)`);
 
   await rejects(
     `INSERT INTO indicator_level_description (id, indicator_id, rank_level_code, rubric_level, expected_practice_th)
-     VALUES (gen_random_uuid(), $1, 'kru', 5, 'x')`, [iId], 'rubric_level 5 must be rejected');
-  await client.query(
+     VALUES (?, ?, 'kru', 5, 'x')`, [uid(), iId], 'rubric_level 5 must be rejected');
+  await q(
     `INSERT INTO indicator_level_description (id, indicator_id, rank_level_code, rubric_level, expected_practice_th)
-     VALUES (gen_random_uuid(), $1, 'kru', 4, 'x')`, [iId]); // 4 is valid
+     VALUES (?, ?, 'kru', 4, 'x')`, [uid(), iId]); // 4 is valid
 });
 
 test('workload_gate indicator cannot be is_scored=true', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const fwId = (await client.query(
-    `INSERT INTO framework_version (id, code, role_family, legal_ref, revision_year, status, effective_from)
-     VALUES (gen_random_uuid(), 't2-fw', 'teacher', 'ว9', 2564, 'active', '2021-05-20') RETURNING id`)).rows[0].id;
-  const dId = (await client.query(
-    `INSERT INTO evaluation_domain (id, framework_version_id, code, name_th, sort_order, part)
-     VALUES (gen_random_uuid(), $1, 'D1', 'ด้าน1', 1, 'standards') RETURNING id`, [fwId])).rows[0].id;
+  const fwId = await mkFramework('t2-fw');
+  const dId = await mkDomain(fwId);
   await rejects(
     `INSERT INTO indicator (id, domain_id, framework_version_id, code, name_th, sort_order, is_scored, indicator_kind)
-     VALUES (gen_random_uuid(), $1, $2, 'GATE', 'ภาระงาน', 9, true, 'workload_gate')`, [dId, fwId],
+     VALUES (?, ?, ?, 'GATE', 'ภาระงาน', 9, true, 'workload_gate')`, [uid(), dId, fwId],
     'workload_gate with is_scored=true must be rejected');
 });
 
 test('membership scope must match the id that is set (tenancy)', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const uId = (await client.query(
-    `INSERT INTO user_account (id, email, display_name, status) VALUES (gen_random_uuid(), 'a@x.io', 'A', 'active') RETURNING id`)).rows[0].id;
+  const uId = uid();
+  await q(`INSERT INTO user_account (id, email, display_name, status) VALUES (?, 'a@x.io', 'A', 'active')`, [uId]);
   // scope=school but no school_id → reject
   await rejects(
     `INSERT INTO school_membership (id, user_id, role, membership_scope, effective_from)
-     VALUES (gen_random_uuid(), $1, 'teacher', 'school', '2026-01-01')`, [uId],
+     VALUES (?, ?, 'teacher', 'school', '2026-01-01')`, [uid(), uId],
     'school scope without school_id must be rejected');
 });
 
 test('email must be lowercase', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
   await rejects(
-    `INSERT INTO user_account (id, email, display_name, status) VALUES (gen_random_uuid(), 'MixedCase@x.io', 'A', 'active')`, [],
+    `INSERT INTO user_account (id, email, display_name, status) VALUES (?, 'MixedCase@x.io', 'A', 'active')`, [uid()],
     'uppercase email must be rejected');
 });
 
-test('only one ACTIVE mapping per (evidence, indicator, cycle); revoked frees the slot', async (t) => {
-  await client.query('BEGIN');
-  t.after(rollback);
-  const sId = (await client.query(`INSERT INTO school (id, code, name) VALUES (gen_random_uuid(),'S1','s') RETURNING id`)).rows[0].id;
-  const uId = (await client.query(`INSERT INTO user_account (id, email, display_name, status) VALUES (gen_random_uuid(),'m@x.io','M','active') RETURNING id`)).rows[0].id;
-  await client.query(`INSERT INTO rank_level (code, role_family, label_th, sort_order) VALUES ('kru2','teacher','ครู',2) ON CONFLICT (code) DO NOTHING`);
-  const pId = (await client.query(`INSERT INTO personnel_profile (id, school_id, user_id, full_name, position_role, rank_level_code) VALUES (gen_random_uuid(),$1,$2,'p','teacher','kru2') RETURNING id`, [sId, uId])).rows[0].id;
-  const cId = (await client.query(`INSERT INTO evidence_category (id, code, label_th, allowed_mime_types) VALUES (gen_random_uuid(),'pdf-t5','เอกสาร', ARRAY['application/pdf']) RETURNING id`)).rows[0].id;
-  const eId = (await client.query(`INSERT INTO evidence (id, school_id, owner_personnel_id, uploaded_by_user_id, category_id, title, status) VALUES (gen_random_uuid(),$1,$2,$3,$4,'t','active') RETURNING id`, [sId, pId, uId, cId])).rows[0].id;
-  const fwId = (await client.query(`INSERT INTO framework_version (id, code, role_family, legal_ref, revision_year, status, effective_from) VALUES (gen_random_uuid(),'t5-fw','teacher','ว9',2564,'active','2021-05-20') RETURNING id`)).rows[0].id;
-  const dId = (await client.query(`INSERT INTO evaluation_domain (id, framework_version_id, code, name_th, sort_order, part) VALUES (gen_random_uuid(),$1,'D1','d',1,'standards') RETURNING id`, [fwId])).rows[0].id;
-  const iId = (await client.query(`INSERT INTO indicator (id, domain_id, framework_version_id, code, name_th, sort_order, is_scored, indicator_kind) VALUES (gen_random_uuid(),$1,$2,'T-1.1','x',1,true,'standard') RETURNING id`, [dId, fwId])).rows[0].id;
+async function mkEvidenceGraph(prefix) {
+  const sId = uid(); const uId = uid(); const pId = uid(); const cId = uid(); const eId = uid();
+  await q(`INSERT INTO school (id, code, name) VALUES (?, ?, 's')`, [sId, `S-${prefix}`]);
+  await q(`INSERT INTO user_account (id, email, display_name, status) VALUES (?, ?, 'M', 'active')`, [uId, `${prefix}@x.io`]);
+  await q(`INSERT IGNORE INTO rank_level (code, role_family, label_th, sort_order) VALUES (?, 'teacher', 'ครู', 2)`, [`kru-${prefix}`]);
+  await q(`INSERT INTO personnel_profile (id, school_id, user_id, full_name, position_role, rank_level_code) VALUES (?, ?, ?, 'p', 'teacher', ?)`, [pId, sId, uId, `kru-${prefix}`]);
+  await q(`INSERT INTO evidence_category (id, code, label_th, allowed_mime_types) VALUES (?, ?, 'เอกสาร', '["application/pdf"]')`, [cId, `pdf-${prefix}`]);
+  await q(`INSERT INTO evidence (id, school_id, owner_personnel_id, uploaded_by_user_id, category_id, title, status) VALUES (?, ?, ?, ?, ?, 't', 'active')`, [eId, sId, pId, uId, cId]);
+  const fwId = await mkFramework(`${prefix}-fw`);
+  const dId = await mkDomain(fwId);
+  const iId = await mkIndicator(dId, fwId, 'T-1.1');
+  return { sId, uId, pId, cId, eId, fwId, dId, iId };
+}
 
-  const mk = (status) => client.query(
+test('only one ACTIVE mapping per (evidence, indicator, cycle); revoked frees the slot', async (t) => {
+  await conn.query('BEGIN');
+  t.after(rollback);
+  const { sId, uId, eId, iId } = await mkEvidenceGraph('t5');
+
+  const mk = (status) => q(
     `INSERT INTO evidence_indicator_mapping (id, school_id, evidence_id, indicator_id, mapping_source, status, mapped_by_user_id)
-     VALUES (gen_random_uuid(), $1, $2, $3, 'human', $4, $5)`, [sId, eId, iId, status, uId]);
+     VALUES (?, ?, ?, ?, 'human', ?, ?)`, [uid(), sId, eId, iId, status, uId]);
 
   await mk('suggested');
-  await rejects(`INSERT INTO evidence_indicator_mapping (id, school_id, evidence_id, indicator_id, mapping_source, status, mapped_by_user_id) VALUES (gen_random_uuid(),$1,$2,$3,'human','confirmed',$4)`, [sId, eId, iId, uId],
+  await rejects(
+    `INSERT INTO evidence_indicator_mapping (id, school_id, evidence_id, indicator_id, mapping_source, status, mapped_by_user_id)
+     VALUES (?, ?, ?, ?, 'human', 'confirmed', ?)`, [uid(), sId, eId, iId, uId],
     'a second active (confirmed) mapping to the same indicator must be rejected');
-  await client.query(`UPDATE evidence_indicator_mapping SET status='revoked' WHERE evidence_id=$1`, [eId]);
+  await q(`UPDATE evidence_indicator_mapping SET status='revoked' WHERE evidence_id=?`, [eId]);
   await mk('suggested');
 });
 
 test('confirmed mapping requires confirmed_by + confirmed_at', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const sId = (await client.query(`INSERT INTO school (id, code, name) VALUES (gen_random_uuid(),'S-conf','s') RETURNING id`)).rows[0].id;
-  const uId = (await client.query(`INSERT INTO user_account (id, email, display_name, status) VALUES (gen_random_uuid(),'conf@x.io','C','active') RETURNING id`)).rows[0].id;
-  await client.query(`INSERT INTO rank_level (code, role_family, label_th, sort_order) VALUES ('kru-conf','teacher','ครู',2) ON CONFLICT (code) DO NOTHING`);
-  const pId = (await client.query(`INSERT INTO personnel_profile (id, school_id, user_id, full_name, position_role, rank_level_code) VALUES (gen_random_uuid(),$1,$2,'p','teacher','kru-conf') RETURNING id`, [sId, uId])).rows[0].id;
-  const cId = (await client.query(`INSERT INTO evidence_category (id, code, label_th, allowed_mime_types) VALUES (gen_random_uuid(),'pdf-conf','เอกสาร', ARRAY['application/pdf']) RETURNING id`)).rows[0].id;
-  const eId = (await client.query(`INSERT INTO evidence (id, school_id, owner_personnel_id, uploaded_by_user_id, category_id, title, status) VALUES (gen_random_uuid(),$1,$2,$3,$4,'t','active') RETURNING id`, [sId, pId, uId, cId])).rows[0].id;
-  const fwId = (await client.query(`INSERT INTO framework_version (id, code, role_family, legal_ref, revision_year, status, effective_from) VALUES (gen_random_uuid(),'t-conf-fw','teacher','ว9',2564,'active','2021-05-20') RETURNING id`)).rows[0].id;
-  const dId = (await client.query(`INSERT INTO evaluation_domain (id, framework_version_id, code, name_th, sort_order, part) VALUES (gen_random_uuid(),$1,'D1','d',1,'standards') RETURNING id`, [fwId])).rows[0].id;
-  const iId = (await client.query(`INSERT INTO indicator (id, domain_id, framework_version_id, code, name_th, sort_order, is_scored, indicator_kind) VALUES (gen_random_uuid(),$1,$2,'T-1.1','x',1,true,'standard') RETURNING id`, [dId, fwId])).rows[0].id;
+  const { sId, uId, eId, iId } = await mkEvidenceGraph('conf');
 
   await rejects(
     `INSERT INTO evidence_indicator_mapping (id, school_id, evidence_id, indicator_id, mapping_source, status, mapped_by_user_id)
-     VALUES (gen_random_uuid(), $1, $2, $3, 'human', 'confirmed', $4)`,
-    [sId, eId, iId, uId],
+     VALUES (?, ?, ?, ?, 'human', 'confirmed', ?)`,
+    [uid(), sId, eId, iId, uId],
     'confirmed without actor/timestamp must be rejected',
   );
 
-  await client.query(
+  await q(
     `INSERT INTO evidence_indicator_mapping
        (id, school_id, evidence_id, indicator_id, mapping_source, status, mapped_by_user_id, confirmed_by_user_id, confirmed_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, 'human', 'confirmed', $4, $4, now())`,
-    [sId, eId, iId, uId],
+     VALUES (?, ?, ?, ?, 'human', 'confirmed', ?, ?, NOW())`,
+    [uid(), sId, eId, iId, uId, uId],
   );
 });
 
+async function mkAssignmentGraph(prefix) {
+  const sId = uid(); const uId = uid(); const pId = uid(); const cyId = uid(); const rId = uid(); const aId = uid();
+  await q(`INSERT INTO school (id, code, name) VALUES (?, ?, 's')`, [sId, `S-${prefix}`]);
+  await q(`INSERT INTO user_account (id, email, display_name, status) VALUES (?, ?, 'E', 'active')`, [uId, `${prefix}@x.io`]);
+  await q(`INSERT IGNORE INTO rank_level (code, role_family, label_th, sort_order) VALUES (?, 'teacher', 'ครู', 2)`, [`kru-${prefix}`]);
+  await q(`INSERT INTO personnel_profile (id, school_id, user_id, full_name, position_role, rank_level_code) VALUES (?, ?, ?, 'p', 'teacher', ?)`, [pId, sId, uId, `kru-${prefix}`]);
+  const fwId = await mkFramework(`${prefix}-fw`);
+  await q(`INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on) VALUES (?, ?, ?, 2569, 'pa', 'c', 'open', '2025-10-01', '2026-09-30')`, [cyId, sId, fwId]);
+  await q(`INSERT INTO evaluation_round (id, cycle_id, round_number, purpose, period_start, period_end, status) VALUES (?, ?, 1, 'formal', '2025-10-01', '2026-09-30', 'scoring')`, [rId, cyId]);
+  await q(`INSERT INTO evaluation_assignment (id, school_id, round_id, evaluatee_personnel_id, status) VALUES (?, ?, ?, ?, 'in_progress')`, [aId, sId, rId, pId]);
+  return { sId, uId, pId, fwId, cyId, rId, aId };
+}
+
 test('passed_individual_threshold is generated (>=70) and cannot be written', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const sId = (await client.query(`INSERT INTO school (id, code, name) VALUES (gen_random_uuid(),'S2','s') RETURNING id`)).rows[0].id;
-  const uId = (await client.query(`INSERT INTO user_account (id, email, display_name, status) VALUES (gen_random_uuid(),'ev@x.io','E','active') RETURNING id`)).rows[0].id;
-  await client.query(`INSERT INTO rank_level (code, role_family, label_th, sort_order) VALUES ('kru3','teacher','ครู',2) ON CONFLICT (code) DO NOTHING`);
-  const pId = (await client.query(`INSERT INTO personnel_profile (id, school_id, user_id, full_name, position_role, rank_level_code) VALUES (gen_random_uuid(),$1,$2,'p','teacher','kru3') RETURNING id`, [sId, uId])).rows[0].id;
-  const fwId = (await client.query(`INSERT INTO framework_version (id, code, role_family, legal_ref, revision_year, status, effective_from) VALUES (gen_random_uuid(),'t6-fw','teacher','ว9',2564,'active','2021-05-20') RETURNING id`)).rows[0].id;
-  const cyId = (await client.query(`INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on) VALUES (gen_random_uuid(),$1,$2,2569,'pa','c','open','2025-10-01','2026-09-30') RETURNING id`, [sId, fwId])).rows[0].id;
-  const rId = (await client.query(`INSERT INTO evaluation_round (id, cycle_id, round_number, purpose, period_start, period_end, status) VALUES (gen_random_uuid(),$1,1,'formal','2025-10-01','2026-09-30','scoring') RETURNING id`, [cyId])).rows[0].id;
-  const aId = (await client.query(`INSERT INTO evaluation_assignment (id, school_id, round_id, evaluatee_personnel_id, status) VALUES (gen_random_uuid(),$1,$2,$3,'in_progress') RETURNING id`, [sId, rId, pId])).rows[0].id;
+  const { uId, aId } = await mkAssignmentGraph('t6');
 
   await rejects(
     `INSERT INTO round_result (id, assignment_id, evaluator_user_id, part1_percent, part2_percent, total_percent, passed_workload_gate, passed_individual_threshold)
-     VALUES (gen_random_uuid(), $1, $2, 50, 20, 68, true, true)`, [aId, uId],
+     VALUES (?, ?, ?, 50, 20, 68, true, true)`, [uid(), aId, uId],
     'writing the generated column must be rejected');
 
-  await client.query(
+  await q(
     `INSERT INTO round_result (id, assignment_id, evaluator_user_id, part1_percent, part2_percent, total_percent, passed_workload_gate)
-     VALUES (gen_random_uuid(), $1, $2, 48, 20, 68, true)`, [aId, uId]);
-  const r = await client.query(`SELECT passed_individual_threshold FROM round_result WHERE assignment_id=$1`, [aId]);
-  assert.equal(r.rows[0].passed_individual_threshold, false, '68% must derive to NOT passed');
+     VALUES (?, ?, ?, 48, 20, 68, true)`, [uid(), aId, uId]);
+  const r = await q(`SELECT passed_individual_threshold AS p FROM round_result WHERE assignment_id=?`, [aId]);
+  assert.equal(Number(r[0].p), 0, '68% must derive to NOT passed');
 
   // 70% boundary → pass
-  const u2 = (await client.query(`INSERT INTO user_account (id, email, display_name, status) VALUES (gen_random_uuid(),'ev2@x.io','E2','active') RETURNING id`)).rows[0].id;
-  await client.query(
+  const u2 = uid();
+  await q(`INSERT INTO user_account (id, email, display_name, status) VALUES (?, 'ev2-t6@x.io', 'E2', 'active')`, [u2]);
+  await q(
     `INSERT INTO round_result (id, assignment_id, evaluator_user_id, part1_percent, part2_percent, total_percent, passed_workload_gate)
-     VALUES (gen_random_uuid(), $1, $2, 50, 20, 70, true)`, [aId, u2]);
-  const r2 = await client.query(`SELECT passed_individual_threshold FROM round_result WHERE assignment_id=$1 AND evaluator_user_id=$2`, [aId, u2]);
-  assert.equal(r2.rows[0].passed_individual_threshold, true, '70% must derive to passed');
+     VALUES (?, ?, ?, 50, 20, 70, true)`, [uid(), aId, u2]);
+  const r2 = await q(`SELECT passed_individual_threshold AS p FROM round_result WHERE assignment_id=? AND evaluator_user_id=?`, [aId, u2]);
+  assert.equal(Number(r2[0].p), 1, '70% must derive to passed');
 });
 
 test('audit_event is append-only: UPDATE and DELETE are blocked', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const id = (await client.query(
-    `INSERT INTO audit_event (id, action, entity_type, entity_id) VALUES (gen_random_uuid(), 'created', 'evidence', gen_random_uuid()) RETURNING id`)).rows[0].id;
-  await rejects(`UPDATE audit_event SET action='tampered' WHERE id=$1`, [id], 'UPDATE on audit_event must be blocked');
-  await rejects(`DELETE FROM audit_event WHERE id=$1`, [id], 'DELETE on audit_event must be blocked');
+  const id = uid();
+  await q(`INSERT INTO audit_event (id, action, entity_type, entity_id) VALUES (?, 'created', 'evidence', ?)`, [id, uid()]);
+  await rejects(`UPDATE audit_event SET action='tampered' WHERE id=?`, [id], 'UPDATE on audit_event must be blocked');
+  await rejects(`DELETE FROM audit_event WHERE id=?`, [id], 'DELETE on audit_event must be blocked');
 });
 
 test('committee seat_number must be 1..3', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const sId = (await client.query(`INSERT INTO school (id, code, name) VALUES (gen_random_uuid(),'S3','s') RETURNING id`)).rows[0].id;
-  const uId = (await client.query(`INSERT INTO user_account (id, email, display_name, status) VALUES (gen_random_uuid(),'seat@x.io','S','active') RETURNING id`)).rows[0].id;
-  await client.query(`INSERT INTO rank_level (code, role_family, label_th, sort_order) VALUES ('kru4','teacher','ครู',2) ON CONFLICT (code) DO NOTHING`);
-  const pId = (await client.query(`INSERT INTO personnel_profile (id, school_id, user_id, full_name, position_role, rank_level_code) VALUES (gen_random_uuid(),$1,$2,'p','teacher','kru4') RETURNING id`, [sId, uId])).rows[0].id;
-  const fwId = (await client.query(`INSERT INTO framework_version (id, code, role_family, legal_ref, revision_year, status, effective_from) VALUES (gen_random_uuid(),'t7-fw','teacher','ว9',2564,'active','2021-05-20') RETURNING id`)).rows[0].id;
-  const cyId = (await client.query(`INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on) VALUES (gen_random_uuid(),$1,$2,2569,'pa','c','open','2025-10-01','2026-09-30') RETURNING id`, [sId, fwId])).rows[0].id;
-  const rId = (await client.query(`INSERT INTO evaluation_round (id, cycle_id, round_number, purpose, period_start, period_end, status) VALUES (gen_random_uuid(),$1,1,'formal','2025-10-01','2026-09-30','open') RETURNING id`, [cyId])).rows[0].id;
-  const aId = (await client.query(`INSERT INTO evaluation_assignment (id, school_id, round_id, evaluatee_personnel_id, status) VALUES (gen_random_uuid(),$1,$2,$3,'pending') RETURNING id`, [sId, rId, pId])).rows[0].id;
+  const { uId, aId } = await mkAssignmentGraph('t7');
 
   await rejects(
     `INSERT INTO committee_member (id, assignment_id, evaluator_user_id, committee_role, seat_number)
-     VALUES (gen_random_uuid(), $1, $2, 'chair', 4)`, [aId, uId],
+     VALUES (?, ?, ?, 'chair', 4)`, [uid(), aId, uId],
     'seat 4 must be rejected');
-  await client.query(
+  await q(
     `INSERT INTO committee_member (id, assignment_id, evaluator_user_id, committee_role, seat_number)
-     VALUES (gen_random_uuid(), $1, $2, 'chair', 1)`, [aId, uId]);
+     VALUES (?, ?, ?, 'chair', 1)`, [uid(), aId, uId]);
 });
 
 test('rounds are configurable 1..n per cycle (no hard-coded max of 2)', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const sId = (await client.query(`INSERT INTO school (id, code, name) VALUES (gen_random_uuid(),'S4','s') RETURNING id`)).rows[0].id;
-  const fwId = (await client.query(`INSERT INTO framework_version (id, code, role_family, legal_ref, revision_year, status, effective_from) VALUES (gen_random_uuid(),'t8-fw','teacher','ว9',2564,'active','2021-05-20') RETURNING id`)).rows[0].id;
-  const cyId = (await client.query(`INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on) VALUES (gen_random_uuid(),$1,$2,2570,'pa','c','open','2026-10-01','2027-09-30') RETURNING id`, [sId, fwId])).rows[0].id;
+  const sId = uid(); const cyId = uid();
+  await q(`INSERT INTO school (id, code, name) VALUES (?, 'S-t8', 's')`, [sId]);
+  const fwId = await mkFramework('t8-fw');
+  await q(`INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on) VALUES (?, ?, ?, 2570, 'pa', 'c', 'open', '2026-10-01', '2027-09-30')`, [cyId, sId, fwId]);
 
   await rejects(
     `INSERT INTO evaluation_round (id, cycle_id, round_number, purpose, period_start, period_end, status)
-     VALUES (gen_random_uuid(), $1, 0, 'bad', '2026-10-01', '2026-12-31', 'planned')`, [cyId],
+     VALUES (?, ?, 0, 'bad', '2026-10-01', '2026-12-31', 'planned')`, [uid(), cyId],
     'round_number 0 must be rejected');
 
   // Three rounds in one cycle must succeed (acceptance: configurable 1..n, not hard-coded to 2).
   for (const n of [1, 2, 3]) {
-    await client.query(
+    await q(
       `INSERT INTO evaluation_round (id, cycle_id, round_number, purpose, period_start, period_end, status)
-       VALUES (gen_random_uuid(), $1, $2, $3, '2026-10-01', '2027-09-30', 'planned')`,
-      [cyId, n, `round-${n}`],
+       VALUES (?, ?, ?, ?, '2026-10-01', '2027-09-30', 'planned')`,
+      [uid(), cyId, n, `round-${n}`],
     );
   }
-  const count = await client.query(`SELECT count(*)::int AS c FROM evaluation_round WHERE cycle_id=$1`, [cyId]);
-  assert.equal(count.rows[0].c, 3);
+  const count = await q(`SELECT CAST(COUNT(*) AS SIGNED) AS c FROM evaluation_round WHERE cycle_id=?`, [cyId]);
+  assert.equal(Number(count[0].c), 3);
 });
 
 test('PA cycle unique per (school, fiscal_year, framework); DPA may repeat', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const sId = (await client.query(`INSERT INTO school (id, code, name) VALUES (gen_random_uuid(),'S5','s') RETURNING id`)).rows[0].id;
-  const fwId = (await client.query(`INSERT INTO framework_version (id, code, role_family, legal_ref, revision_year, status, effective_from) VALUES (gen_random_uuid(),'t9-fw','teacher','ว9',2564,'active','2021-05-20') RETURNING id`)).rows[0].id;
+  const sId = uid();
+  await q(`INSERT INTO school (id, code, name) VALUES (?, 'S-t9', 's')`, [sId]);
+  const fwId = await mkFramework('t9-fw');
 
-  await client.query(
+  await q(
     `INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on)
-     VALUES (gen_random_uuid(), $1, $2, 2571, 'pa', 'PA1', 'open', '2027-10-01', '2028-09-30')`,
-    [sId, fwId],
+     VALUES (?, ?, ?, 2571, 'pa', 'PA1', 'open', '2027-10-01', '2028-09-30')`,
+    [uid(), sId, fwId],
   );
   await rejects(
     `INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on)
-     VALUES (gen_random_uuid(), $1, $2, 2571, 'pa', 'PA-dup', 'open', '2027-10-01', '2028-09-30')`,
-    [sId, fwId],
+     VALUES (?, ?, ?, 2571, 'pa', 'PA-dup', 'open', '2027-10-01', '2028-09-30')`,
+    [uid(), sId, fwId],
     'duplicate PA cycle must be rejected',
   );
 
   // DPA on-demand may appear more than once for the same school/year/framework.
-  await client.query(
-    `INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on)
-     VALUES (gen_random_uuid(), $1, $2, 2571, 'dpa', 'DPA-1', 'open', '2027-10-01', '2028-09-30')`,
-    [sId, fwId],
-  );
-  await client.query(
-    `INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on)
-     VALUES (gen_random_uuid(), $1, $2, 2571, 'dpa', 'DPA-2', 'open', '2027-10-01', '2028-09-30')`,
-    [sId, fwId],
-  );
+  for (const title of ['DPA-1', 'DPA-2']) {
+    await q(
+      `INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on)
+       VALUES (?, ?, ?, 2571, 'dpa', ?, 'open', '2027-10-01', '2028-09-30')`,
+      [uid(), sId, fwId, title],
+    );
+  }
 });
 
 test('standard and challenge scores share indicator_score (ChallengeScore merge)', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const sId = (await client.query(`INSERT INTO school (id, code, name) VALUES (gen_random_uuid(),'S6','s') RETURNING id`)).rows[0].id;
-  const uId = (await client.query(`INSERT INTO user_account (id, email, display_name, status) VALUES (gen_random_uuid(),'sc@x.io','SC','active') RETURNING id`)).rows[0].id;
-  await client.query(`INSERT INTO rank_level (code, role_family, label_th, sort_order) VALUES ('kru5','teacher','ครู',2) ON CONFLICT (code) DO NOTHING`);
-  const pId = (await client.query(`INSERT INTO personnel_profile (id, school_id, user_id, full_name, position_role, rank_level_code) VALUES (gen_random_uuid(),$1,$2,'p','teacher','kru5') RETURNING id`, [sId, uId])).rows[0].id;
-  const fwId = (await client.query(`INSERT INTO framework_version (id, code, role_family, legal_ref, revision_year, status, effective_from) VALUES (gen_random_uuid(),'t10-fw','teacher','ว9',2564,'active','2021-05-20') RETURNING id`)).rows[0].id;
-  const dStd = (await client.query(`INSERT INTO evaluation_domain (id, framework_version_id, code, name_th, sort_order, part) VALUES (gen_random_uuid(),$1,'D1','d',1,'standards') RETURNING id`, [fwId])).rows[0].id;
-  const dCh = (await client.query(`INSERT INTO evaluation_domain (id, framework_version_id, code, name_th, sort_order, part) VALUES (gen_random_uuid(),$1,'C','c',2,'challenge') RETURNING id`, [fwId])).rows[0].id;
-  const iStd = (await client.query(`INSERT INTO indicator (id, domain_id, framework_version_id, code, name_th, sort_order, is_scored, indicator_kind) VALUES (gen_random_uuid(),$1,$2,'T-1.1','s',1,true,'standard') RETURNING id`, [dStd, fwId])).rows[0].id;
-  const iCh = (await client.query(`INSERT INTO indicator (id, domain_id, framework_version_id, code, name_th, sort_order, is_scored, indicator_kind, max_points) VALUES (gen_random_uuid(),$1,$2,'T-C.1','c',1,true,'challenge',20) RETURNING id`, [dCh, fwId])).rows[0].id;
-  const cyId = (await client.query(`INSERT INTO evaluation_cycle (id, school_id, framework_version_id, fiscal_year, evaluation_kind, title, status, starts_on, ends_on) VALUES (gen_random_uuid(),$1,$2,2572,'pa','c','open','2028-10-01','2029-09-30') RETURNING id`, [sId, fwId])).rows[0].id;
-  const rId = (await client.query(`INSERT INTO evaluation_round (id, cycle_id, round_number, purpose, period_start, period_end, status) VALUES (gen_random_uuid(),$1,1,'formal','2028-10-01','2029-09-30','scoring') RETURNING id`, [cyId])).rows[0].id;
-  const aId = (await client.query(`INSERT INTO evaluation_assignment (id, school_id, round_id, evaluatee_personnel_id, status) VALUES (gen_random_uuid(),$1,$2,$3,'in_progress') RETURNING id`, [sId, rId, pId])).rows[0].id;
+  const { uId, fwId, aId } = await mkAssignmentGraph('t10');
+  const dCh = await mkDomain(fwId, 'C', 'challenge', 2);
+  const dStd = await mkDomain(fwId, 'D2', 'standards', 3);
+  const iStd = await mkIndicator(dStd, fwId, 'T-1.1');
+  const iCh = await mkIndicator(dCh, fwId, 'T-C.1', 'challenge', { maxPoints: 20 });
 
   // No separate challenge_score table — both kinds write indicator_score.
-  const tables = await client.query(
-    `SELECT to_regclass('public.challenge_score') AS challenge_score, to_regclass('public.indicator_score') AS indicator_score`,
+  const tables = await q(
+    `SELECT
+       (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'challenge_score') AS challenge_score,
+       (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'indicator_score') AS indicator_score`,
   );
-  assert.equal(tables.rows[0].challenge_score, null, 'challenge_score table must not exist (merged)');
-  assert.ok(tables.rows[0].indicator_score, 'indicator_score table must exist');
+  assert.equal(Number(tables[0].challenge_score), 0, 'challenge_score table must not exist (merged)');
+  assert.equal(Number(tables[0].indicator_score), 1, 'indicator_score table must exist');
 
-  await client.query(
+  await q(
     `INSERT INTO indicator_score (id, assignment_id, indicator_id, evaluator_user_id, rubric_level, points_awarded)
-     VALUES (gen_random_uuid(), $1, $2, $3, 3, NULL)`, [aId, iStd, uId]);
-  await client.query(
+     VALUES (?, ?, ?, ?, 3, NULL)`, [uid(), aId, iStd, uId]);
+  await q(
     `INSERT INTO indicator_score (id, assignment_id, indicator_id, evaluator_user_id, rubric_level, points_awarded)
-     VALUES (gen_random_uuid(), $1, $2, $3, 4, 20)`, [aId, iCh, uId]);
+     VALUES (?, ?, ?, ?, 4, 20)`, [uid(), aId, iCh, uId]);
 
-  const n = await client.query(`SELECT count(*)::int AS c FROM indicator_score WHERE assignment_id=$1`, [aId]);
-  assert.equal(n.rows[0].c, 2);
+  const n = await q(`SELECT CAST(COUNT(*) AS SIGNED) AS c FROM indicator_score WHERE assignment_id=?`, [aId]);
+  assert.equal(Number(n[0].c), 2);
 });
 
 test('evidence_file is metadata-only columns (no bytea payload)', async (t) => {
-  await client.query('BEGIN');
+  await conn.query('BEGIN');
   t.after(rollback);
-  const cols = await client.query(
-    `SELECT column_name, data_type FROM information_schema.columns
-     WHERE table_schema='public' AND table_name='evidence_file'
+  const cols = await q(
+    `SELECT column_name AS column_name, data_type AS data_type FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'evidence_file'
      ORDER BY ordinal_position`,
   );
-  const names = cols.rows.map((r) => r.column_name);
+  const names = cols.map((r) => r.column_name);
   assert.ok(names.includes('storage_uri'));
   assert.ok(names.includes('storage_provider'));
   assert.ok(names.includes('checksum_sha256'));
-  assert.ok(!names.includes('bytes'), 'must not store file bytes in Postgres (ADR-0005 / SEC-UPL-1)');
-  assert.ok(!cols.rows.some((r) => r.data_type === 'bytea'), 'no bytea column on evidence_file');
+  assert.ok(!names.includes('bytes'), 'must not store file bytes in the DB (ADR-0005 / SEC-UPL-1)');
+  const blobTypes = ['blob', 'mediumblob', 'longblob', 'tinyblob', 'binary', 'varbinary'];
+  assert.ok(
+    !cols.some((r) => blobTypes.includes(String(r.data_type).toLowerCase())),
+    'no blob/binary column on evidence_file',
+  );
 });

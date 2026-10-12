@@ -2,7 +2,9 @@
 // Not school-scoped by a single schoolId parameter (a user's memberships SPAN
 // schools) — tenancy here means "return only what belongs to this user", which
 // every function does by construction (userId is always the filter root).
+import type { Role, RoleFamily } from '@prisma/client';
 import { prisma } from '../client.js';
+import { writeAuditEvent } from '../audit.js';
 import type { MembershipRow } from '@seip/auth';
 
 export async function findUserByEmail(email: string) {
@@ -83,6 +85,321 @@ export async function countCommitteeEligibleUserIds(schoolId: string, userIds: s
     distinct: ['userId'],
   });
   return rows.length;
+}
+
+// ── onboarding (CCR-014) ──
+//
+// Everything below IS school-scoped, unlike the user-rooted functions above:
+// these serve a school_admin managing their own school, so schoolId is the first
+// parameter and folds into the WHERE by construction (SEC-TEN-1), exactly like
+// the evidence and cycles repositories.
+
+export interface PersonnelSummaryRow {
+  id: string;
+  fullName: string;
+  employeeCode: string | null;
+  positionRole: RoleFamily;
+  rankLevelCode: string;
+  status: string;
+}
+
+export async function listPersonnelForSchool(
+  schoolId: string,
+  opts: { status?: 'active' | 'inactive' | 'all'; positionRole?: RoleFamily } = {},
+): Promise<PersonnelSummaryRow[]> {
+  const status = opts.status ?? 'active';
+  return prisma.personnelProfile.findMany({
+    where: {
+      schoolId,
+      ...(status === 'all' ? {} : { status }),
+      ...(opts.positionRole ? { positionRole: opts.positionRole } : {}),
+    },
+    select: { id: true, fullName: true, employeeCode: true, positionRole: true, rankLevelCode: true, status: true },
+    orderBy: [{ fullName: 'asc' }],
+  });
+}
+
+/** A membership is "current" when it has not been ended. effectiveTo is a DATE,
+ * so an offboarding recorded today is still >= today until tomorrow — matching
+ * endMembership, which grants the rest of the day rather than retroactively
+ * cutting a session that already exists. */
+function currentMembershipWhere() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return { OR: [{ effectiveTo: null }, { effectiveTo: { gte: today } }] };
+}
+
+export async function listMembersForSchool(schoolId: string, opts: { status?: 'current' | 'all' } = {}) {
+  const rows = await prisma.schoolMembership.findMany({
+    where: {
+      schoolId,
+      ...(opts.status === 'all' ? {} : currentMembershipWhere()),
+    },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      effectiveFrom: true,
+      effectiveTo: true,
+      user: { select: { email: true, displayName: true, status: true } },
+    },
+    orderBy: [{ effectiveFrom: 'desc' }],
+  });
+
+  // Personnel is per (school, user), not per membership — fetched in one query
+  // rather than N, and matched in memory.
+  const personnel = await prisma.personnelProfile.findMany({
+    where: { schoolId, userId: { in: rows.map((r) => r.userId) } },
+    select: { id: true, userId: true, fullName: true, employeeCode: true, positionRole: true, rankLevelCode: true, status: true },
+  });
+  const byUser = new Map(personnel.map((p) => [p.userId, p]));
+
+  return rows.map((r) => ({ ...r, personnel: byUser.get(r.userId) ?? null }));
+}
+
+export interface InviteMemberInput {
+  schoolId: string;
+  actorUserId: string;
+  email: string;
+  displayName: string;
+  role: Role;
+  personnel?: {
+    fullName: string;
+    employeeCode?: string | null;
+    positionRole: RoleFamily;
+    rankLevelCode: string;
+  };
+  /** Pre-hashed by the caller; this layer never sees the raw token. */
+  inviteTokenHash: string;
+  inviteExpiresAt: Date;
+  requestId?: string;
+}
+
+export type InviteMemberResult =
+  | { ok: true; membershipId: string; userId: string; issuedInvite: boolean }
+  | { ok: false; reason: 'already_a_member' };
+
+/**
+ * Creates account + membership + optional personnel atomically.
+ *
+ * Two things here are load-bearing:
+ *
+ * 1. **An existing account with a password NEVER receives an invite token.**
+ *    Otherwise `inviteMember` doubles as an admin-triggered password reset for
+ *    any email in the system, and any school_admin could take over an account in
+ *    a school they have no membership in. `issuedInvite` reports which path ran
+ *    so the route can null the token out of the response.
+ *
+ * 2. **The overlap check is done here, in the transaction, not by the database.**
+ *    `schema.prisma` claims "no-overlapping-active-membership" is a constraint,
+ *    but that partial unique index did not survive the Postgres → MySQL move
+ *    (ADR-0008) — only `membership_scope_ids` exists in
+ *    20260718210100_constraints. So the invariant is application-enforced, and
+ *    the read and the write must share a transaction or two concurrent invites
+ *    both pass the check.
+ */
+export async function inviteMember(input: InviteMemberInput): Promise<InviteMemberResult> {
+  const email = input.email.toLowerCase(); // DB CHECK compares against LOWER(email) as BINARY
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.userAccount.findUnique({
+      where: { email },
+      select: { id: true, passwordHash: true, status: true },
+    });
+
+    if (existing) {
+      const clash = await tx.schoolMembership.findFirst({
+        where: { userId: existing.id, schoolId: input.schoolId, ...currentMembershipWhere() },
+        select: { id: true },
+      });
+      if (clash) return { ok: false, reason: 'already_a_member' } as const;
+    }
+
+    const hasCredential = Boolean(existing?.passwordHash);
+    const issuedInvite = !hasCredential;
+
+    const user = existing
+      ? // Only re-issue an invite to an account that never completed one. An
+        // account with a password keeps it untouched (see note 1 above).
+        issuedInvite
+        ? await tx.userAccount.update({
+            where: { id: existing.id },
+            data: { inviteTokenHash: input.inviteTokenHash, inviteExpiresAt: input.inviteExpiresAt },
+            select: { id: true, status: true },
+          })
+        : { id: existing.id, status: existing.status }
+      : await tx.userAccount.create({
+          data: {
+            email,
+            displayName: input.displayName,
+            status: 'invited',
+            inviteTokenHash: input.inviteTokenHash,
+            inviteExpiresAt: input.inviteExpiresAt,
+          },
+          select: { id: true, status: true },
+        });
+
+    const membership = await tx.schoolMembership.create({
+      data: {
+        userId: user.id,
+        schoolId: input.schoolId,
+        role: input.role,
+        membershipScope: 'school',
+        effectiveFrom: today,
+        status: 'active',
+      },
+      select: { id: true },
+    });
+
+    if (input.personnel) {
+      const profile = await tx.personnelProfile.create({
+        data: {
+          schoolId: input.schoolId,
+          userId: user.id,
+          fullName: input.personnel.fullName,
+          employeeCode: input.personnel.employeeCode ?? null,
+          positionRole: input.personnel.positionRole,
+          rankLevelCode: input.personnel.rankLevelCode,
+          status: 'active',
+        },
+        select: { id: true, schoolId: true, userId: true, positionRole: true, rankLevelCode: true, status: true },
+      });
+      await writeAuditEvent(
+        {
+          schoolId: input.schoolId,
+          actorUserId: input.actorUserId,
+          action: 'personnel_created',
+          entityType: 'PersonnelProfile',
+          entityId: profile.id,
+          after: profile,
+          requestId: input.requestId,
+        },
+        tx,
+      );
+    }
+
+    // Membership changes who can reach PDPA-scoped evidence — audited, in the
+    // same transaction, so a rollback un-says it.
+    await writeAuditEvent(
+      {
+        schoolId: input.schoolId,
+        actorUserId: input.actorUserId,
+        action: 'membership_granted',
+        entityType: 'SchoolMembership',
+        entityId: membership.id,
+        after: { id: membership.id, userId: user.id, schoolId: input.schoolId, role: input.role, status: 'active' },
+        requestId: input.requestId,
+      },
+      tx,
+    );
+
+    return { ok: true, membershipId: membership.id, userId: user.id, issuedInvite } as const;
+  });
+}
+
+export type AcceptInviteResult = { ok: true; userId: string } | { ok: false };
+
+/**
+ * Consumes an invite: sets the password, activates the account, and clears the
+ * token in ONE transaction — that is what makes the token single-use.
+ *
+ * The lookup is by hash and includes the expiry test, so an expired token is
+ * indistinguishable from an unknown one at this layer too; the caller cannot
+ * accidentally leak the difference (AUTH-005).
+ */
+export async function acceptInvite(
+  inviteTokenHash: string,
+  passwordHash: string,
+  requestId?: string,
+): Promise<AcceptInviteResult> {
+  return prisma.$transaction(async (tx) => {
+    const candidate = await tx.userAccount.findUnique({
+      where: { inviteTokenHash },
+      select: { id: true },
+    });
+    if (!candidate) return { ok: false } as const;
+
+    // updateMany, not update: the WHERE is re-evaluated at write time, so the
+    // token hash and expiry are checked again against the row being written.
+    // Two concurrent accepts of the same token cannot both succeed — the loser
+    // matches 0 rows. Same compare-and-swap shape as the outbox claim.
+    const claimed = await tx.userAccount.updateMany({
+      where: { id: candidate.id, inviteTokenHash, inviteExpiresAt: { gt: new Date() } },
+      data: { passwordHash, status: 'active', inviteTokenHash: null, inviteExpiresAt: null },
+    });
+    if (claimed.count === 0) return { ok: false } as const;
+
+    const user = { id: candidate.id };
+
+    await writeAuditEvent(
+      {
+        schoolId: null, // account-level event; the account may span schools
+        actorUserId: user.id,
+        action: 'invite_accepted',
+        entityType: 'UserAccount',
+        entityId: user.id,
+        after: { id: user.id, status: 'active' },
+        requestId,
+      },
+      tx,
+    );
+    return { ok: true, userId: user.id } as const;
+  });
+}
+
+/** Offboarding. Scoped by schoolId so an admin cannot end a membership at
+ * another school even with a valid membership id (SEC-TEN-1); a miss returns
+ * null and the route maps that to RES-001, never revealing existence. */
+export async function endMembership(schoolId: string, membershipId: string, actorUserId: string, requestId?: string) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const existing = await prisma.schoolMembership.findFirst({
+    where: { id: membershipId, schoolId },
+    select: { id: true, userId: true, role: true, status: true, effectiveTo: true },
+  });
+  if (!existing) return null;
+
+  // Idempotent: an already-ended membership keeps its original end date rather
+  // than being pushed forward by a second call.
+  if (existing.effectiveTo === null) {
+    await prisma.schoolMembership.update({ where: { id: membershipId }, data: { effectiveTo: today, status: 'ended' } });
+    await writeAuditEvent({
+      schoolId,
+      actorUserId,
+      action: 'membership_ended',
+      entityType: 'SchoolMembership',
+      entityId: membershipId,
+      before: { id: existing.id, userId: existing.userId, schoolId, role: existing.role, status: existing.status },
+      after: { id: existing.id, userId: existing.userId, schoolId, role: existing.role, status: 'ended' },
+      requestId,
+    });
+  }
+
+  return prisma.schoolMembership.findFirst({
+    where: { id: membershipId, schoolId },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      effectiveFrom: true,
+      effectiveTo: true,
+      user: { select: { email: true, displayName: true, status: true } },
+    },
+  });
+}
+
+/** Validates that a rank code exists AND belongs to the given framework family.
+ * A teacher rank on an administrator profile would silently select the wrong
+ * framework's rubric rows, so this is VAL-003 territory, not a 500. */
+export async function rankLevelMatchesFamily(rankLevelCode: string, positionRole: RoleFamily): Promise<boolean> {
+  const row = await prisma.rankLevel.findUnique({
+    where: { code: rankLevelCode },
+    select: { roleFamily: true },
+  });
+  return row?.roleFamily === positionRole;
 }
 
 // ── refresh tokens (SEC-AUTH-2: rotation with reuse detection) ──

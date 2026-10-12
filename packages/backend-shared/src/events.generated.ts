@@ -3,7 +3,7 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const EVENTS_VERSION = '1.1.0';
+export const EVENTS_VERSION = '1.3.0';
 
 export type EventType =
   | 'evidence.created'
@@ -18,7 +18,8 @@ export type EventType =
   | 'assignment.completed'
   | 'round.closed'
   | 'report.generated'
-  | 'ai.suggestion.created';
+  | 'ai.suggestion.created'
+  | 'report.approved';
 
 export interface Event_evidence_created {
   evidence_id: string;
@@ -36,7 +37,7 @@ export interface Event_evidence_file_registered {
 export interface Event_evidence_file_scan_completed {
   evidence_id: string;
   file_id: string;
-  scan_status: 'clean' | 'blocked';
+  scan_status: 'clean' | 'unscanned' | 'blocked';
 }
 
 export interface Event_evidence_mapping_suggested {
@@ -108,6 +109,14 @@ export interface Event_ai_suggestion_created {
   suggestion_count: number;
 }
 
+export interface Event_report_approved {
+  report_id: string;
+  cycle_id: string;
+  subject_personnel_id: string;
+  approver_user_id: string;
+  step_code: string;
+}
+
 export interface EventPayloadMap {
   'evidence.created': Event_evidence_created;
   'evidence.file.registered': Event_evidence_file_registered;
@@ -122,6 +131,7 @@ export interface EventPayloadMap {
   'round.closed': Event_round_closed;
   'report.generated': Event_report_generated;
   'ai.suggestion.created': Event_ai_suggestion_created;
+  'report.approved': Event_report_approved;
 }
 
 /** Envelope fields required on every emitted event (events.yaml #envelope). */

@@ -1,12 +1,16 @@
 // Committee assignment management for one round (SEIP-UI-002).
 //
-// KNOWN LIMITATION (documented, not hidden — same discipline as the CCRs):
-// openapi.yaml has no personnel/user-listing endpoint, so evaluatee_personnel_id
-// and the 3 committee evaluator_user_id fields are raw-uuid text inputs here,
-// not name pickers. A director would need those ids from elsewhere (e.g. the
-// database directly) until a listPersonnel/listStaff-style endpoint exists —
-// flagged as a follow-up, out of scope for this task (touches apps/api, which
-// this task's primary_paths deliberately excludes).
+// CCR-014 resolved half of the limitation this file used to carry: listPersonnel
+// now exists, so the evaluatee is a name picker instead of a raw-uuid text box.
+//
+// REMAINING LIMITATION (documented, not hidden): the 3 committee seats are keyed
+// on evaluator_user_id — a UserAccount id, not a personnel id — and listPersonnel
+// returns neither. The operation that does map users to names is listMembers,
+// which permissions.yaml grants to school_admin only, while this page is gated on
+// manageCycles (director + school_admin). Widening listMembers to director would
+// be a permissions change beyond what CCR-014 was approved for, so committee
+// seats stay uuid inputs for now. External evaluators additionally have no
+// PersonnelProfile at all, so listPersonnel could never cover them.
 //
 // Round context (purpose/dates) arrives via router state from CycleDetailPage's
 // link when navigated in-app; a direct URL/refresh has none (no GET
@@ -17,6 +21,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { api, unwrap } from '../../api/client';
 import { ApiError, thaiMessageFor } from '../../api/errors';
+import { usePersonnel } from '../../lib/usePersonnel';
 import type { components } from '../../api/schema.generated';
 
 type Assignment = components['schemas']['Assignment'];
@@ -35,6 +40,7 @@ export function RoundAssignmentsPage() {
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [error, setError] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const { nameFor } = usePersonnel();
 
   function reload() {
     if (!roundId) return;
@@ -73,7 +79,7 @@ export function RoundAssignmentsPage() {
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {assignments.map((a) => (
             <li key={a.id} className="evidence-card" style={{ marginBottom: 'var(--space-2)' }}>
-              <div className="title">ผู้รับการประเมิน: {a.evaluatee_personnel_id}</div>
+              <div className="title">ผู้รับการประเมิน: {nameFor(a.evaluatee_personnel_id)}</div>
               <span className="status-badge">
                 <span className="status-dot" data-state={a.status === 'completed' ? 'clean' : a.status === 'void' ? 'blocked' : 'pending'} aria-hidden="true" />
                 {assignmentStatusLabel(a.status)}
@@ -95,6 +101,7 @@ export function RoundAssignmentsPage() {
 }
 
 function CreateAssignmentForm({ roundId, onCreated }: { roundId: string; onCreated: () => void }) {
+  const { personnel, failed: personnelFailed } = usePersonnel();
   const [evaluateePersonnelId, setEvaluateePersonnelId] = useState('');
   const [committee, setCommittee] = useState<CommitteeRow[]>([
     { evaluatorUserId: '', role: 'chair' },
@@ -145,12 +152,30 @@ function CreateAssignmentForm({ roundId, onCreated }: { roundId: string; onCreat
     <form onSubmit={onSubmit} noValidate style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
       <div className="alert alert-info" role="note">
         <span aria-hidden="true">ℹ</span>
-        <span>ระบบยังไม่มีหน้าค้นหารายชื่อบุคลากร กรุณากรอกรหัส UUID ของผู้รับการประเมินและกรรมการโดยตรง</span>
+        <span>กรรมการยังต้องกรอกรหัส UUID ของบัญชีผู้ใช้ เพราะระบบยังไม่มีหน้าค้นหาบัญชีสำหรับผู้อำนวยการ</span>
       </div>
 
       <div className="field">
-        <label htmlFor="evaluatee">รหัสผู้รับการประเมิน (personnel id)</label>
-        <input id="evaluatee" type="text" value={evaluateePersonnelId} onChange={(e) => setEvaluateePersonnelId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" required />
+        <label htmlFor="evaluatee">ผู้รับการประเมิน</label>
+        {personnel === null && !personnelFailed && <p className="field-hint">กำลังโหลดรายชื่อ…</p>}
+        {personnel !== null && personnel.length > 0 && (
+          <select id="evaluatee" value={evaluateePersonnelId} onChange={(e) => setEvaluateePersonnelId(e.target.value)} required>
+            <option value="">— เลือกผู้รับการประเมิน —</option>
+            {personnel.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.full_name}{p.employee_code ? ` (${p.employee_code})` : ''}
+              </option>
+            ))}
+          </select>
+        )}
+        {personnel !== null && personnel.length === 0 && (
+          <p className="field-hint">ยังไม่มีบุคลากรในโรงเรียน — ให้ผู้ดูแลระบบเชิญบุคลากรก่อน</p>
+        )}
+        {/* Degraded, not broken: if the name list fails to load, a director who
+            already has the id can still complete the assignment. */}
+        {personnelFailed && (
+          <input id="evaluatee" type="text" value={evaluateePersonnelId} onChange={(e) => setEvaluateePersonnelId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" required />
+        )}
       </div>
 
       <h2>คณะกรรมการ (3 คน)</h2>

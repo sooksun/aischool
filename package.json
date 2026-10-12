@@ -22,6 +22,11 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset --force",
+    "provision:school": "npm run build:libs && node --env-file-if-exists=.env scripts/ops/provision-school.mjs",
+    "bootstrap:admin": "npm run build:libs && node --env-file-if-exists=.env scripts/ops/bootstrap-admin.mjs",
+    "rescan:files": "npm run build:libs && node --env-file-if-exists=.env scripts/ops/rescan-files.mjs",
+    "backup": "node --env-file-if-exists=.env scripts/ops/backup.mjs",
+    "restore": "node --env-file-if-exists=.env scripts/ops/restore.mjs",
     "test:backend": "node --test \"tests/backend/*.test.mjs\"",
     "test:integration": "node --test \"tests/backend/*.test.mjs\"",
     "test:security": "npm run build:libs && npm run build --workspace apps/api && node --env-file-if-exists=.env --test \"tests/security/*.test.mjs\"",
@@ -46,7 +51,7 @@
     "@node-rs/argon2": "^2.0.2",
     "@playwright/test": "^1.51.0",
     "js-yaml": "^4.3.0",
-    "pg": "^8.13.1",
+    "mysql2": "^3.23.0",
     "prisma": "^6.19.3"
   }
 }

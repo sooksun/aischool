@@ -12,7 +12,8 @@ Scope per original GROK.md review scope; enforcement responsibility is claude (A
 | SEC-AUTH-2 | Access token TTL ≤ 60 min; refresh rotation with reuse detection; logout revokes refresh | Test (Sprint 1) |
 | SEC-AUTH-3 | Disabled/`invited` accounts cannot authenticate (AUTH-003) | Permission tests |
 | SEC-AUTH-4 | No credentials or tokens in URLs, query strings, or client storage other than httpOnly cookie / secure storage | Review + e2e |
-| SEC-AUTH-5 | Login brute-force throttling (per-account + per-IP) before Sprint 1 exit | Test (Sprint 1) |
+| SEC-AUTH-5 | Login brute-force throttling (per-account + per-IP) before Sprint 1 exit. `acceptInvite` is throttled on its OWN per-IP bucket, not login's — a school sits behind one NAT'd IP, so a shared bucket would let an onboarding batch lock out staff logins (CCR-014) | Test (Sprint 1) |
+| SEC-AUTH-6 | Minimum password length **12**, enforced server-side. Length, not composition: NIST 800-63B dropped composition rules because they push users toward `Passw0rd!`. Mirrored in three places that must move together — `MIN_PASSWORD_LENGTH` (packages/auth), `AcceptInviteRequest.password.minLength` (openapi.yaml), and the accept-invite UI hint (CCR-014) | Test (onboarding-flow.test.mjs) |
 
 ## 2. Tenant / school data isolation (SEC-TEN) — highest-risk area
 

@@ -15,7 +15,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -99,9 +99,15 @@ enum EvidenceStatus {
   rejected
 }
 
+/// CCR-012: `unscanned` = processed, but NO scanner ran, so the platform makes no
+/// claim about the contents. It is served like `clean` — the distinction is
+/// disclosure, not restriction. `blocked` is quarantine: a scanner rejected the
+/// file, or the stored object did not match the declared byte_size. Replaces a
+/// stub that reported `clean` for every filename it did not recognise.
 enum ScanStatus {
   pending
   clean
+  unscanned
   blocked
 }
 
@@ -156,7 +162,7 @@ enum ApprovalDecision {
 // ─────────────────────── tenancy & identity ───────────────────────
 
 model Area {
-  id      String   @id @default(uuid()) @db.Uuid
+  id      String   @id @default(uuid()) @db.Char(36)
   code    String   @unique
   name    String
   schools School[]
@@ -168,10 +174,10 @@ model Area {
 /// Tenant boundary. Nearly every operational row carries schoolId; the API derives
 /// it from the caller's membership and never accepts it as a parameter (ARCH-001).
 model School {
-  id     String       @id @default(uuid()) @db.Uuid
+  id     String       @id @default(uuid()) @db.Char(36)
   code   String       @unique
   name   String
-  areaId String?      @map("area_id") @db.Uuid
+  areaId String?      @map("area_id") @db.Char(36)
   status SchoolStatus @default(active)
   area   Area?        @relation(fields: [areaId], references: [id], onDelete: Restrict)
 
@@ -192,7 +198,7 @@ model School {
 /// Login identity. Separate from PersonnelProfile: an account is who you authenticate
 /// as; a profile is your employment record at a school.
 model UserAccount {
-  id           String     @id @default(uuid()) @db.Uuid
+  id           String     @id @default(uuid()) @db.Char(36)
   email        String     @unique                  // stored lowercase — enforced in app + CHECK
   displayName  String     @map("display_name")
   /// SEIP-API-001 addition: DB-000/DB-001 modeled the evaluation domain, not
@@ -202,6 +208,13 @@ model UserAccount {
   passwordHash String?    @map("password_hash")
   status       UserStatus @default(invited)
   createdAt    DateTime   @default(now()) @map("created_at")
+  /// CCR-014 onboarding. SHA-256 of a single-use invite secret — never the
+  /// secret itself, same handling as RefreshToken.tokenHash. Both columns are
+  /// cleared in the transaction that sets passwordHash, so a non-null
+  /// inviteTokenHash means "invited and not yet accepted". No separate table:
+  /// an invite is 1:1 with the account it creates.
+  inviteTokenHash String?   @unique @map("invite_token_hash")
+  inviteExpiresAt DateTime? @map("invite_expires_at")
 
   memberships       SchoolMembership[]
   personnelProfiles PersonnelProfile[]
@@ -225,13 +238,13 @@ model UserAccount {
 /// no existing table changes. The raw token is a bearer secret — only its hash is
 /// stored, so a DB read alone can never impersonate a session.
 model RefreshToken {
-  id           String    @id @default(uuid()) @db.Uuid
-  userId       String    @map("user_id") @db.Uuid
+  id           String    @id @default(uuid()) @db.Char(36)
+  userId       String    @map("user_id") @db.Char(36)
   tokenHash    String    @unique @map("token_hash") // sha256 of the opaque token
   issuedAt     DateTime  @default(now()) @map("issued_at")
   expiresAt    DateTime  @map("expires_at")
   revokedAt    DateTime? @map("revoked_at")
-  replacedById String?   @map("replaced_by_id") @db.Uuid // rotation chain: reuse of a revoked-and-replaced token is a theft signal
+  replacedById String?   @map("replaced_by_id") @db.Char(36) // rotation chain: reuse of a revoked-and-replaced token is a theft signal
 
   user UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -242,19 +255,22 @@ model RefreshToken {
 /// Role of a user within a school, or across an area (area_admin, read-only per
 /// permissions.yaml). This table is what the API resolves tenancy from.
 model SchoolMembership {
-  id              String          @id @default(uuid()) @db.Uuid
-  userId          String          @map("user_id") @db.Uuid
-  schoolId        String?         @map("school_id") @db.Uuid
-  areaId          String?         @map("area_id") @db.Uuid
+  id              String          @id @default(uuid()) @db.Char(36)
+  userId          String          @map("user_id") @db.Char(36)
+  schoolId        String?         @map("school_id") @db.Char(36)
+  areaId          String?         @map("area_id") @db.Char(36)
   role            Role
   membershipScope MembershipScope @map("membership_scope")
   effectiveFrom   DateTime        @map("effective_from") @db.Date
   effectiveTo     DateTime?       @map("effective_to") @db.Date
   status          String          @default("active")
 
+  // onUpdate: Restrict on school/area — MySQL forbids columns with a CASCADE
+  // referential action inside CHECK constraints (membership_scope_ids), and
+  // these UUID PKs are never updated anyway (ADR-0008).
   user   UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
-  school School?     @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-  area   Area?       @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  school School?     @relation(fields: [schoolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  area   Area?       @relation(fields: [areaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   // scope↔id agreement and no-overlapping-active-membership are CHECK/partial-index
   // constraints — see constraints.sql
@@ -281,9 +297,9 @@ model RankLevel {
 
 /// The evaluatee / evidence owner as school staff (ครู or ผู้บริหาร).
 model PersonnelProfile {
-  id            String     @id @default(uuid()) @db.Uuid
-  schoolId      String     @map("school_id") @db.Uuid
-  userId        String     @map("user_id") @db.Uuid
+  id            String     @id @default(uuid()) @db.Char(36)
+  schoolId      String     @map("school_id") @db.Char(36)
+  userId        String     @map("user_id") @db.Char(36)
   employeeCode  String?    @map("employee_code")
   fullName      String     @map("full_name")
   positionRole  RoleFamily @map("position_role") // selects ว9 vs ว10 framework
@@ -310,7 +326,7 @@ model PersonnelProfile {
 /// schema. A future ก.ค.ศ. revision is a new row + new domain/indicator rows;
 /// historical cycles keep pointing at the version they were evaluated under.
 model FrameworkVersion {
-  id            String          @id @default(uuid()) @db.Uuid
+  id            String          @id @default(uuid()) @db.Char(36)
   code          String          @unique              // e.g. v9-2564-teacher
   roleFamily    RoleFamily      @map("role_family")
   legalRef      String          @map("legal_ref")    // ศธ 0206.3/ว 9 ลว. 20 พ.ค. 2564
@@ -330,8 +346,8 @@ model FrameworkVersion {
 
 /// ด้าน — 3 for teachers (ว9), 5 for administrators (ว10), plus the challenge part.
 model EvaluationDomain {
-  id                 String     @id @default(uuid()) @db.Uuid
-  frameworkVersionId String     @map("framework_version_id") @db.Uuid
+  id                 String     @id @default(uuid()) @db.Char(36)
+  frameworkVersionId String     @map("framework_version_id") @db.Char(36)
   code               String
   nameTh             String     @map("name_th")
   sortOrder          Int        @map("sort_order")
@@ -348,9 +364,9 @@ model EvaluationDomain {
 /// Administrator: A-1.1…A-5.2 (15) + challenge items + workload gate.
 /// frameworkVersionId is denormalized from the domain so (framework, code) can be unique.
 model Indicator {
-  id                 String        @id @default(uuid()) @db.Uuid
-  domainId           String        @map("domain_id") @db.Uuid
-  frameworkVersionId String        @map("framework_version_id") @db.Uuid
+  id                 String        @id @default(uuid()) @db.Char(36)
+  domainId           String        @map("domain_id") @db.Char(36)
+  frameworkVersionId String        @map("framework_version_id") @db.Char(36)
   code               String
   nameTh             String        @map("name_th")
   sortOrder          Int           @map("sort_order")
@@ -374,11 +390,11 @@ model Indicator {
 /// The same indicator is judged against a DIFFERENT expected level depending on the
 /// person's วิทยฐานะ (framework §Scoring model). That text is data, never code.
 model IndicatorLevelDescription {
-  id                 String @id @default(uuid()) @db.Uuid
-  indicatorId        String @map("indicator_id") @db.Uuid
+  id                 String @id @default(uuid()) @db.Char(36)
+  indicatorId        String @map("indicator_id") @db.Char(36)
   rankLevelCode      String @map("rank_level_code")
   rubricLevel        Int    @map("rubric_level") // 1..4 — CHECK in constraints.sql
-  expectedPracticeTh String @map("expected_practice_th")
+  expectedPracticeTh String @map("expected_practice_th") @db.Text
 
   indicator Indicator @relation(fields: [indicatorId], references: [id], onDelete: Cascade)
   rankLevel RankLevel @relation(fields: [rankLevelCode], references: [code], onDelete: Restrict)
@@ -390,11 +406,11 @@ model IndicatorLevelDescription {
 /// 60/40 and 20/10/10 live here, per framework version — a future revision that
 /// reweights the parts is a data change.
 model ScoreWeight {
-  id                 String  @id @default(uuid()) @db.Uuid
-  frameworkVersionId String  @map("framework_version_id") @db.Uuid
+  id                 String  @id @default(uuid()) @db.Char(36)
+  frameworkVersionId String  @map("framework_version_id") @db.Char(36)
   weightKey          String  @map("weight_key")   // part1_total | part2_total | challenge_method | ...
   weightValue        Decimal @map("weight_value") @db.Decimal(6, 2)
-  notes              String?
+  notes              String? @db.Text
 
   framework FrameworkVersion @relation(fields: [frameworkVersionId], references: [id], onDelete: Cascade)
 
@@ -405,10 +421,10 @@ model ScoreWeight {
 /// Framework-named evidence classes + the technical limits the API validates
 /// against (openapi EvidenceCategory). ว9 sets the ≤10-minute inspiration video.
 model EvidenceCategory {
-  id                 String  @id @default(uuid()) @db.Uuid
+  id                 String  @id @default(uuid()) @db.Char(36)
   code               String  @unique
   labelTh            String  @map("label_th")
-  allowedMimeTypes   String[] @map("allowed_mime_types")
+  allowedMimeTypes   Json    @map("allowed_mime_types") // string[] — Json because MySQL has no scalar-list columns
   maxByteSize        BigInt? @map("max_byte_size")
   maxDurationSeconds Int?    @map("max_duration_seconds")
   requiredForDpa     Boolean @default(false) @map("required_for_dpa")
@@ -424,26 +440,32 @@ model EvidenceCategory {
 /// framework_version_id PINS the taxonomy: changing the globally-active framework
 /// must never rewrite a historical cycle's meaning.
 model EvaluationCycle {
-  id                 String         @id @default(uuid()) @db.Uuid
-  schoolId           String         @map("school_id") @db.Uuid
-  frameworkVersionId String         @map("framework_version_id") @db.Uuid
+  id                 String         @id @default(uuid()) @db.Char(36)
+  schoolId           String         @map("school_id") @db.Char(36)
+  frameworkVersionId String         @map("framework_version_id") @db.Char(36)
   fiscalYear         Int            @map("fiscal_year")
   evaluationKind     EvaluationKind @map("evaluation_kind")
-  title              String
+  title              String         @db.VarChar(200)
   status             CycleStatus    @default(planned)
   startsOn           DateTime       @map("starts_on") @db.Date
   endsOn             DateTime       @map("ends_on") @db.Date
+  /// STORED GENERATED in the constraints migration (MySQL has no partial unique
+  /// indexes): non-NULL only when evaluation_kind='pa'. Never write it.
+  paUkKey            String?        @map("pa_uk_key") @db.VarChar(120)
 
-  school    School           @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-  framework FrameworkVersion @relation(fields: [frameworkVersionId], references: [id], onDelete: Restrict)
+  // onUpdate: Restrict — school_id/framework_version_id feed the STORED GENERATED
+  // pa_uk_key; MySQL forbids CASCADE-updated columns as generated-column bases.
+  school    School           @relation(fields: [schoolId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  framework FrameworkVersion @relation(fields: [frameworkVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   rounds     EvaluationRound[]
   agreements PerformanceAgreement[]
   mappings   EvidenceIndicatorMapping[]
   reports    Report[]
 
-  // PA uniqueness per (school, year, kind, framework) is a partial unique index
-  // (DPA may repeat) — constraints.sql
+  // PA uniqueness per (school, year, framework) rides the generated paUkKey —
+  // NULL for DPA rows, so DPA may repeat (constraints migration)
+  @@unique([paUkKey], map: "evaluation_cycle_pa_uk")
   @@index([schoolId, fiscalYear])
   @@map("evaluation_cycle")
 }
@@ -452,8 +474,8 @@ model EvaluationCycle {
 /// fiscal year, but salary review runs twice — so the count is DATA. Nothing in
 /// this schema caps it at 2.
 model EvaluationRound {
-  id          String      @id @default(uuid()) @db.Uuid
-  cycleId     String      @map("cycle_id") @db.Uuid
+  id          String      @id @default(uuid()) @db.Char(36)
+  cycleId     String      @map("cycle_id") @db.Char(36)
   roundNumber Int         @map("round_number")
   purpose     String
   periodStart DateTime    @map("period_start") @db.Date
@@ -472,10 +494,10 @@ model EvaluationRound {
 
 /// PA1 — the agreement itself, one per person per cycle.
 model PerformanceAgreement {
-  id          String          @id @default(uuid()) @db.Uuid
-  schoolId    String          @map("school_id") @db.Uuid
-  cycleId     String          @map("cycle_id") @db.Uuid
-  personnelId String          @map("personnel_id") @db.Uuid
+  id          String          @id @default(uuid()) @db.Char(36)
+  schoolId    String          @map("school_id") @db.Char(36)
+  cycleId     String          @map("cycle_id") @db.Char(36)
+  personnelId String          @map("personnel_id") @db.Char(36)
   formVariant String          @map("form_variant") // PA1_s | PA1_bs
   status      AgreementStatus @default(draft)
   submittedAt DateTime?       @map("submitted_at")
@@ -495,12 +517,12 @@ model PerformanceAgreement {
 /// ภาระงาน — pass/fail gate, deliberately NOT an indicator score.
 /// Framework rule: workload not met ⇒ overall fail regardless of percentage.
 model WorkloadDeclaration {
-  id               String   @id @default(uuid()) @db.Uuid
-  agreementId      String   @map("agreement_id") @db.Uuid
-  roundId          String   @map("round_id") @db.Uuid
+  id               String   @id @default(uuid()) @db.Char(36)
+  agreementId      String   @map("agreement_id") @db.Char(36)
+  roundId          String   @map("round_id") @db.Char(36)
   workloadMet      Boolean  @map("workload_met")
-  notes            String?
-  declaredByUserId String   @map("declared_by_user_id") @db.Uuid
+  notes            String?  @db.Text
+  declaredByUserId String   @map("declared_by_user_id") @db.Char(36)
   declaredAt       DateTime @default(now()) @map("declared_at")
 
   agreement  PerformanceAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
@@ -513,12 +535,23 @@ model WorkloadDeclaration {
 
 /// ประเด็นท้าทาย — the person's planned method + targets for ส่วนที่ 2.
 model AgreementChallenge {
-  id                 String  @id @default(uuid()) @db.Uuid
-  agreementId        String  @map("agreement_id") @db.Uuid
-  indicatorId        String  @map("indicator_id") @db.Uuid
-  methodPlan         String  @map("method_plan")
-  quantitativeTarget String? @map("quantitative_target")
-  qualitativeTarget  String? @map("qualitative_target")
+  id          String @id @default(uuid()) @db.Char(36)
+  agreementId String @map("agreement_id") @db.Char(36)
+  /// CCR-015: the framework's วิธีดำเนินการ indicator (T-C.1 / A-C.1). One
+  /// challenge row per agreement — the PA1 form has exactly one ประเด็นท้าทาย,
+  /// and this row carries all three scored texts, so the unique key below
+  /// enforces "one per agreement" rather than merely de-duplicating indicators.
+  indicatorId String @map("indicator_id") @db.Char(36)
+  /// ประเด็นท้าทาย เรื่อง … — added CCR-015. Required: a plan with no subject is
+  /// not a challenge. Safe as NOT NULL because this table had zero rows in every
+  /// environment (nothing could create one until CCR-015).
+  title              String  @db.VarChar(500)
+  methodPlan         String  @map("method_plan") @db.Text
+  quantitativeTarget String? @map("quantitative_target") @db.Text
+  qualitativeTarget  String? @map("qualitative_target") @db.Text
+  /// Both appear on the PA1 form; neither is scored.
+  targetGroup        String? @map("target_group") @db.VarChar(500)
+  periodNote         String? @map("period_note") @db.VarChar(500)
 
   agreement PerformanceAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
   indicator Indicator            @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
@@ -533,13 +566,13 @@ model AgreementChallenge {
 /// reports through mappings — never copied per use.
 /// Lifecycle (CCR-002): draft → active once the first file upload completes.
 model Evidence {
-  id                String         @id @default(uuid()) @db.Uuid
-  schoolId          String         @map("school_id") @db.Uuid
-  ownerPersonnelId  String         @map("owner_personnel_id") @db.Uuid
-  uploadedByUserId  String         @map("uploaded_by_user_id") @db.Uuid
-  categoryId        String         @map("category_id") @db.Uuid
-  title             String
-  description       String?
+  id                String         @id @default(uuid()) @db.Char(36)
+  schoolId          String         @map("school_id") @db.Char(36)
+  ownerPersonnelId  String         @map("owner_personnel_id") @db.Char(36)
+  uploadedByUserId  String         @map("uploaded_by_user_id") @db.Char(36)
+  categoryId        String         @map("category_id") @db.Char(36)
+  title             String         @db.VarChar(300)
+  description       String?        @db.Text
   status            EvidenceStatus @default(draft)
   capturedAt        DateTime?      @map("captured_at")
   createdAt         DateTime       @default(now()) @map("created_at")
@@ -558,26 +591,37 @@ model Evidence {
   @@map("evidence")
 }
 
-/// File METADATA only. Bytes live in MinIO (ADR-0005) and never enter Postgres or
+/// File METADATA only. Bytes live in MinIO (ADR-0005) and never enter the DB or
 /// pass through the API process (SEC-UPL-1). storageUri/storageProvider are never
 /// exposed in any API response — the client only ever gets a short-lived presigned URL.
 model EvidenceFile {
-  id               String          @id @default(uuid()) @db.Uuid
-  evidenceId       String          @map("evidence_id") @db.Uuid
+  id               String          @id @default(uuid()) @db.Char(36)
+  evidenceId       String          @map("evidence_id") @db.Char(36)
   storageProvider  StorageProvider @default(s3_compatible) @map("storage_provider")
-  storageUri       String          @map("storage_uri")
+  storageUri       String          @map("storage_uri") @db.Text
   contentType      String          @map("content_type")
   byteSize         BigInt          @map("byte_size")
   checksumSha256   String          @map("checksum_sha256")
   durationSeconds  Int?            @map("duration_seconds") // null until the worker probes (CCR-002)
-  originalFilename String          @map("original_filename")
+  originalFilename String          @map("original_filename") @db.VarChar(255)
   scanStatus       ScanStatus      @default(pending) @map("scan_status")
+  /// Receipt for a REAL scan: set only when clamd returned a verdict (ADR-0009).
+  /// Null therefore means "no scanner has ever read these bytes" — which is true
+  /// of `unscanned` rows, of files blocked for size without being read, and of
+  /// every `clean` row written by the filename stub CCR-012 deleted. Without this
+  /// column those stub rows are indistinguishable from a genuine pass, which is
+  /// exactly why migration 20260718220000 could not safely backfill them.
+  /// Also dates the verdict, so a signature-update sweep can target `scanned_at
+  /// < <date>`. Deliberately internal: not in openapi, so this stays additive.
+  scannedAt        DateTime?       @map("scanned_at")
   uploadedAt       DateTime        @default(now()) @map("uploaded_at")
 
   evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
 
   @@index([evidenceId])
   @@index([scanStatus])
+  /// The rescan sweep's query: "never really scanned", oldest first.
+  @@index([scannedAt])
   @@map("evidence_file")
 }
 
@@ -587,12 +631,12 @@ model EvidenceFile {
 /// (events.yaml + module-boundaries rule 4). Worker publishes / fans out;
 /// `publishedAt` null means still pending dispatch.
 model OutboxEvent {
-  id            String    @id @default(uuid()) @db.Uuid
+  id            String    @id @default(uuid()) @db.Char(36)
   eventType     String    @map("event_type")
   schemaVersion Int       @default(1) @map("schema_version")
-  schoolId      String?   @map("school_id") @db.Uuid
-  actorUserId   String?   @map("actor_user_id") @db.Uuid
-  requestId     String?   @map("request_id") @db.Uuid
+  schoolId      String?   @map("school_id") @db.Char(36)
+  actorUserId   String?   @map("actor_user_id") @db.Char(36)
+  requestId     String?   @map("request_id") @db.Char(36)
   payload       Json
   occurredAt    DateTime  @default(now()) @map("occurred_at")
   publishedAt   DateTime? @map("published_at")
@@ -607,7 +651,7 @@ model OutboxEvent {
 /// Async work units (scan, duration probe, GC, future AI/report jobs).
 /// One worker process claims pending rows — no second queue runner.
 model WorkerJob {
-  id          String    @id @default(uuid()) @db.Uuid
+  id          String    @id @default(uuid()) @db.Char(36)
   jobType     String    @map("job_type")
   payload     Json
   status      String    @default("pending") // pending | running | done | failed
@@ -629,30 +673,40 @@ model WorkerJob {
 /// machine so a human confirms what counts toward which indicator. AI suggestions
 /// (Sprint 2) will land here as mappingSource=ai_suggested, still requiring confirmation.
 model EvidenceIndicatorMapping {
-  id                String         @id @default(uuid()) @db.Uuid
-  schoolId          String         @map("school_id") @db.Uuid
-  evidenceId        String         @map("evidence_id") @db.Uuid
-  indicatorId       String         @map("indicator_id") @db.Uuid
-  cycleId           String?        @map("cycle_id") @db.Uuid
+  id                String         @id @default(uuid()) @db.Char(36)
+  schoolId          String         @map("school_id") @db.Char(36)
+  evidenceId        String         @map("evidence_id") @db.Char(36)
+  indicatorId       String         @map("indicator_id") @db.Char(36)
+  cycleId           String?        @map("cycle_id") @db.Char(36)
   mappingSource     MappingSource  @default(human) @map("mapping_source")
   status            MappingStatus  @default(suggested)
-  rationale         String?
-  mappedByUserId    String         @map("mapped_by_user_id") @db.Uuid
-  confirmedByUserId String?        @map("confirmed_by_user_id") @db.Uuid
+  rationale         String?        @db.Text
+  mappedByUserId    String         @map("mapped_by_user_id") @db.Char(36)
+  confirmedByUserId String?        @map("confirmed_by_user_id") @db.Char(36)
   mappedAt          DateTime       @default(now()) @map("mapped_at")
   confirmedAt       DateTime?      @map("confirmed_at")
+  /// Maintained by BEFORE INSERT/UPDATE triggers (constraints migration): non-NULL
+  /// only while status is suggested/confirmed; NULL cycle_id folds to a sentinel so
+  /// NULL collides with NULL. Not STORED GENERATED because InnoDB refuses the
+  /// evidence FK's ON DELETE CASCADE on a generated base column. Never write it —
+  /// the triggers overwrite whatever the client supplies.
+  activeUkKey       String?        @map("active_uk_key") @db.VarChar(120)
 
+  // onUpdate: Restrict on evidence/indicator/cycle (bases of the STORED GENERATED
+  // active_uk_key) and confirmedBy (in the mapping_confirmed_has_actor CHECK) —
+  // MySQL forbids CASCADE-updated columns in either construct.
   school      School           @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-  evidence    Evidence         @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
-  indicator   Indicator        @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
-  cycle       EvaluationCycle? @relation(fields: [cycleId], references: [id], onDelete: Restrict)
+  evidence    Evidence         @relation(fields: [evidenceId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  indicator   Indicator        @relation(fields: [indicatorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  cycle       EvaluationCycle? @relation(fields: [cycleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   mappedBy    UserAccount      @relation("MappingMapper", fields: [mappedByUserId], references: [id], onDelete: Restrict)
-  confirmedBy UserAccount?     @relation("MappingConfirmer", fields: [confirmedByUserId], references: [id], onDelete: Restrict)
+  confirmedBy UserAccount?     @relation("MappingConfirmer", fields: [confirmedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   sectionRefs ReportSectionRef[]
 
-  // Uniqueness of an ACTIVE mapping is a partial unique index (revoked/rejected rows
-  // must not block a re-map) — constraints.sql
+  // Uniqueness of an ACTIVE mapping rides the generated activeUkKey — NULL once
+  // revoked/rejected, so old rows never block a re-map (constraints migration)
+  @@unique([activeUkKey], map: "evidence_indicator_mapping_active_uk")
   @@index([indicatorId, status])
   @@index([schoolId, status])
   @@map("evidence_indicator_mapping")
@@ -662,11 +716,11 @@ model EvidenceIndicatorMapping {
 
 /// One evaluatee, one round.
 model EvaluationAssignment {
-  id                   String           @id @default(uuid()) @db.Uuid
-  schoolId             String           @map("school_id") @db.Uuid
-  roundId              String           @map("round_id") @db.Uuid
-  evaluateePersonnelId String           @map("evaluatee_personnel_id") @db.Uuid
-  agreementId          String?          @map("agreement_id") @db.Uuid
+  id                   String           @id @default(uuid()) @db.Char(36)
+  schoolId             String           @map("school_id") @db.Char(36)
+  roundId              String           @map("round_id") @db.Char(36)
+  evaluateePersonnelId String           @map("evaluatee_personnel_id") @db.Char(36)
+  agreementId          String?          @map("agreement_id") @db.Char(36)
   status               AssignmentStatus @default(pending)
 
   school    School                @relation(fields: [schoolId], references: [id], onDelete: Restrict)
@@ -687,9 +741,9 @@ model EvaluationAssignment {
 /// The "exactly 3" rule is enforced at scoring time (SCORE-001), not at insert time,
 /// so a committee can be assembled seat by seat.
 model CommitteeMember {
-  id              String        @id @default(uuid()) @db.Uuid
-  assignmentId    String        @map("assignment_id") @db.Uuid
-  evaluatorUserId String        @map("evaluator_user_id") @db.Uuid
+  id              String        @id @default(uuid()) @db.Char(36)
+  assignmentId    String        @map("assignment_id") @db.Char(36)
+  evaluatorUserId String        @map("evaluator_user_id") @db.Char(36)
   committeeRole   CommitteeRole @map("committee_role")
   seatNumber      Int           @map("seat_number") // 1..3 — CHECK in constraints.sql
 
@@ -709,13 +763,13 @@ model CommitteeMember {
 /// have duplicated it. Standard vs challenge scoring differs only in how points are
 /// derived, which is framework data (ScoreWeight + Indicator.maxPoints), not structure.
 model IndicatorScore {
-  id              String   @id @default(uuid()) @db.Uuid
-  assignmentId    String   @map("assignment_id") @db.Uuid
-  indicatorId     String   @map("indicator_id") @db.Uuid
-  evaluatorUserId String   @map("evaluator_user_id") @db.Uuid
+  id              String   @id @default(uuid()) @db.Char(36)
+  assignmentId    String   @map("assignment_id") @db.Char(36)
+  indicatorId     String   @map("indicator_id") @db.Char(36)
+  evaluatorUserId String   @map("evaluator_user_id") @db.Char(36)
   rubricLevel     Int      @map("rubric_level") // 1..4 — CHECK in constraints.sql
   pointsAwarded   Decimal? @map("points_awarded") @db.Decimal(6, 2)
-  comment         String?
+  comment         String?  @db.Text
   scoredAt        DateTime @default(now()) @map("scored_at")
 
   assignment EvaluationAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
@@ -733,9 +787,9 @@ model IndicatorScore {
 /// passedIndividualThreshold is a GENERATED column (constraints.sql) so it can
 /// never disagree with totalPercent — the app cannot write it.
 model RoundResult {
-  id                        String   @id @default(uuid()) @db.Uuid
-  assignmentId              String   @map("assignment_id") @db.Uuid
-  evaluatorUserId           String   @map("evaluator_user_id") @db.Uuid
+  id                        String   @id @default(uuid()) @db.Char(36)
+  assignmentId              String   @map("assignment_id") @db.Char(36)
+  evaluatorUserId           String   @map("evaluator_user_id") @db.Char(36)
   part1Percent              Decimal  @map("part1_percent") @db.Decimal(5, 2)
   part2Percent              Decimal  @map("part2_percent") @db.Decimal(5, 2)
   totalPercent              Decimal  @map("total_percent") @db.Decimal(5, 2)
@@ -756,11 +810,11 @@ model RoundResult {
 /// PA1/PA2/PA3 × ส/บส instance. Stores structured payload + references; the official
 /// layout is a Protected Artifact and report contracts are deferred to v0.2.
 model Report {
-  id                String       @id @default(uuid()) @db.Uuid
-  schoolId          String       @map("school_id") @db.Uuid
-  cycleId           String       @map("cycle_id") @db.Uuid
-  roundId           String?      @map("round_id") @db.Uuid
-  subjectPersonnelId String      @map("subject_personnel_id") @db.Uuid
+  id                String       @id @default(uuid()) @db.Char(36)
+  schoolId          String       @map("school_id") @db.Char(36)
+  cycleId           String       @map("cycle_id") @db.Char(36)
+  roundId           String?      @map("round_id") @db.Char(36)
+  subjectPersonnelId String      @map("subject_personnel_id") @db.Char(36)
   templateCode      String       @map("template_code")
   status            ReportStatus @default(draft)
   payload           Json
@@ -781,10 +835,10 @@ model Report {
 /// Cites evidence BY REFERENCE. A report never embeds file bytes — that is what
 /// makes "upload once" hold across every report that reuses the same evidence.
 model ReportSectionRef {
-  id         String  @id @default(uuid()) @db.Uuid
-  reportId   String  @map("report_id") @db.Uuid
-  evidenceId String? @map("evidence_id") @db.Uuid
-  mappingId  String? @map("mapping_id") @db.Uuid
+  id         String  @id @default(uuid()) @db.Char(36)
+  reportId   String  @map("report_id") @db.Char(36)
+  evidenceId String? @map("evidence_id") @db.Char(36)
+  mappingId  String? @map("mapping_id") @db.Char(36)
   sectionKey String  @map("section_key")
   sortOrder  Int     @map("sort_order")
 
@@ -797,13 +851,13 @@ model ReportSectionRef {
 }
 
 model Approval {
-  id             String           @id @default(uuid()) @db.Uuid
-  schoolId       String           @map("school_id") @db.Uuid
-  reportId       String           @map("report_id") @db.Uuid
-  approverUserId String           @map("approver_user_id") @db.Uuid
+  id             String           @id @default(uuid()) @db.Char(36)
+  schoolId       String           @map("school_id") @db.Char(36)
+  reportId       String           @map("report_id") @db.Char(36)
+  approverUserId String           @map("approver_user_id") @db.Char(36)
   stepCode       String           @map("step_code")
   decision       ApprovalDecision @default(pending)
-  comment        String?
+  comment        String?          @db.Text
   decidedAt      DateTime?        @map("decided_at")
 
   school   School      @relation(fields: [schoolId], references: [id], onDelete: Restrict)
@@ -823,15 +877,15 @@ model Approval {
 /// SEC-PDPA-2: beforeState/afterState use a field allowlist — learner content must
 /// never be duplicated into audit rows.
 model AuditEvent {
-  id           String   @id @default(uuid()) @db.Uuid
-  schoolId     String?  @map("school_id") @db.Uuid
-  actorUserId  String?  @map("actor_user_id") @db.Uuid
+  id           String   @id @default(uuid()) @db.Char(36)
+  schoolId     String?  @map("school_id") @db.Char(36)
+  actorUserId  String?  @map("actor_user_id") @db.Char(36)
   action       String
   entityType   String   @map("entity_type")
   entityId     String   @map("entity_id")
   beforeState  Json?    @map("before_state")
   afterState   Json?    @map("after_state")
-  requestId    String?  @map("request_id") @db.Uuid
+  requestId    String?  @map("request_id") @db.Char(36)
   occurredAt   DateTime @default(now()) @map("occurred_at")
 
   @@index([schoolId, occurredAt])

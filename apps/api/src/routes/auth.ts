@@ -3,14 +3,18 @@
 // (CCR-002 §GAP-1 for /me's `personnel` shape; CCR-008 for the session lifecycle).
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { verifyPassword, signAccessToken, ACCESS_TOKEN_TTL_SECONDS, generateRefreshToken, hashRefreshToken, refreshTokenExpiryDate } from '@seip/auth';
+import {
+  verifyPassword, signAccessToken, ACCESS_TOKEN_TTL_SECONDS, generateRefreshToken, hashRefreshToken,
+  refreshTokenExpiryDate, hashPassword, hashInviteToken, isAcceptablePassword, MIN_PASSWORD_LENGTH,
+} from '@seip/auth';
 import {
   findUserByEmailForLogin, getUserById, getMembershipsForUser, createRefreshToken,
   findActiveRefreshToken, rotateRefreshToken, revokeRefreshToken, revokeAllRefreshTokensForUser,
+  acceptInvite,
 } from '@seip/database';
 import { ApiError } from '@seip/backend-shared';
 import type { Env } from '../env.js';
-import { getLoginRateLimiter } from '../lib/login-rate-limit.js';
+import { getLoginRateLimiter, getInviteRateLimiter } from '../lib/login-rate-limit.js';
 
 const LoginBody = z.object({
   email: z.string().email(),
@@ -23,6 +27,11 @@ const RefreshBody = z.object({
 
 const LogoutBody = z.object({
   refresh_token: z.string().min(1).optional(),
+});
+
+const AcceptInviteBody = z.object({
+  invite_token: z.string().min(1),
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(256),
 });
 
 export const authRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env }) => {
@@ -87,6 +96,42 @@ export const authRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env })
       refresh_token: rawRefresh,
       expires_in: ACCESS_TOKEN_TTL_SECONDS,
     });
+  });
+
+  // CCR-014. Unauthenticated by contract (permissions.yaml `unauthenticated:`):
+  // an `invited` account has no password, so it cannot hold a bearer token, and
+  // SEC-AUTH-3 would reject it at login anyway. The invite token IS the credential.
+  app.post('/auth/accept-invite', { config: { operationId: 'acceptInvite' } }, async (request, reply) => {
+    const body = AcceptInviteBody.parse(request.body);
+    const tokenHash = hashInviteToken(body.invite_token);
+
+    // Throttle before argon2 work (SEC-AUTH-5), same as login. The second bucket
+    // is keyed on the token HASH, not a constant: a constant would be one global
+    // bucket that any attacker could exhaust to block every real invite in the
+    // school — a self-inflicted DoS. Per-IP is the bucket that actually resists
+    // guessing; per-token just caps hammering one known token.
+    const ip = request.ip || 'unknown';
+    const limited = getInviteRateLimiter().check(ip, tokenHash);
+    if (!limited.ok) {
+      if (limited.retryAfterSec) reply.header('retry-after', String(limited.retryAfterSec));
+      throw new ApiError('AUTH-004', 'Too many attempts — try again later');
+    }
+
+    // Length is re-checked here as well as in zod because MIN_PASSWORD_LENGTH is
+    // the contract's number (openapi AcceptInviteRequest.minLength) and this is
+    // the last point before it is hashed and becomes unrecoverable.
+    if (!isAcceptablePassword(body.password)) {
+      throw new ApiError('VAL-001', `Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+    }
+
+    const result = await acceptInvite(tokenHash, await hashPassword(body.password), request.id);
+    // One code for unknown / expired / already-accepted. Distinguishing them
+    // would tell an attacker which invite tokens once existed (AUTH-005).
+    if (!result.ok) throw new ApiError('AUTH-005', 'Invite token is not usable');
+
+    // Deliberately no token pair: the caller logs in normally, so the
+    // invited -> active gate stays enforced in exactly one place (login).
+    reply.status(204).send();
   });
 
   app.post('/auth/logout', { config: { operationId: 'logout' } }, async (request, reply) => {
