@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-SEIP — School Evidence Intelligence Platform: evidence collection, indicator mapping, committee scoring, and PA report generation for Thai teacher/administrator performance agreements (วPA ว9/2564 + ว10/2564, ADR-0003). Node/TypeScript npm-workspaces monorepo: Fastify API, Vite+React SPA, polling worker, Prisma/MySQL 8 (ADR-0008), MinIO object storage (ADR-0005/0006).
+SEIP — School Evidence Intelligence Platform: evidence collection, indicator mapping, committee scoring, and PA report generation for Thai teacher/administrator performance agreements (วPA ว9/2564 + ว10/2564, ADR-0003). Node/TypeScript npm-workspaces monorepo: Fastify API, Vite+React SPA, polling worker, Prisma/PostgreSQL 18 + pgvector (ADR-0012), S3-API object storage — SeaweedFS in dev/CI/staging, Amazon S3 Bangkok in production (ADR-0013). Product direction since the 2026-10 rethink: `docs/project/PRD.md`, `docs/project/plan.md`, ADR-0010–0018.
 
 You are the sole developer — architect, backend, frontend, and QA in one (ADR-0004); the user is the final approver. The retired multi-AI mechanisms (file locks, dispatch prompts, cross-agent handoffs, per-agent ownership) and `AGENTS.md` / `ANTIGRAVITY.md` / `GROK.md` are superseded — ignore them.
 
@@ -15,7 +15,7 @@ You are the sole developer — architect, backend, frontend, and QA in one (ADR-
 
 ## Commands
 
-Local stack (ADR-0008): the database is the host's **Laragon MySQL 8 on :3306** (root, no password) — `docker compose up -d` starts **MinIO only** (:9000, console :9001, bucket auto-created). Create the DB once: `mysql -u root -e "CREATE DATABASE IF NOT EXISTS seip CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"`. Copy `.env.example` → `.env`. DB: `npm run db:generate`, `db:migrate` (deploy), `db:migrate:dev`, `db:seed`, `db:reset`.
+Local stack (ADR-0012/0013): `docker compose up -d` starts **PostgreSQL 18 + pgvector on :5432** (first boot runs `scripts/db/bootstrap-roles.sql`) and **SeaweedFS S3 on :8333** (bucket auto-created). Copy `.env.example` → `.env`. Two DB roles, neither superuser: `DATABASE_URL` = `seip_app` (app, tests, seed — DML only), `MIGRATE_DATABASE_URL` = `seip_migrator` (owns the schema). DB: `npm run db:generate`, `db:migrate` (deploy, runs as migrator via `scripts/db/migrate.mjs`), `db:migrate:dev`, `db:seed`, `db:reset`. Laragon MySQL is no longer used.
 
 Build/run:
 - `npm run build:libs` — builds packages/* which apps import; root `build`/`typecheck`/`lint`/`test:unit`/`test:security` run it first automatically.
@@ -26,7 +26,7 @@ Build/run:
 Tests (integration/backend/security/e2e need the docker stack migrated + seeded):
 - `npm run test:backend` — root DB constraint/schema-alignment/seed-taxonomy tests (`node --test tests/backend/*.test.mjs`).
 - `npm run test:unit` — packages/auth + backend-shared (`node --test` on src), apps/web (vitest).
-- `npm run test:integration --workspace apps/api` (likewise `apps/worker`, `packages/database`) — builds, then runs `test/*.test.mjs` against real Postgres/MinIO.
+- `npm run test:integration --workspace apps/api` (likewise `apps/worker`, `packages/database`) — builds, then runs `test/*.test.mjs` against real PostgreSQL/SeaweedFS.
 - `npm run test:security` — permission-matrix sweep asserting every operation in `permissions.yaml`.
 - `npm run test:e2e` — Playwright, chromium only, 1 worker; spawns Vite itself unless `E2E_BASE_URL` is set; API must already be running on the proxy port. `npx playwright install chromium` once. Fixture users (`e2e-teacher@seip.local`, `e2e-director@seip.local`, committee) are seeded by `tests/e2e/global-setup.mjs`.
 - Single test: `node --test tests/backend/constraints.test.mjs` · `npm run test:unit --workspace apps/web -- src/lib/capabilities.test.ts` · `npx playwright test tests/e2e/flows-depth.spec.ts`.
@@ -47,9 +47,9 @@ Rules that bind implementation:
 - **Contract-first (locked since Sprint 0 exit):** `docs/contracts/{openapi,events,permissions,error-codes}.yaml` are the protected source of truth — no invented fields, types generated never hand-written. Additive change → minor bump, noted in close-out. Breaking change → CCR doc in `docs/reviews/CCR-NNN-*.md` + major bump + **user approval before merge**; the contract-compatibility gate fails breaking diffs lacking a same-change major bump. Flow details: `docs/contracts/contract-policy.md`.
 - **Taxonomy is data** (ADR-0003): indicators, level descriptions, and weights come from versioned framework seed rows — never hard-coded.
 - **Events over dual writes:** cross-module side effects ride the transactional outbox per `events.yaml`.
-- **Storage:** evidence binaries live in MinIO; MySQL stores metadata only. Uploads contain personal data (PDPA) — never commit uploads, keep `.gitignore` intact, storage stays server-side.
-- **MySQL dialect notes (ADR-0008):** no partial unique indexes — the two conditional uniques ride `pa_uk_key` (STORED GENERATED) and `active_uk_key` (trigger-maintained; InnoDB refuses cascading FKs on generated bases). CHECKs comparing case must use BINARY (collation is case-insensitive). Prisma JSON filters take a `'$.field'` JSONPath string, not the Postgres array form. `allowed_mime_types` is a Json column (no scalar lists on MySQL).
-- **AI mapping is `local_heuristic` on-prem only** (ADR-0007): cloud/foreign LLM calls are forbidden while ADR-0005 holds; a superseding ADR is required to change this.
+- **Storage:** evidence binaries live in S3-API storage; PostgreSQL stores metadata only. Uploads contain personal data (PDPA) — never commit uploads, keep `.gitignore` intact, storage stays server-side.
+- **Database rules (ADR-0012):** constraints Prisma can't express live in `prisma/migrations/20261013000100_constraints` — partial unique indexes (`evidence_indicator_mapping_active_uk` with NULLS NOT DISTINCT, `evaluation_cycle_pa_uk`), generated `passed_individual_threshold`, CHECKs, and `audit_event` append-only via REVOKE from `seip_app` + trigger. Migrations must run as `seip_migrator` (non-superuser) — never write one that needs superuser. Prisma JSON path filters use the array form (`path: ['file_id']`). Leases use `FOR UPDATE SKIP LOCKED`. S3 clients set `requestChecksumCalculation: 'WHEN_REQUIRED'` (SDK default breaks presigned PUTs).
+- **AI is in-country only** (ADR-0010, supersedes ADR-0007): open models self-hosted in Thailand; no foreign or cloud AI. `local_heuristic` remains the fallback floor. AI only suggests — never auto-confirms.
 
 Product flow: login (JWT + refresh rotation, rate-limited) → evidence upload (presigned PUT → worker scan) → indicator mapping (+ local AI suggest) → evaluation cycles/rounds → 3-evaluator committee scoring → structured PA report (JSON + section refs) → on-demand PDF. Pixel-perfect official ก.ค.ศ. paper plates are explicitly deferred.
 
