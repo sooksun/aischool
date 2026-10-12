@@ -1071,12 +1071,12 @@ tasks:
       disk; dev/CI now 64 MB x 100.
     acceptance_criteria:
       - Suite green against SeaweedFS                                              # DONE
-      - Runs in CI                                                                 # PENDING (integration gate step)
+      - Runs in CI                                                                 # DONE — integration gate, run on c55baac
       - Same suite green against Amazon S3 ap-southeast-7                          # OPEN — P1 (needs the AWS account)
 
   - id: SEIP-P0-006
     title: "P0 — Flutter skeleton calling the API through the generated Dart client"
-    status: review              # 2026-10-12 — analyze clean, widget tests + live API test pass
+    status: review              # 2026-10-12 — 15/15 CI green incl. mobile (run 38313557183); emulator run open
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P0-004]
     decisions: [ADR-0014, ADR-0016]
@@ -1096,4 +1096,4 @@ tasks:
       - flutter analyze --fatal-infos clean; widget tests pass                     # DONE (2)
       - Live sign-in against the real API                                          # DONE (host VM)
       - On an Android emulator (P0 exit wording)                                   # OPEN — needs a machine with an emulator
-      - Gate green in CI                                                           # PENDING
+      - Gate green in CI                                                           # DONE — run 38313557183 (15/15)
