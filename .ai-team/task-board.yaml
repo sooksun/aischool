@@ -1028,7 +1028,7 @@ tasks:
 
   - id: SEIP-P0-004
     title: "P0 week 2 — Dart client spike (swagger_parser) against contract 4.0.0 draft"
-    status: review              # 2026-10-12 — passes locally; CI gate added
+    status: review              # 2026-10-12 — 14/14 CI green incl. dart client (run 38306379490)
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P0-003]
     decisions: [ADR-0016]
@@ -1049,4 +1049,4 @@ tasks:
       - Client generated from the contract, not hand-written                      # DONE
       - build_runner + dart analyze --fatal-infos clean                           # DONE
       - Decode tests for sync / suggestion / upload session                       # DONE (4)
-      - Gate green in CI                                                           # PENDING
+      - Gate green in CI                                                           # DONE — run 38306379490 (14/14)
