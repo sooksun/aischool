@@ -3,6 +3,8 @@
 ## Status
 Accepted (local-only path)
 
+> **Superseded by ADR-0010** (AI ในประเทศบนโมเดลเปิด), 2026-10-12
+
 ## Context
 
 OPEN-3 blocked AI-mapping contracts: which provider, and may personal data leave

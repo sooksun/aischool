@@ -1,7 +1,7 @@
 # ADR-0011: Hosting, data residency, เส้นทางเครือข่าย และกติกาจัดหา GPU
 
 ## Status
-**Proposed** (2026-10-12) — addendum เรื่อง GPU ต้องตัดสินภายใน 27 พ.ย. 2569. Supersedes ADR-0005 §2 (deploy on-premise ต่อโรงเรียน/เขต)
+**Accepted** (2026-10-12, owner อนุมัติ; เสนอ 2026-10-12) — addendum เรื่อง GPU ต้องตัดสินภายใน 27 พ.ย. 2569. Supersedes ADR-0005 §2 (deploy on-premise ต่อโรงเรียน/เขต)
 
 ## Context
 - ADR-0005 วางระบบ on-prem ที่โรงเรียน แต่แอปมือถือ (D4) ต้องมี backend ที่เข้าถึงได้จากอินเทอร์เน็ต และผู้ซื้อคือ สพท. (D2) ซึ่งดูแลหลายโรงเรียน

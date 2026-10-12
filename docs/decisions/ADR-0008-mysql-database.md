@@ -1,6 +1,8 @@
 # ADR-0008 — Database engine: MySQL 8 (PostgreSQL retired)
 
 Status: **Accepted** · Date: 2026-07-18 · Decider: user (request) + Claude Code (execution, ADR-0004)
+
+> **Superseded by ADR-0012** (PostgreSQL 18), 2026-10-12
 Supersedes: the PostgreSQL choice embedded in ADR-0001/ADR-0005-era tooling (docker-compose Postgres :5433, `pg` test client). Object storage (ADR-0005 MinIO) and all contracts are unaffected.
 
 ## Context

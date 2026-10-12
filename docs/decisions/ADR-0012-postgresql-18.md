@@ -1,7 +1,7 @@
 # ADR-0012: PostgreSQL 18 + pgvector เป็นฐานข้อมูลหลัก
 
 ## Status
-**Proposed** (2026-10-12) — ดำเนินการใน P0 สัปดาห์ที่ 1. Supersedes ADR-0008 (MySQL 8)
+**Accepted** (2026-10-12, owner อนุมัติ; เสนอ 2026-10-12) — ดำเนินการใน P0 สัปดาห์ที่ 1. Supersedes ADR-0008 (MySQL 8)
 
 ## Context
 - ADR-0008 ย้ายไป MySQL 8 เพื่อใช้ MySQL ของ Laragon บนเครื่อง dev

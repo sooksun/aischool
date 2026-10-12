@@ -1,7 +1,7 @@
 # ADR-0014: Identity — Keycloak เป็นตัวกลาง ThaID, person key, BFF และ step-up MFA
 
 ## Status
-**Proposed** (2026-10-12) — เสนอใน P0 และรับรองเมื่อออกจาก P1. Supersedes หัวข้อ auth ใน ADR-0006 (การออก token เองด้วย Argon2id + JWT + refresh rotation)
+**Accepted** (2026-10-12, owner อนุมัติ; เสนอ 2026-10-12) — เสนอใน P0 และรับรองเมื่อออกจาก P1. Supersedes หัวข้อ auth ใน ADR-0006 (การออก token เองด้วย Argon2id + JWT + refresh rotation)
 
 ## Context
 - แอปมือถือต้องใช้ OIDC + PKCE ผ่าน system browser. Token ที่ระบบออกเองเหมาะกับเว็บ แต่จัดการ device session และ offline session ของมือถือได้ไม่ดี

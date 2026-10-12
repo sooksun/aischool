@@ -1,7 +1,7 @@
 # ADR-0010: AI ในประเทศไทยด้วย open-weight model ที่ host เอง และ pipeline คำแนะนำแบบ async
 
 ## Status
-**Proposed** (2026-10-12). ต้องได้รับอนุมัติจาก owner ใน P0. Supersedes ADR-0007 ทั้งขอบเขตผู้ให้บริการ AI และ contract `suggestMappings` แบบ synchronous. Amends ADR-0001 โดยเพิ่ม Python เข้า stack
+**Accepted** (2026-10-12, owner อนุมัติ; เสนอ 2026-10-12). ต้องได้รับอนุมัติจาก owner ใน P0. Supersedes ADR-0007 ทั้งขอบเขตผู้ให้บริการ AI และ contract `suggestMappings` แบบ synchronous. Amends ADR-0001 โดยเพิ่ม Python เข้า stack
 
 ## Context
 

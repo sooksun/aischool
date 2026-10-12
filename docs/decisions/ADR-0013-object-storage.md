@@ -1,7 +1,7 @@
 # ADR-0013: Object storage — ใช้ S3 API เท่านั้น พร้อม versioning, Object Lock และ legal hold
 
 ## Status
-**Proposed** (2026-10-12) — ดำเนินการใน P0. Supersedes ADR-0005 §1 (เลือก MinIO) แต่**คงกติกา** "ใช้ S3 API เท่านั้น" และ "ไบต์ของไฟล์ไม่ผ่าน API process"
+**Accepted** (2026-10-12, owner อนุมัติ; เสนอ 2026-10-12) — ดำเนินการใน P0. Supersedes ADR-0005 §1 (เลือก MinIO) แต่**คงกติกา** "ใช้ S3 API เท่านั้น" และ "ไบต์ของไฟล์ไม่ผ่าน API process"
 
 ## Context
 - **MinIO หยุดเผยแพร่ Docker image และ binary รุ่น community ตั้งแต่ ต.ค. 2025** และ repo ถูก archive ในปี 2026 ([Chainguard](https://www.chainguard.dev/unchained/secure-and-free-minio-chainguard-containers), [madewithlove](https://madewithlove.com/blog/thanks-for-all-the-buckets/))

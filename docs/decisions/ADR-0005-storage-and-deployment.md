@@ -3,6 +3,8 @@
 ## Status
 Accepted
 
+> §1 (MinIO) superseded by ADR-0013 · §2 (on-premise) superseded by ADR-0011, 2026-10-12
+
 ## Context
 
 Two questions were carried open through all of Sprint 0 and now block SEIP-DB-001's evidence storage columns and Sprint 1's infra:
