@@ -263,11 +263,11 @@ test('a failure mid-submission rolls back scores AND rollup together', async () 
       { part1Percent: 25, part2Percent: 25, totalPercent: 25, passedWorkloadGate: true },
       {
         // audit_event carries no FKs on purpose (rows must outlive the entities
-        // they describe), so the failure is forced with an `action` past the
-        // varchar(191) limit — a write error at the LAST statement in the
-        // transaction, which is exactly where a non-atomic version would already
-        // have committed the scores and rollup.
-        schoolId: null, actorUserId: evaluatorUserId, action: 'x'.repeat(300),
+        // they describe), so the failure is forced with a NUL byte in `action`,
+        // which PostgreSQL text rejects (22021) — a write error at the LAST
+        // statement in the transaction, which is exactly where a non-atomic
+        // version would already have committed the scores and rollup.
+        schoolId: null, actorUserId: evaluatorUserId, action: 'bad\u0000action',
         entityType: 'EvaluationAssignment', entityId: assignment.id,
       },
     ),

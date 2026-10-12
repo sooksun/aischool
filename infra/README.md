@@ -1,6 +1,6 @@
 # Infrastructure (SEIP-OPS-003+)
 
-On-prem / staging layout for SEIP. Architecture decisions: **ADR-0005** (MinIO + on-premise).
+On-prem / staging layout for SEIP. Architecture decisions: **ADR-0011** (hosting), **ADR-0012** (PostgreSQL 18), **ADR-0013** (S3 API / SeaweedFS).
 
 | Path | Purpose |
 |---|---|
@@ -10,7 +10,7 @@ On-prem / staging layout for SEIP. Architecture decisions: **ADR-0005** (MinIO +
 | `docker/nginx-web.conf` | Static file server inside the web image |
 | `nginx/seip-staging.conf.example` | **Edge** TLS reverse proxy + rate limit + security headers (OPS-004) |
 | `nginx/http-rate-zones.conf.example` | `limit_req_zone` lines for main `http {}` block |
-| `../docker-compose.staging.yml` | Staging stack: postgres, minio, api, worker, web |
+| `../docker-compose.staging.yml` | Staging stack: postgres, seaweedfs, migrate, api, worker, web, clamav, backup |
 | `../docs/project/ops-runbook.md` | Backup/restore, TLS, secrets, bring-up checklist |
 
 ## Quick start (staging-shaped)
@@ -31,7 +31,7 @@ Then point a host nginx at `infra/nginx/seip-staging.conf.example` (or terminate
 | Service | Public? | Role |
 |---|---|---|
 | postgres | no (internal) | Primary data store |
-| minio | no (internal) | S3-compatible evidence storage |
+| seaweedfs | no (internal) | S3-compatible evidence storage |
 | api | localhost:3001 | HTTP API (`/api/v1`) |
 | worker | no | Scan, duration, outbox, GC |
 | web | localhost:8080 | SPA; edge nginx proxies `/api` → api |

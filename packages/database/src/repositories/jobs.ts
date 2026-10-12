@@ -67,9 +67,9 @@ export async function claimPendingJobs(limit = 10) {
  * event per copy.
  *
  * Read into a Set rather than filtered per file in SQL: the pending queue is
- * small by design (the worker drains 10 per poll), and Prisma's MySQL JSON
- * filters take a single `'$.file_id'` path equality (ADR-0008), so a batch
- * membership test would mean one query per candidate.
+ * small by design (the worker drains 10 per poll), and Prisma's JSON path
+ * filters take a single equality, so a batch membership test would mean one
+ * query per candidate.
  */
 export async function listQueuedFileProcessTargets(): Promise<Set<string>> {
   const rows = await prisma.workerJob.findMany({

@@ -1,7 +1,7 @@
-// Object storage client — the official AWS S3 SDK, pointed at MinIO's S3-compatible
-// endpoint (ADR-0005: consumed through the S3 API only, so migrating to real S3/R2
-// later is a config change, not a rewrite). forcePathStyle is required for MinIO
-// (it doesn't do virtual-hosted-style bucket addressing by default).
+// Object storage client — the official AWS S3 SDK, pointed at an S3-compatible
+// endpoint (ADR-0013: S3 API only — SeaweedFS in dev/CI, Amazon S3 Bangkok in
+// production, a config change rather than a rewrite). forcePathStyle is required
+// for SeaweedFS, which does not do virtual-hosted-style bucket addressing.
 import {
   S3Client,
   PutObjectCommand,
@@ -25,6 +25,12 @@ export function createS3Client(env: Env): S3Client {
     region: env.S3_REGION,
     forcePathStyle: true,
     credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY }, // gitleaks:allow
+    // SDK v3 >= 3.729 defaults to WHEN_SUPPORTED, which bakes a CRC32 of the
+    // EMPTY body (`x-amz-checksum-crc32=AAAAAA==`) into every presigned PUT. MinIO
+    // ignored it; S3 and SeaweedFS verify it and answer 400 BadDigest for any real
+    // upload. Integrity is the declared SHA-256, re-checked by the worker.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 }
 

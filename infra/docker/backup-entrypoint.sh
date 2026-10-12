@@ -11,7 +11,7 @@ INTERVAL="${BACKUP_INTERVAL_SECONDS:-86400}"
 
 echo "[backup-runner] starting; interval=${INTERVAL}s retain=${BACKUP_RETAIN_DAYS:-14}d dir=${BACKUP_DIR:-/backups}"
 
-# Wait a little on boot so MySQL is genuinely serving, not merely healthy.
+# Wait a little on boot so PostgreSQL is genuinely serving, not merely healthy.
 sleep 30
 
 while true; do

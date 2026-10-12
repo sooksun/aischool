@@ -28,7 +28,7 @@
 - ต้องเริ่มยืนยันตัวตนนักพัฒนากับ Apple (D-U-N-S) และ Google ตั้งแต่ P0 เพราะ Android บังคับ developer verification ในไทยตั้งแต่ 30 ก.ย. 2569
 
 ## Approved By
-รอ owner อนุมัติ
+owner (sooksun) — 2026-10-12
 
 ## Date
 2026-10-12

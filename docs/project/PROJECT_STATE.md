@@ -4,6 +4,11 @@
 School Evidence Intelligence Platform (SEIP)
 
 ## Current Phase
+**Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
+
+> **P0 week 1 (SEIP-P0-001, in review):** back on PostgreSQL 18 with non-superuser `seip_migrator`/`seip_app` roles (ADR-0012), SeaweedFS replaces MinIO (ADR-0013), dependency audit clean. All suites green locally; CI on PR #3 pending.
+
+### Previous phase
 **Sprint 1 — First production features** (opened 2026-07-17 when the ARCH-002 merge went green on develop, run `b5c6d6a`). Single-agent mode per ADR-0004.
 
 > ✅ **All three audit blockers closed** (2026-07-19/20): B-1 onboarding (CCR-014, openapi 2.9.0), B-2 agreements + ประเด็นท้าทาย (CCR-015, **3.0.0** breaking), B-3 report approval (CCR-016, 3.1.0). The วPA flow now runs end to end through the API: invite → accept → PA1 + ประเด็นท้าทาย → evidence → mapping → cycles/rounds → 3-evaluator scoring with the challenge visible → report → **director approves**.
@@ -108,7 +113,10 @@ See `.ai-team/task-board.yaml` (single tracker).
 - ADR-0004 — Single-agent development by Claude Code (Accepted)
 - ADR-0005 — Object storage: MinIO / S3-compatible; deployment: on-premise (Accepted)
 - ADR-0006 — Implementation frameworks: Fastify (api), Vite+React (web), npm workspaces (Accepted)
-- ADR-0007 — AI mapping provider: on-prem `local_heuristic` only; cloud LLM forbidden while ADR-0005 holds (Accepted for product progress)
+- ADR-0007 — AI mapping provider: on-prem `local_heuristic` only (**superseded by ADR-0010**)
+- ADR-0008 — MySQL 8 (**superseded by ADR-0012**)
+- ADR-0009 — Malware scanning, ClamAV fail-closed (amended by ADR-0018)
+- ADR-0010 — In-country AI on open models · ADR-0011 — Hosting/residency/GPU · ADR-0012 — PostgreSQL 18 · ADR-0013 — Object storage (S3 API, SeaweedFS) · ADR-0014 — Keycloak + ThaID · ADR-0015 — Portfolio ownership · ADR-0016 — Clients + contract 4.0 · ADR-0017 — v1 scope, rules as data · ADR-0018 — Upload integrity + media (all Accepted 2026-10-12)
 - ADR-0008 — Database engine: MySQL 8 (Laragon local dev, containerized staging/on-prem); PostgreSQL retired (Accepted)
 
 ## Open Questions

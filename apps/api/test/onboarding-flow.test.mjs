@@ -351,7 +351,7 @@ test('re-inviting a current member is RES-002, not a duplicate membership', asyn
   assert.equal(second.json().code, 'RES-003');
 
   const count = await prisma.schoolMembership.count({ where: { user: { email }, schoolId: school.id } });
-  assert.equal(count, 1, 'the overlap rule is application-enforced (MySQL has no partial unique index) — it must hold');
+  assert.equal(count, 1, 'the overlap rule is application-enforced (no DB constraint covers date overlap) — it must hold');
 });
 
 test('email is normalised to lowercase so the unique constraint means something', async () => {

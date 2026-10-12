@@ -27,7 +27,7 @@
 - Object Lock ทำให้ "ลบหลักฐาน" ใน v1 เป็น soft-delete ระหว่างช่วง retention
 
 ## Approved By
-รอ owner อนุมัติ
+owner (sooksun) — 2026-10-12
 
 ## Date
 2026-10-12

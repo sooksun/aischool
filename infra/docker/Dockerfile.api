@@ -44,4 +44,13 @@ COPY packages/database/package.json packages/database/
 COPY apps/api/package.json apps/api/
 EXPOSE 3001
 # Migrate then start — staging/on-prem bring-up path (ops-runbook.md)
-CMD ["sh", "-c", "npx prisma migrate deploy && node apps/api/dist/index.js"]
+# Migrations are NOT run here: the api connects as seip_app, which owns nothing
+# (ADR-0012 §4), and this runtime image has no prisma CLI. The `migrate` stage
+# below runs them as seip_migrator.
+CMD ["node", "apps/api/dist/index.js"]
+
+# One-shot migration runner (docker-compose.staging.yml `migrate` service). Built
+# from `build`, which still has the lockfile-pinned prisma CLI in devDependencies.
+FROM build AS migrate
+WORKDIR /app
+CMD ["node", "scripts/db/migrate.mjs", "deploy"]

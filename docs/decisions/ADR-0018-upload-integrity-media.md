@@ -24,7 +24,7 @@
 - สถานะ `scanned_at` (ADR-0009 addendum) ยังใช้ต่อ
 
 ## Approved By
-รอ owner อนุมัติ
+owner (sooksun) — 2026-10-12
 
 ## Date
 2026-10-12

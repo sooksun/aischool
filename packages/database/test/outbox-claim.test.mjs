@@ -1,4 +1,4 @@
-// Outbox claim concurrency (2026-07-18 audit R1/R5) against real MySQL.
+// Outbox claim concurrency (2026-07-18 audit R1/R5) against real PostgreSQL.
 //
 // claimUnpublishedOutbox documented an optimistic-CAS guarantee — "a losing
 // racer's updateMany affects 0 rows and the row is skipped" — that the code did
@@ -71,7 +71,12 @@ test('claiming increments attempts exactly once', async () => {
   const afterClaim = await prisma.outboxEvent.findUniqueOrThrow({ where: { id } });
   assert.equal(afterClaim.attempts, 1);
 
-  // A second pass re-claims it (still unpublished) — the counter tracks tries.
+  // While leased, another pass must not take it.
+  const leased = await claimUnpublishedOutbox(100);
+  assert.ok(!leased.some((r) => r.id === id), 'a leased event must not be re-claimed');
+
+  // A failed dispatch releases the lease; the next pass retries and counts it.
+  await markOutboxFailed(id, 'retry me');
   await claimUnpublishedOutbox(100);
   const afterSecond = await prisma.outboxEvent.findUniqueOrThrow({ where: { id } });
   assert.equal(afterSecond.attempts, 2);

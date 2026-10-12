@@ -1,4 +1,4 @@
-// SEIP-WORKER-001 — file.process + outbox against real Postgres + MinIO.
+// SEIP-WORKER-001 — file.process + outbox against real PostgreSQL + S3-compatible storage.
 process.env.NODE_ENV = 'test';
 
 import { test, before, after } from 'node:test';
@@ -272,7 +272,7 @@ test('an unreachable scanner leaves the file pending — never clean', async () 
   // instead of its own. That is what broke three sibling tests the first time
   // this was written (see the caveat in docs/qa/QUALITY-GATES.md).
   await prisma.workerJob.deleteMany({
-    where: { jobType: 'file.process', payload: { path: '$.file_id', equals: file.id } },
+    where: { jobType: 'file.process', payload: { path: ['file_id'], equals: file.id } },
   });
 });
 
@@ -327,7 +327,7 @@ test('the sweep corrects a stub-written `clean` row that was never actually scan
     data: { scanStatus: 'clean', scannedAt: null },
   });
   await prisma.workerJob.deleteMany({
-    where: { jobType: 'file.process', payload: { path: '$.file_id', equals: file.id } },
+    where: { jobType: 'file.process', payload: { path: ['file_id'], equals: file.id } },
   });
 
   // Selected despite reading `clean`.
@@ -376,7 +376,7 @@ test('a metadata row whose object is gone fails with a sentence, not `UnknownErr
   await runOnce(env, s3, { scheduleGc: false });
 
   const job = await prisma.workerJob.findFirstOrThrow({
-    where: { jobType: 'file.process', payload: { path: '$.file_id', equals: file.id } },
+    where: { jobType: 'file.process', payload: { path: ['file_id'], equals: file.id } },
   });
   assert.match(job.lastError ?? '', /object missing from storage/);
   assert.match(job.lastError ?? '', new RegExp(file.id), 'the message must name the file');
@@ -387,7 +387,7 @@ test('a metadata row whose object is gone fails with a sentence, not `UnknownErr
 
   // Unsatisfiable by construction — same shared-queue cleanup as above.
   await prisma.workerJob.deleteMany({
-    where: { jobType: 'file.process', payload: { path: '$.file_id', equals: file.id } },
+    where: { jobType: 'file.process', payload: { path: ['file_id'], equals: file.id } },
   });
 });
 
@@ -414,6 +414,6 @@ test('the sweep skips soft-deleted evidence and files already queued', async () 
   );
 
   await prisma.workerJob.deleteMany({
-    where: { jobType: 'file.process', payload: { path: '$.file_id', equals: file.id } },
+    where: { jobType: 'file.process', payload: { path: ['file_id'], equals: file.id } },
   });
 });

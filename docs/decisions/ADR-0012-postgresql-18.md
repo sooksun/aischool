@@ -29,7 +29,7 @@
 - test ใน `tests/backend/*` ต้องเปลี่ยนจาก mysql2 กลับเป็น pg และ map errno ใหม่
 
 ## Approved By
-รอ owner อนุมัติ
+owner (sooksun) — 2026-10-12
 
 ## Date
 2026-10-12

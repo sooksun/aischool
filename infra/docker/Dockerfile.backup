@@ -1,20 +1,20 @@
 # Backup runner (ADR-0009 sibling; ops-runbook §5).
 #
-# Deliberately NOT built from the app image: it needs the MySQL client tools and
-# `mc`, and nothing else. Keeping it separate means the thing that can restore
+# Deliberately NOT built from the app image: it needs the PostgreSQL 18 client
+# tools and the aws CLI, and nothing else. Keeping it separate means the thing that can restore
 # your data does not inherit the app's dependency surface.
 FROM node:24-bookworm-slim
 
-# default-mysql-client provides mysqldump + mysql (MariaDB build; wire-compatible
-# with MySQL 8 for dump/restore).
+# pg_dump must be >= the server's major version (ADR-0012: 18), and bookworm
+# ships 15 — so the client comes from the PostgreSQL project's apt repository.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends default-mysql-client ca-certificates curl \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg awscli \
+ && install -d /usr/share/postgresql-common/pgdg \
+ && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+ && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client-18 \
  && rm -rf /var/lib/apt/lists/*
-
-# MinIO client for the object mirror.
-RUN curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc \
- && chmod +x /usr/local/bin/mc
-
 WORKDIR /app
 COPY scripts/ops/backup.mjs scripts/ops/restore.mjs ./scripts/ops/
 COPY infra/docker/backup-entrypoint.sh /usr/local/bin/backup-entrypoint.sh

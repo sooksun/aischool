@@ -1,4 +1,4 @@
-# SEIP worker image (SEIP-OPS-003) — async jobs against same Postgres + MinIO as API.
+# SEIP worker image (SEIP-OPS-003) — async jobs against the same PostgreSQL + S3 storage as the API.
 # Single process, multiple job types (scan, duration, outbox, GC, future reports/AI).
 
 FROM node:24-bookworm-slim AS deps

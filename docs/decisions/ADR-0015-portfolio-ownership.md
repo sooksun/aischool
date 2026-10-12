@@ -28,7 +28,7 @@
 - ข้อสันนิษฐานว่า สพท. เป็น controller ต้องให้ที่ปรึกษากฎหมาย/DPO ยืนยัน (PRD OQ-30)
 
 ## Approved By
-รอ owner อนุมัติ
+owner (sooksun) — 2026-10-12
 
 ## Date
 2026-10-12

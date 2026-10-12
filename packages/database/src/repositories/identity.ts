@@ -119,14 +119,19 @@ export async function listPersonnelForSchool(
   });
 }
 
-/** A membership is "current" when it has not been ended. effectiveTo is a DATE,
- * so an offboarding recorded today is still >= today until tomorrow — matching
- * endMembership, which grants the rest of the day rather than retroactively
- * cutting a session that already exists. */
+/** A membership is "current" when it is `active` and its effectiveTo (a DATE)
+ * has not passed. endMembership flips status to `ended` in the same write that
+ * stamps effectiveTo, so an offboarding drops out immediately — the same rule
+ * role-resolution applies to access (`status !== 'active'` → no roles).
+ *
+ * The status test is load-bearing: effectiveTo alone (`>= today`) keeps a
+ * membership ended today in the list until midnight. On the MySQL dev box that
+ * was masked by a timezone artefact (local midnight at UTC+7 stored as the
+ * previous UTC date), so the test passed there and nowhere else. */
 function currentMembershipWhere() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return { OR: [{ effectiveTo: null }, { effectiveTo: { gte: today } }] };
+  return { status: 'active', OR: [{ effectiveTo: null }, { effectiveTo: { gte: today } }] };
 }
 
 export async function listMembersForSchool(schoolId: string, opts: { status?: 'current' | 'all' } = {}) {
@@ -191,15 +196,15 @@ export type InviteMemberResult =
  *    so the route can null the token out of the response.
  *
  * 2. **The overlap check is done here, in the transaction, not by the database.**
- *    `schema.prisma` claims "no-overlapping-active-membership" is a constraint,
- *    but that partial unique index did not survive the Postgres → MySQL move
- *    (ADR-0008) — only `membership_scope_ids` exists in
- *    20260718210100_constraints. So the invariant is application-enforced, and
+ *    No database constraint expresses "no overlapping active membership" (an
+ *    effective-dated overlap is not a plain unique key) — only
+ *    `membership_scope_ids` exists in 20261013000100_constraints. So the
+ *    invariant is application-enforced, and
  *    the read and the write must share a transaction or two concurrent invites
  *    both pass the check.
  */
 export async function inviteMember(input: InviteMemberInput): Promise<InviteMemberResult> {
-  const email = input.email.toLowerCase(); // DB CHECK compares against LOWER(email) as BINARY
+  const email = input.email.toLowerCase(); // DB CHECK user_email_lowercase
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 

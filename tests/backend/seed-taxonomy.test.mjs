@@ -1,23 +1,24 @@
-// SEIP-DB-001 — verifies seed data shape after `npm run db:seed` (MySQL, ADR-0008).
+// SEIP-DB-001 — verifies seed data shape after `npm run db:seed` (PostgreSQL 18, ADR-0012).
 // Skips (pass with notice) if frameworks not seeded yet, so constraint CI can run
 // on a fresh migrate without requiring seed first.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import mysql from 'mysql2/promise';
+import pg from 'pg';
 
-const url = process.env.DATABASE_URL ?? 'mysql://root@localhost:3306/seip';
-let conn;
+const url = process.env.DATABASE_URL
+  ?? 'postgresql://seip_app:seip_app_dev@localhost:5432/seip';
+const client = new pg.Client({ connectionString: url });
 
+const toPg = (sql) => { let i = 0; return sql.replace(/\?/g, () => `$${++i}`); };
 async function q(sql, params = []) {
-  const [rows] = await conn.query(sql, params);
-  return rows;
+  return (await client.query(toPg(sql), params)).rows;
 }
 
 before(async () => {
-  conn = await mysql.createConnection(url);
+  await client.connect();
 });
 after(async () => {
-  await conn.end();
+  await client.end();
 });
 
 async function frameworkId(code) {
@@ -36,13 +37,13 @@ test('seeded ว9/ว10 frameworks exist with expected indicator counts', async 
   const count = async (fwId, kind = null) => {
     if (kind) {
       const r = await q(
-        `SELECT CAST(COUNT(*) AS SIGNED) AS c FROM indicator WHERE framework_version_id=? AND indicator_kind=?`,
+        `SELECT COUNT(*)::int AS c FROM indicator WHERE framework_version_id=? AND indicator_kind=?`,
         [fwId, kind],
       );
       return Number(r[0].c);
     }
     const r = await q(
-      `SELECT CAST(COUNT(*) AS SIGNED) AS c FROM indicator WHERE framework_version_id=?`,
+      `SELECT COUNT(*)::int AS c FROM indicator WHERE framework_version_id=?`,
       [fwId],
     );
     return Number(r[0].c);
@@ -78,7 +79,7 @@ test('seeded ว9/ว10 frameworks exist with expected indicator counts', async 
   // Weights are data
   for (const fw of [v9, v10]) {
     const w = await q(
-      `SELECT weight_key AS weight_key, CAST(weight_value AS DOUBLE) AS v
+      `SELECT weight_key AS weight_key, CAST(weight_value AS DOUBLE PRECISION) AS v
        FROM score_weight WHERE framework_version_id=? ORDER BY weight_key`,
       [fw],
     );
@@ -106,7 +107,7 @@ test('SEIP-DB-003: level descriptions cover scored indicators × ranks × rubric
   // 18 scored × 6 ranks × 4 levels = 432; admin 18 × 5 × 4 = 360
   const countForFw = async (fwId) => {
     const r = await q(
-      `SELECT CAST(COUNT(*) AS SIGNED) AS c
+      `SELECT COUNT(*)::int AS c
        FROM indicator_level_description ild
        JOIN indicator i ON i.id = ild.indicator_id
        WHERE i.framework_version_id = ?`,
@@ -119,7 +120,7 @@ test('SEIP-DB-003: level descriptions cover scored indicators × ranks × rubric
 
   // Every scored indicator has 4 levels for a representative rank
   const sample = await q(
-    `SELECT i.code AS code, CAST(COUNT(*) AS SIGNED) AS c
+    `SELECT i.code AS code, COUNT(*)::int AS c
      FROM indicator i
      JOIN indicator_level_description ild ON ild.indicator_id = i.id
      WHERE i.framework_version_id = ?
@@ -136,7 +137,7 @@ test('SEIP-DB-003: level descriptions cover scored indicators × ranks × rubric
 
   // Workload gate must not get level rows
   const gate = await q(
-    `SELECT CAST(COUNT(*) AS SIGNED) AS c
+    `SELECT COUNT(*)::int AS c
      FROM indicator_level_description ild
      JOIN indicator i ON i.id = ild.indicator_id
      WHERE i.framework_version_id = ? AND i.indicator_kind = 'workload_gate'`,
@@ -146,7 +147,7 @@ test('SEIP-DB-003: level descriptions cover scored indicators × ranks × rubric
 
   // Rubric CHECK still holds for seeded data (1..4 only)
   const bad = await q(
-    `SELECT CAST(COUNT(*) AS SIGNED) AS c FROM indicator_level_description WHERE rubric_level NOT BETWEEN 1 AND 4`,
+    `SELECT COUNT(*)::int AS c FROM indicator_level_description WHERE rubric_level NOT BETWEEN 1 AND 4`,
   );
   assert.equal(Number(bad[0].c), 0);
 

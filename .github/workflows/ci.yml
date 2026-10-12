@@ -149,35 +149,32 @@ jobs:
   integration:
     name: "Gate: integration tests"
     runs-on: ubuntu-latest
-    # These tests hit a real database (+ MinIO, since SEIP-API-001), so this gate
-    # provides both. Runs on a MIGRATED + SEEDED database — distinct from
+    # These tests hit a real database (+ S3 storage, since SEIP-API-001), so this
+    # gate provides both — PostgreSQL 18 as seip_app, SeaweedFS (ADR-0012/0013). Runs on a MIGRATED + SEEDED database — distinct from
     # migration-validation, which runs the same DB-level suite on a from-zero,
     # unseeded DB. Together: migrations apply cleanly AND the seed produces a
     # working dataset the tests still pass against AND the real API/DB/storage
     # wiring works end-to-end (apps/api's evidence-flow.test.mjs).
     #
-    # MinIO is NOT a `services:` entry (see the "Start MinIO" step below) — a
-    # services container can't be given a command, and minio/minio's default
-    # CMD just prints usage instead of starting the server; it requires an
-    # explicit `server /data` argument. Verified locally: `--entrypoint sh`
-    # (the previous approach here) overrides startup with a no-op shell that
-    # exits immediately, so the server process never runs at all.
+    # SeaweedFS is NOT a `services:` entry: a services container can't mount a
+    # checked-out file (its S3 identity config) or be given a command, so
+    # scripts/ci/start-seaweedfs.sh starts it after checkout.
     services:
-      mysql:
-        image: mysql:8.0
+      postgres:
+        image: pgvector/pgvector:pg18
         env:
-          MYSQL_ROOT_PASSWORD: seip_ci_root
-          MYSQL_USER: seip
-          MYSQL_PASSWORD: seip_ci
-          MYSQL_DATABASE: seip
+          POSTGRES_PASSWORD: seip_ci_root
+          POSTGRES_DB: seip
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pseip_ci_root"
-          --health-interval 5s --health-timeout 5s --health-retries 15
+          --health-cmd "pg_isready -U postgres -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DATABASE_URL: mysql://seip:seip_ci@localhost:3306/seip
-      S3_ENDPOINT: http://localhost:9000
+      # ADR-0012 §4: tests and the app run as seip_app; migrations as seip_migrator.
+      DATABASE_URL: postgresql://seip_app:seip_app_dev@localhost:5432/seip
+      MIGRATE_DATABASE_URL: postgresql://seip_migrator:seip_migrator_dev@localhost:5432/seip
+      S3_ENDPOINT: http://localhost:8333
       S3_BUCKET: seip-evidence
       S3_ACCESS_KEY: seip_ci
       S3_SECRET_KEY: seip_ci_only_change_me
@@ -189,31 +186,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
-          for i in $(seq 1 20); do
-            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
-              echo "minio healthy"; exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::minio did not become healthy in time"
-          docker logs minio
-          exit 1
+      - name: Start SeaweedFS (S3 API, ADR-0013)
+        run: scripts/ci/start-seaweedfs.sh
+      - name: Create seip_migrator / seip_app (ADR-0012 §4)
+        run: scripts/ci/bootstrap-db.sh
       - name: Run if package.json defines scripts.test:integration
         run: |
           ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['test:integration']?'true':'false')}catch{process.stdout.write('false')}")
           if [ "$ARMED" != "true" ]; then
             echo "::notice::integration gate not yet armed — arms when scripts.test:integration is defined"; exit 0; fi
           npm ci
-          npx --yes prisma@6 migrate deploy
-          npx --yes prisma@6 generate
+          node scripts/db/migrate.mjs deploy
+          npx prisma generate
           node prisma/seed.mjs
           npm run test:integration
-      - name: "Create the MinIO bucket (GH Actions services has no init-container equivalent)"
+      - name: Build api + worker (and confirm the bucket through the app's own S3 client)
         run: |
           npm run build:libs
           npm run build --workspace apps/api
@@ -222,7 +209,7 @@ jobs:
           # apps/api test step dies on ERR_MODULE_NOT_FOUND. Broken since the
           # REPORTS-AI merge; found while fixing the red develop runs (SEC-002).
           npm run build --workspace apps/worker
-          node scripts/ci/ensure-minio-bucket.mjs
+          node scripts/ci/ensure-bucket.mjs
       - name: apps/api evidence-workflow integration tests
         run: npm run test:integration --workspace apps/api
       - name: packages/database repository integration tests
@@ -245,20 +232,20 @@ jobs:
     name: "Gate: migration validation"
     runs-on: ubuntu-latest
     services:
-      mysql:
-        image: mysql:8.0
+      postgres:
+        image: pgvector/pgvector:pg18
         env:
-          MYSQL_ROOT_PASSWORD: seip_ci_root
-          MYSQL_USER: seip
-          MYSQL_PASSWORD: seip_ci
-          MYSQL_DATABASE: seip
+          POSTGRES_PASSWORD: seip_ci_root
+          POSTGRES_DB: seip
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pseip_ci_root"
-          --health-interval 5s --health-timeout 5s --health-retries 15
+          --health-cmd "pg_isready -U postgres -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DATABASE_URL: mysql://seip:seip_ci@localhost:3306/seip
+      # ADR-0012 §4: tests and the app run as seip_app; migrations as seip_migrator.
+      DATABASE_URL: postgresql://seip_app:seip_app_dev@localhost:5432/seip
+      MIGRATE_DATABASE_URL: postgresql://seip_migrator:seip_migrator_dev@localhost:5432/seip
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -269,46 +256,49 @@ jobs:
         run: |
           if [ -f prisma/schema.prisma ]; then echo "armed=true" >> "$GITHUB_OUTPUT"
           else echo "::notice::migration gate not yet armed — arms when prisma/schema.prisma lands"; fi
+      - name: Install (pinned prisma CLI from the lockfile, not npx latest)
+        if: steps.arm.outputs.armed == 'true'
+        run: npm ci
       - name: Validate schema
         if: steps.arm.outputs.armed == 'true'
-        run: npx --yes prisma@6 validate
-      - name: Apply migrations up (proves the up-path against a real MySQL)
+        run: npx prisma validate
+      - name: Create seip_migrator / seip_app (ADR-0012 §4)
         if: steps.arm.outputs.armed == 'true'
-        run: npx --yes prisma@6 migrate deploy
+        run: scripts/ci/bootstrap-db.sh
+      - name: Apply migrations up as seip_migrator — not a superuser (ADR-0012)
+        if: steps.arm.outputs.armed == 'true'
+        run: node scripts/db/migrate.mjs deploy
         # No `migrate diff` drift check on purpose: the constraints migration adds
-        # generated columns, CHECKs, partial indexes and triggers that Prisma's schema
-        # language cannot represent, so diff(schema, migrations) always reports a
-        # difference. The constraint tests below verify those objects exist and bite,
-        # which is stronger than a structural diff would be anyway.
+        # a generated column, CHECKs, partial indexes, triggers and a REVOKE that
+        # Prisma's schema language cannot represent, so diff(schema, migrations)
+        # always reports a difference. The constraint tests below verify those
+        # objects exist and bite, which is stronger than a structural diff.
       - name: Constraint tests (the ว9/ว10 DB rules actually bite)
         if: steps.arm.outputs.armed == 'true'
-        run: |
-          npm install --no-save pg@8
-          npm run test:backend
+        run: npm run test:backend
 
   permission-tests:
     name: "Gate: permission tests"
     runs-on: ubuntu-latest
     # Generated FROM permissions.yaml (SEC-TEN-5) against the real API, so it needs
-    # the same MySQL + MinIO as the integration gate — see that job's comments
-    # for why services has no compose-style init container, and why MinIO is
-    # started as a manual step below rather than a `services:` entry.
+    # the same PostgreSQL + SeaweedFS as the integration gate — see that job's
+    # comments for why SeaweedFS is started as a step rather than a `services:` entry.
     services:
-      mysql:
-        image: mysql:8.0
+      postgres:
+        image: pgvector/pgvector:pg18
         env:
-          MYSQL_ROOT_PASSWORD: seip_ci_root
-          MYSQL_USER: seip
-          MYSQL_PASSWORD: seip_ci
-          MYSQL_DATABASE: seip
+          POSTGRES_PASSWORD: seip_ci_root
+          POSTGRES_DB: seip
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pseip_ci_root"
-          --health-interval 5s --health-timeout 5s --health-retries 15
+          --health-cmd "pg_isready -U postgres -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DATABASE_URL: mysql://seip:seip_ci@localhost:3306/seip
-      S3_ENDPOINT: http://localhost:9000
+      # ADR-0012 §4: tests and the app run as seip_app; migrations as seip_migrator.
+      DATABASE_URL: postgresql://seip_app:seip_app_dev@localhost:5432/seip
+      MIGRATE_DATABASE_URL: postgresql://seip_migrator:seip_migrator_dev@localhost:5432/seip
+      S3_ENDPOINT: http://localhost:8333
       S3_BUCKET: seip-evidence
       S3_ACCESS_KEY: seip_ci
       S3_SECRET_KEY: seip_ci_only_change_me
@@ -320,54 +310,44 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
-          for i in $(seq 1 20); do
-            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
-              echo "minio healthy"; exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::minio did not become healthy in time"
-          docker logs minio
-          exit 1
+      - name: Start SeaweedFS (S3 API, ADR-0013)
+        run: scripts/ci/start-seaweedfs.sh
+      - name: Create seip_migrator / seip_app (ADR-0012 §4)
+        run: scripts/ci/bootstrap-db.sh
       - name: Run if tests/security has test files
         run: |
           if [ -z "$(find tests/security -type f ! -name '.gitkeep' -print -quit 2>/dev/null)" ]; then
             echo "::notice::permission gate not yet armed — arms when tests/security/* land (against permissions.yaml matrix)"; exit 0
           fi
           npm ci
-          npx --yes prisma@6 migrate deploy
-          npx --yes prisma@6 generate
+          node scripts/db/migrate.mjs deploy
+          npx prisma generate
           node prisma/seed.mjs
           npm run build:libs
           npm run build --workspace apps/api
-          node scripts/ci/ensure-minio-bucket.mjs
+          node scripts/ci/ensure-bucket.mjs
           npm run test:security
 
   e2e-smoke:
     name: "Gate: e2e smoke"
     runs-on: ubuntu-latest
-    # SEIP-QA-004: login → evidence list against real api+web+MySQL+MinIO.
+    # SEIP-QA-004: login → evidence list against real api+web+PostgreSQL+SeaweedFS.
     services:
-      mysql:
-        image: mysql:8.0
+      postgres:
+        image: pgvector/pgvector:pg18
         env:
-          MYSQL_ROOT_PASSWORD: seip_ci_root
-          MYSQL_USER: seip
-          MYSQL_PASSWORD: seip_ci
-          MYSQL_DATABASE: seip
+          POSTGRES_PASSWORD: seip_ci_root
+          POSTGRES_DB: seip
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -pseip_ci_root"
-          --health-interval 5s --health-timeout 5s --health-retries 15
+          --health-cmd "pg_isready -U postgres -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DATABASE_URL: mysql://seip:seip_ci@localhost:3306/seip
-      S3_ENDPOINT: http://localhost:9000
+      # ADR-0012 §4: tests and the app run as seip_app; migrations as seip_migrator.
+      DATABASE_URL: postgresql://seip_app:seip_app_dev@localhost:5432/seip
+      MIGRATE_DATABASE_URL: postgresql://seip_migrator:seip_migrator_dev@localhost:5432/seip
+      S3_ENDPOINT: http://localhost:8333
       S3_BUCKET: seip-evidence
       S3_ACCESS_KEY: seip_ci
       S3_SECRET_KEY: seip_ci_only_change_me
@@ -386,28 +366,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
-          for i in $(seq 1 20); do
-            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
-              echo "minio healthy"; exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::minio did not become healthy"; docker logs minio; exit 1
+      - name: Start SeaweedFS (S3 API, ADR-0013)
+        run: scripts/ci/start-seaweedfs.sh
+      - name: Create seip_migrator / seip_app (ADR-0012 §4)
+        run: scripts/ci/bootstrap-db.sh
       - name: Install, migrate, seed, build
         run: |
           npm ci
-          npx --yes prisma@6 migrate deploy
-          npx --yes prisma@6 generate
+          node scripts/db/migrate.mjs deploy
+          npx prisma generate
           node prisma/seed.mjs
           npm run build:libs
           npm run build --workspace apps/api
           npm run build --workspace apps/web
-          node scripts/ci/ensure-minio-bucket.mjs
+          node scripts/ci/ensure-bucket.mjs
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
       - name: Start API and web

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CI-only: docker-compose's minio-init service does the equivalent job for local
+// CI-only: docker-compose's storage-init service does the equivalent job for local
 // dev, but a GitHub Actions `services:` container has no init-container concept —
 // this script is the CI substitute. Requires apps/api already built (imports its
 // dist/lib/s3.js — no separate copy of the S3 logic to maintain).

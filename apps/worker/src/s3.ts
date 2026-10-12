@@ -16,6 +16,9 @@ export function createS3Client(env: Env): S3Client {
       accessKeyId: env.S3_ACCESS_KEY,
       secretAccessKey: env.S3_SECRET_KEY, // gitleaks:allow
     },
+    // Same as apps/api/src/lib/s3.ts: no SDK-default flexible checksums.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 }
 

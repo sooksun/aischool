@@ -1,6 +1,6 @@
 # SEIP Operations Runbook (SEIP-OPS-003)
 
-Status: Operational draft for **staging / on-prem** (ADR-0005)  
+Status: Operational draft for **staging / Thai-owned self-hosted profile** (ADR-0011/0012/0013). Production is RDS + S3 in ap-southeast-7.  
 Audience: school or area IT operator + developer bring-up  
 Related: `docker-compose.staging.yml`, `infra/`, `.env.staging.example`, `docs/qa/QUALITY-GATES.md` (backup/restore release gate)
 
@@ -10,26 +10,28 @@ Related: `docker-compose.staging.yml`, `infra/`, `.env.staging.example`, `docs/q
 
 | Env | Compose file | Secrets | Public exposure |
 |---|---|---|---|
-| **dev** | `docker-compose.yml` | Throwaway values in file + `.env.example` | Postgres/MinIO ports on localhost for tooling |
-| **staging / on-prem** | `docker-compose.staging.yml` | **Only** via gitignored `.env.staging` (or OS secrets) | Prefer edge TLS proxy; DB/MinIO not published |
+| **dev** | `docker-compose.yml` | Throwaway values in file + `.env.example` | PostgreSQL :5432 / SeaweedFS S3 :8333 on localhost for tooling |
+| **staging / on-prem** | `docker-compose.staging.yml` | **Only** via gitignored `.env.staging` (or OS secrets) | Prefer edge TLS proxy; DB/S3 not published |
 
-Same architecture everywhere: **Node API + SPA + PostgreSQL + MinIO (S3 API)**. Configuration differs; code does not.
+Same architecture everywhere: **Node API + SPA + PostgreSQL 18 + S3 API (SeaweedFS self-hosted, Amazon S3 in production)**. Configuration differs; code does not.
 
 ---
 
 ## 2. Secrets (SEC-REPO-1)
 
-**Never commit** `.env`, `.env.staging`, private keys, or real MinIO/Postgres passwords.
+**Never commit** `.env`, `.env.staging`, private keys, or real S3/Postgres passwords.
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `MYSQL_ROOT_PASSWORD` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DATABASE` | mysql, api/worker `DATABASE_URL` | Strong passwords; rotate with re-encrypt plan (ADR-0008) |
-| `DATABASE_URL` | api, worker (dev / process) | Staging compose builds this from MYSQL_*; dev uses Laragon MySQL `mysql://root@localhost:3306/seip` |
+| `POSTGRES_PASSWORD` | postgres (admin), backup verify | Admin only: first-boot role bootstrap and scratch databases. Never given to the app |
+| `SEIP_MIGRATOR_PASSWORD` | `migrate` service, backup | `seip_migrator` owns the schema (ADR-0012 §4) |
+| `SEIP_APP_PASSWORD` | api, worker `DATABASE_URL` | `seip_app`: DML only, cannot rewrite `audit_event` |
+| `DATABASE_URL` / `MIGRATE_DATABASE_URL` | api, worker / `npm run db:migrate` | Staging compose builds these; dev values in `.env.example` |
 | `JWT_SECRET` | api | ≥ 32 characters; rotating invalidates sessions |
-| `S3_ENDPOINT` | api, worker | Staging internal: `http://minio:9000` |
-| `S3_BUCKET` | api, worker, minio-init | Private bucket; no anonymous read |
-| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | api, worker, minio root (staging) | Treat as root secrets; separate app keys later if needed |
-| `S3_REGION` | api, worker | Dummy for S3 SDK; MinIO accepts any |
+| `S3_ENDPOINT` | api, worker | Staging internal: `http://seaweedfs:8333` |
+| `S3_BUCKET` | api, worker, storage-init | Private bucket; no anonymous read |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | api, worker, SeaweedFS identity (staging) | Treat as root secrets; separate app keys later if needed |
+| `S3_REGION` | api, worker | Dummy for SeaweedFS; `ap-southeast-7` for Amazon S3 Bangkok |
 | `PORT` | api | Default `3001` |
 | `NODE_ENV` | api, worker | `production` in staging compose |
 | `WORKER_POLL_MS` | worker | Job poll interval (default 2000) |
@@ -54,7 +56,7 @@ Templates:
 4. Confirm health:
    ```bash
    docker compose -f docker-compose.staging.yml --env-file .env.staging ps
-   # Expect: mysql, minio, api, worker, web (minio-init exited 0)
+   # Expect: postgres, seaweedfs, api, worker, web, clamav, backup (migrate + storage-init exited 0)
    # API container healthcheck is TCP :3001; process probe:
    curl -sS -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:3001/api/v1/auth/login \
      -H 'content-type: application/json' -d '{}'
@@ -200,7 +202,7 @@ timer and **proves each dump restorable before calling it a backup**.
 ### 5.1 Running it
 
 ```bash
-# manual, from the repo (needs mysqldump + mysql on PATH; mc for objects)
+# manual, from the repo (needs pg_dump/pg_restore/psql 18 on PATH, or PG_BIN_DIR; aws CLI for objects)
 npm run backup                       # dump + object mirror + verify + prune
 npm run backup -- --no-objects       # database only
 npm run backup -- --retain-days=30
@@ -224,24 +226,25 @@ exactly the failures that do not matter.
 
 ### 5.2 What it actually does
 
-1. `mysqldump --single-transaction --routines --triggers --events` to
-   `<dir>/seip-<timestamp>.sql.gz`, mode 0600, directory 0700 — dumps contain
-   every evaluation score and every teacher's evidence metadata (PDPA at rest).
-2. **Restores that dump into a scratch database and compares table counts**, then
-   drops it. Fails the run if the restore errors or the counts differ.
-3. `mc mirror` of the evidence bucket (without `--remove`: a mirror that deletes
+1. `pg_dump -Fc --no-owner --no-acl` (as `seip_migrator`, which owns every table)
+   to `<dir>/seip-<timestamp>.dump`, directory 0700 — dumps contain every
+   evaluation score and every teacher's evidence metadata (PDPA at rest).
+2. **Restores that dump into a scratch database (via `BACKUP_ADMIN_URL`, which has
+   CREATEDB) and compares table AND trigger counts**, then drops it. Fails the run
+   if the restore errors or the counts differ.
+3. `aws s3 sync` of the evidence bucket (without `--delete`: a mirror that deletes
    local copies of missing objects would faithfully replicate an accidental
    bucket wipe).
 4. Prunes artefacts older than the retention window.
 
-The password reaches `mysqldump` through `MYSQL_PWD`, never `-p` on the command
-line, because argv is readable by every local user via `ps`.
+Passwords reach the pg tools through `PGPASSWORD`, never argv, because argv is
+readable by every local user via `ps`.
 
 ### 5.3 Restoring
 
 ```bash
 # drill: restore into a scratch database, report, drop it (the default)
-npm run restore -- --from=backups/seip-2026-07-20-05-41-20.sql.gz --dry-run
+npm run restore -- --from=backups/seip-2026-10-13-05-00-00.dump --dry-run
 
 # into a named database
 npm run restore -- --from=<file> --into=seip_recovered
@@ -254,10 +257,12 @@ The drill reports `tables / triggers / evidence / users` and **fails if the
 restored database has no triggers**, because a restore that quietly lost them
 gives you a database that accepts `DELETE` on `audit_event`.
 
-Objects: `mc mirror --overwrite <dir>/objects-<timestamp>/ <alias>/seip-evidence/`.
-After restoring a dump older than the current code, run `npm run db:migrate`.
+Objects: `aws s3 sync <dir>/objects-<timestamp>/ s3://seip-evidence --endpoint-url <S3_ENDPOINT>`.
+Dumps are taken `--no-acl`, so after a real restore re-run
+`scripts/db/bootstrap-roles.sql` and `npm run db:migrate` — that re-applies the
+`seip_app` grants and the `audit_event` REVOKE.
 
-### 5.4 Why the dump format matters (a real incident)
+### 5.4 Why the verify step exists (a real incident, MySQL era)
 
 The first real run of `backup.mjs` **failed its own verify**, and the cause was a
 schema bug nobody had noticed:
@@ -282,20 +287,18 @@ restored is a hypothesis, and the verify step is what turns it into a backup.
 Before first production go-live, and before each release touching storage or schema:
 
 1. `npm run backup` on staging — it self-verifies, so a green run is step 1 and 2.
-   **On staging, not on a dev box.** The MySQL half needs `mysqldump`/`mysql` on
-   PATH (Laragon ships them under `bin/mysql/*/bin`, which is not on PATH by
-   default) and the object half needs `mc`, which the `backup` image installs but
-   a Windows dev machine generally does not have. Verified 2026-07-20: on this
-   dev machine the database dump verifies at 32 tables and the object mirror then
-   exits 1 with `mc alias failed`, so **every local run to date has backed up the
-   database only**. The script is right to fail loudly rather than report a
-   partial backup as success — but a green *database* run is not a green backup.
+   **On staging, not on a dev box.** The database half needs PostgreSQL 18
+   client tools (`pg_dump` must be >= the server major) and the object half needs
+   the aws CLI; the `backup` image installs both. Verified 2026-10-12 against
+   PG18: dump + verify + `--dry-run` restore drill green (database only — the
+   object half was not run locally). A green *database* run is not a green backup.
 2. `npm run restore -- --from=<latest> --dry-run` and check the reported counts
    against production expectations.
 3. Restore objects into a throwaway bucket; confirm an evidence object is
    downloadable through the presigned flow.
 4. Confirm login works against the restored database, and that
-   `SELECT COUNT(*) FROM information_schema.triggers` is 4.
+   `SELECT COUNT(DISTINCT trigger_name) FROM information_schema.triggers` is 2
+   (`audit_event_no_update`, `audit_event_no_delete`).
 5. Record date + operator in the release notes.
 
 ## 5b. Malware scanning and the re-scan sweep (ADR-0009)
@@ -436,7 +439,7 @@ Across the whole store clamd found **no malware**: 333 real verdicts, all clean,
 zero `blocked` with a receipt.
 
 **The 46 orphans were purged the same day**, after each object was re-checked
-against MinIO immediately before deletion rather than trusting the recorded job
+against the object store immediately before deletion rather than trusting the recorded job
 error — all 46 confirmed 404, none had come back. Deleting only the
 `evidence_file` rows was rejected: every one was its evidence's **only** file, so
 that would have left 46 `active` evidence with no files at all, which is
@@ -471,7 +474,7 @@ now reports live evidence and lists soft-deleted separately.
 ## 6. Disk growth and retention
 
 - Teaching videos dominate growth (ADR-0005 risk).
-- Monitor volume size for `seip_staging_pgdata` and `seip_staging_minio`.
+- Monitor volume size for `seip_staging_pgdata` and `seip_staging_seaweedfs`.
 - Soft-deleted evidence GC is handled by the **worker** service (`WORKER_GC_AFTER_DAYS`).
 - Longer school retention (`evidence+N`) still needs a written purge policy; do not delete volumes without approval.
 

@@ -20,7 +20,7 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 | Build | `npm run build` | `Gate: build` | self-arming | `scripts.build` defined |
 | Migration validation | `npx prisma validate` (DB-001 extends: `migrate diff` up/down) | `Gate: migration validation` | self-arming | `prisma/schema.prisma` exists |
 | Permission tests | `npm run test:security` — asserts the `permissions.yaml` matrix (esp. cross-school RES-001) | `Gate: permission tests` | self-arming | files in `tests/security/` |
-| E2E smoke | `npm run test:e2e` (Playwright: login → evidence list → open submit) | `Gate: e2e smoke` | **LIVE** (SEIP-QA-004) | always; needs MySQL 8 + MinIO + api + web (ADR-0008) |
+| E2E smoke | `npm run test:e2e` (Playwright: login → evidence list → open submit) | `Gate: e2e smoke` | **LIVE** (SEIP-QA-004) | always; needs PostgreSQL 18 + SeaweedFS + api + web (ADR-0012/0013) |
 | Code owner review | — (not a CI job) | branch protection + CODEOWNERS | policy | requires branch protection (below) |
 
 **Pass thresholds:** every gate is binary (exit 0). `dep-audit` fails on **high+** advisories. oasdiff fails on **breaking** changes only (additive contract changes pass). Secret scan fails on any leak — a confirmed false positive gets an inline `// gitleaks:allow` comment on the exact flagged line (gitleaks' native line-level suppression), with a code comment explaining why it isn't a real secret, reviewed in the same PR. Never skip the gate to work around one. (A repo-wide `.gitleaks.toml` allowlist was tried first for SEIP-API-001's one false positive — `credentials: { ..., secretAccessKey: env.S3_SECRET_KEY }`, gitleaks' `generic-api-key` rule matching the *identifier* `secretAccessKey:` regardless of the RHS being a literal or a variable reference — but its regex/fingerprint matching didn't reliably suppress findings already baked into git history when run through the pinned docker image; the inline comment is simpler, guaranteed to work per-line, and keeps the justification next to the code it excuses.)
@@ -83,7 +83,7 @@ Gate: e2e smoke
 Local (API already on `PORT` matching Vite proxy, default proxy `3011`):
 
 ```bash
-# terminal 1: MinIO via docker compose (DB is the host's Laragon MySQL 8, ADR-0008), then:
+# terminal 1: `docker compose up -d` (PostgreSQL 18 + SeaweedFS, ADR-0012/0013), then:
 export DATABASE_URL=... JWT_SECRET=... S3_*=... PORT=3011
 npm run build:libs && npm run build --workspace apps/api
 node apps/api/dist/index.js
@@ -104,7 +104,7 @@ playwright.config.ts because on Windows vite's default host can bind IPv6-only
 (`[::1]`), which the IPv4 `baseURL` poll never reaches (found 2026-07-18 — the
 local webServer path had never actually run on Windows before that).
 
-CI starts MySQL 8, MinIO, migrate+seed, API, Vite, then Playwright Chromium.
+CI starts PostgreSQL 18 (roles bootstrapped, migrations as `seip_migrator`), SeaweedFS, seed, API (as `seip_app`), Vite, then Playwright Chromium.
 Fixture users from `tests/e2e/global-setup.mjs`:
 - `e2e-teacher@seip.local` — evidence upload + reports nav
 - `e2e-director@seip.local` — cycles, create report, PDF, chair scoring
@@ -162,7 +162,35 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
-## Verified runs (2026-07-18, local — ADR-0008 MySQL migration, full suite + e2e)
+## Verified runs (2026-10-12, local — P0 rebaseline on PostgreSQL 18 + SeaweedFS)
+
+ADR-0012/0013. Stack: `pgvector/pgvector:pg18` with `seip_migrator` (migrations)
+and `seip_app` (everything else), neither superuser; `chrislusf/seaweedfs:4.48`
+S3 gateway. Fresh lockfile (npm 11), React Router 7.18, `deepmerge-ts` override.
+
+| Command | Result |
+|---|---|
+| `npm run gate:ownership` · `gate:contracts` · `gate:secret-scan` | pass |
+| `npm run gate:dep-audit` | **0 vulnerabilities** (was 17: 11 high) |
+| `npm run build` · `typecheck` · `lint` · `format:check` · `test:unit` | pass |
+| `npm run test:backend` (as `seip_app` and as `seip_migrator`) | 20/20 — CHECKs, partial unique indexes, generated threshold, audit REVOKE + trigger, role checks |
+| `npm run test:integration --workspace apps/api` | 78/78 |
+| `npm run test:integration --workspace packages/database` | 17/17 (outbox claim ×3 runs) |
+| `npm run test:integration --workspace apps/worker` | 21/21 |
+| `npm run test:security` | 6/6 |
+| `npm run test:e2e` | 12/12 |
+| `npm run backup -- --no-objects` + `npm run restore -- --dry-run` | dump verified, drill passed |
+
+Defects the move surfaced (all latent on MySQL, fixed in the same change):
+- presigned PUTs carried the SDK's default CRC32 of an **empty** body — S3 and
+  SeaweedFS reject every upload (400 BadDigest); MinIO had ignored it.
+- the outbox claim's optimistic CAS let a dispatcher that read after the
+  winner's write claim the same event again — replaced by `FOR UPDATE SKIP
+  LOCKED` + a lease.
+- "current memberships" kept a membership ended today until midnight; it only
+  passed on the dev box because of a UTC+7 DATE artefact.
+
+## Verified runs (2026-07-18, local — ADR-0008 MySQL migration, full suite + e2e) — historical
 
 Engine switched PostgreSQL → **MySQL 8.0.30** (Laragon host server, ADR-0008);
 migrations rebaselined (init + constraints in MySQL dialect), backend raw-SQL

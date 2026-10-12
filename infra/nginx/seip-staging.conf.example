@@ -8,7 +8,7 @@
 # Architecture (ADR-0005):
 #   Client ──TLS──► edge nginx ──► web:80 (SPA)
 #                         └──/api/──► api:3001
-#   api/web talk to postgres + minio only on the internal compose network.
+#   api/web talk to postgres + seaweedfs only on the internal compose network.
 #
 # Do NOT commit real certificates or private keys (SEC-REPO-1).
 #
@@ -65,7 +65,7 @@ server {
     # CSP: start report-only; tighten once UI asset inventory is stable.
     # add_header Content-Security-Policy-Report-Only "default-src 'self'; img-src 'self' data: blob:; connect-src 'self';" always;
 
-    # Uploads go direct to MinIO via presigned URL — not through this proxy body.
+    # Uploads go direct to S3 storage via presigned URL — not through this proxy body.
     client_max_body_size 0;
 
     # Hide nginx version

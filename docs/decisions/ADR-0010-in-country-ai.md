@@ -47,7 +47,7 @@ Owner ตัดสินใจเมื่อ 2026-10-12 (D1) ว่า **กา
 - Fine-tuning (LoRA) จาก confirm/reject ทำได้เฉพาะข้อมูลที่ได้รับความยินยอมแยกต่างหาก และตัดสินใน P7
 
 ## Approved By
-รอ owner อนุมัติ (เสนอโดย Claude Code, 2026-10-12)
+owner (sooksun) — 2026-10-12 (เสนอโดย Claude Code)
 
 ## Date
 2026-10-12

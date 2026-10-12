@@ -35,7 +35,7 @@
 - `evaluation-framework.md` ต้องแก้ตาม PRD §11.3 (C-01 ถึง C-09)
 
 ## Approved By
-รอ owner อนุมัติ
+owner (sooksun) — 2026-10-12
 
 ## Date
 2026-10-12

@@ -33,43 +33,52 @@ export async function enqueueOutboxEvent(
   });
 }
 
+/** How long a claimed event stays invisible to other dispatchers if the claimer
+ * dies before publishing or failing it. */
+const OUTBOX_LEASE_SECONDS = 60;
+
+type OutboxRow = Awaited<ReturnType<typeof prisma.outboxEvent.findMany>>[number];
+
 /**
  * Claim unpublished outbox rows for dispatch, one dispatcher at a time per row.
  *
- * The CAS gate is the `attempts` value read with the candidate — classic
- * optimistic concurrency. A losing racer's WHERE no longer matches (the winner
- * already incremented), so its updateMany affects 0 rows and it skips that row.
+ * One statement: select candidates `FOR UPDATE SKIP LOCKED`, stamp a lease and
+ * count the attempt, return the rows (ADR-0012 §3). A concurrent dispatcher skips
+ * rows another transaction is claiming, and the lease keeps them invisible after
+ * that transaction commits — until markOutboxPublished, markOutboxFailed
+ * (releases the lease, so the next poll retries) or the lease expiring (the
+ * claimer crashed).
  *
- * The previous version gated on `publishedAt: null` alone while only
- * incrementing `attempts`. Nothing in the claim changed the column being tested,
- * so `publishedAt` was still null for the second racer: BOTH got count === 1 and
- * both claimed the same row. The comment asserted the guarantee; the code never
- * implemented it (2026-07-18 audit). Masked so far only because a single worker
- * process runs the loop.
+ * History: the first version gated on `publishedAt: null` alone and both racers
+ * claimed every row. The second used `attempts` as an optimistic CAS, which only
+ * stopped racers that READ before the winner's write — a dispatcher that read
+ * after it saw the incremented value, matched it, and claimed the same row again
+ * (the outbox-claim test caught it on PostgreSQL). A lease is a state the second
+ * reader can see.
  *
- * WorkerJob does this with a real state transition (pending → running, jobs.ts).
- * OutboxEvent has no status column, so `attempts` carries the CAS — one increment
- * per claim, which is also what an attempts counter should mean. markOutboxFailed
- * therefore does NOT increment again; the claim already counted the try.
+ * markOutboxFailed does NOT increment `attempts`; the claim already counted the try.
  */
-export async function claimUnpublishedOutbox(limit = 20) {
-  const candidates = await prisma.outboxEvent.findMany({
-    where: { publishedAt: null, attempts: { lt: 10 } },
+export async function claimUnpublishedOutbox(limit = 20): Promise<OutboxRow[]> {
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    UPDATE outbox_event
+       SET attempts = attempts + 1,
+           locked_until = now() + make_interval(secs => ${OUTBOX_LEASE_SECONDS})
+     WHERE id IN (
+       SELECT id FROM outbox_event
+        WHERE published_at IS NULL
+          AND attempts < 10
+          AND (locked_until IS NULL OR locked_until < now())
+        ORDER BY occurred_at
+        LIMIT ${limit}
+        FOR UPDATE SKIP LOCKED)
+    RETURNING id`;
+  if (rows.length === 0) return [];
+  // Re-read through Prisma so callers get the same typed shape (Json payload,
+  // camelCase fields) as before; order matches the claim.
+  return prisma.outboxEvent.findMany({
+    where: { id: { in: rows.map((r) => r.id) } },
     orderBy: { occurredAt: 'asc' },
-    take: limit,
   });
-
-  const claimed = [];
-  for (const row of candidates) {
-    const result = await prisma.outboxEvent.updateMany({
-      where: { id: row.id, publishedAt: null, attempts: row.attempts },
-      data: { attempts: { increment: 1 } },
-    });
-    if (result.count === 1) {
-      claimed.push(row);
-    }
-  }
-  return claimed;
 }
 
 /**
@@ -87,7 +96,7 @@ export async function claimUnpublishedOutbox(limit = 20) {
 export async function markOutboxPublished(id: string): Promise<number> {
   const { count } = await prisma.outboxEvent.updateMany({
     where: { id },
-    data: { publishedAt: new Date(), lastError: null },
+    data: { publishedAt: new Date(), lastError: null, lockedUntil: null },
   });
   return count;
 }
@@ -102,7 +111,8 @@ export async function markOutboxFailed(id: string, error: string): Promise<numbe
   // error path. A recovery handler that can throw is not a recovery handler.
   const { count } = await prisma.outboxEvent.updateMany({
     where: { id },
-    data: { lastError: error.slice(0, 2000) },
+    // Releasing the lease is what lets the next poll retry it.
+    data: { lastError: error.slice(0, 2000), lockedUntil: null },
   });
   return count;
 }

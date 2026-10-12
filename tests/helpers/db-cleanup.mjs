@@ -3,12 +3,12 @@
  *
  * ## Why this exists
  *
- * Every integration suite shares ONE MySQL, one MinIO bucket and one
+ * Every integration suite shares ONE PostgreSQL, one storage bucket and one
  * `worker_job` queue (see the caveat in docs/qa/QUALITY-GATES.md), and until
  * 2026-07-20 essentially none of them deleted what they created. The dev
  * database had accumulated 994 evidence rows and 1830 users, which was tolerable
  * as noise right up until the ADR-0009 re-scan sweep started reading the whole
- * store: test rows registered without ever putting an object in MinIO look
+ * store: test rows registered without ever putting an object in the store look
  * exactly like a production file whose bytes were lost. Each one burns 8 worker
  * retries and then sits in the census as an unexplained orphan forever.
  *
@@ -31,7 +31,7 @@
  * - **Shared taxonomy** — `EvidenceCategory`, `RankLevel`, `Indicator`,
  *   `FrameworkVersion`. Suites `upsert` these and run in parallel, so deleting
  *   one would break a sibling mid-run.
- * - **MinIO objects.** Cleaning those is `storage.gc`'s job and needs an S3
+ * - **Stored objects.** Cleaning those is `storage.gc`'s job and needs an S3
  *   client this helper deliberately does not take.
  */
 
@@ -74,11 +74,10 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = [], frame
     ].filter(Boolean))];
 
     // Worker jobs are not school-scoped by column, only inside the payload.
-    // MySQL Prisma JSON filters take a '$.field' path string, not the Postgres
-    // array form (ADR-0008), and only compare one value — hence the loop.
+    // Prisma JSON path filters compare one value at a time — hence the loop.
     for (const schoolId of ids) {
       await prisma.workerJob.deleteMany({
-        where: { payload: { path: '$.school_id', equals: schoolId } },
+        where: { payload: { path: ['school_id'], equals: schoolId } },
       });
     }
 
