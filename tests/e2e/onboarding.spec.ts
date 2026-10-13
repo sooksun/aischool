@@ -85,7 +85,12 @@ test.describe('onboarding: invite → accept → login', () => {
     await expect(page.getByRole('heading', { name: 'หลักฐานของฉัน' })).toBeVisible({ timeout: 20_000 });
     // Their own display name, not the admin's — proves this is a distinct
     // account and not a leftover session.
-    await expect(page.getByText('ครูอีทูอี')).toBeVisible();
+    // Exact: the profile banner below also contains the name, inside a longer line.
+    await expect(page.getByText('ครูอีทูอี', { exact: true })).toBeVisible();
+    // FR-099a: a new teacher is asked to check the profile the admin entered.
+    await expect(page.getByRole('region', { name: 'ตรวจข้อมูลบุคลากร' })).toBeVisible();
+    await page.getByRole('button', { name: 'ข้อมูลถูกต้อง' }).click();
+    await expect(page.getByRole('region', { name: 'ตรวจข้อมูลบุคลากร' })).toHaveCount(0);
     // A teacher must not see the admin-only nav entry.
     await expect(page.getByRole('link', { name: 'บุคลากร' })).toHaveCount(0);
   });
