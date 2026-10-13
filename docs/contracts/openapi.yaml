@@ -1,4 +1,7 @@
 openapi: 3.1.0
+# version 4.8.0 — CCR-026 (additive): same bytes in one person's portfolio (FR-012).
+#   findMyDuplicateFiles checks a SHA-256 before any bytes move; EvidenceFile gains
+#   duplicate_of_evidence_id, set once the server's own re-hash confirms the match.
 # version 4.7.0 — CCR-024 (additive): evidence a school admin uploads for someone
 #   else waits for the owner's acceptance (acceptEvidence) before it can be mapped;
 #   the owner moves an item to another of their schools (EvidencePatch.origin_school_id)
@@ -28,7 +31,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.7.0
+  version: 4.8.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -497,6 +500,37 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /me/files/duplicates:
+    get:
+      operationId: findMyDuplicateFiles
+      summary: Files in my portfolio with these exact bytes (CCR-026, FR-012)
+      description: 'Called with the SHA-256 the client computed, before any bytes are sent,
+        so a duplicate costs no data. Only the caller''s own live items, and only files
+        whose bytes the server has verified. Empty when there is none.
+
+        '
+      tags:
+      - evidence
+      parameters:
+      - name: checksum_sha256
+        in: query
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+      responses:
+        '200':
+          description: Matches, newest first (possibly none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DuplicateFile'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /me/personnel/confirm:
     post:
       operationId: confirmMyPersonnel
@@ -3341,6 +3375,25 @@ components:
           enum:
           - active
           - inactive
+    DuplicateFile:
+      type: object
+      required:
+      - evidence_id
+      - file_id
+      - title
+      - uploaded_at
+      properties:
+        evidence_id:
+          type: string
+          format: uuid
+        file_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
     PersonnelCorrectionRequest:
       type: object
       required:
@@ -4357,6 +4410,14 @@ components:
           format: date-time
           description: Set when the worker re-hashed the stored object and it matched checksum_sha256. Clients delete
             a local copy only after this is set and scan_status is clean or sanitised.
+        duplicate_of_evidence_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: 'CCR-026 (FR-012): another of the owner''s items already holds these exact
+            bytes, confirmed by the server''s re-hash. A warning, not a refusal — the person
+            decides whether to keep both.'
         duration_ms:
           type:
           - integer

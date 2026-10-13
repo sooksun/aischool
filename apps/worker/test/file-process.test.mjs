@@ -440,3 +440,35 @@ test('the sweep skips soft-deleted evidence and files already queued', async () 
     where: { jobType: 'file.process', payload: { path: ['file_id'], equals: file.id } },
   });
 });
+
+test('FR-012: the same verified bytes twice in one portfolio mark the later file as a duplicate; another person is not affected', async () => {
+  const first = await fixture('dup-a.pdf');
+  await runOnce(env, s3, { scheduleGc: false });
+
+  // A second item, same owner, same bytes.
+  const evidence2 = await prisma.evidence.create({
+    data: {
+      originSchoolId: first.school.id, ownerPersonId: first.evidence.ownerPersonId, uploadedByUserId: first.user.id,
+      categoryId: first.evidence.categoryId, title: 'again', status: 'draft',
+    },
+  });
+  const body = Buffer.from('hello-worker-bytes');
+  const fileId = randomUUID();
+  const key = `evidence/${first.school.id}/${evidence2.id}/${fileId}/dup-b.pdf`;
+  await putObject(key, body, 'application/pdf');
+  const second = await registerEvidenceFileWithWorkerJobs({
+    id: fileId, evidenceId: evidence2.id, storageUri: key, contentType: 'application/pdf',
+    byteSize: BigInt(body.length), checksumSha256: createHash('sha256').update(body).digest('hex'),
+    durationSeconds: null, originalFilename: 'dup-b.pdf', schoolId: first.school.id, actorUserId: first.user.id,
+  });
+  const stranger = await fixture('dup-c.pdf');
+  await runOnce(env, s3, { scheduleGc: false });
+
+  const a = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: first.file.id } });
+  const b = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: second.id } });
+  const c = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: stranger.file.id } });
+  assert.equal(a.duplicateOfFileId, null, 'the first copy is the original');
+  assert.equal(b.duplicateOfFileId, a.id, 'the later copy points at it');
+  assert.equal(c.duplicateOfFileId, null, "another person's identical file is theirs, not a duplicate");
+  assert.equal(b.mediaState, 'ready', 'a warning, never a refusal');
+});

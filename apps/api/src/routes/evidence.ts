@@ -11,7 +11,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   listEvidence, withAreaScope, resolveAreaScope, createEvidence, getEvidenceDetail, updateEvidence, softDeleteEvidence,
-  getEvidenceCategoryById, writeAuditEvent, aggregateScanStatus, getSchoolAreaId, acceptEvidenceByOwner,
+  getEvidenceCategoryById, writeAuditEvent, aggregateScanStatus, getSchoolAreaId, acceptEvidenceByOwner, findOwnerFilesByChecksum,
   listEvaluateePersonIdsForCommitteeMember, getPersonnelInSchoolByPerson,
   openUploadSession, getUploadSession, claimUploadForCompletion, releaseUploadClaim,
   finishUpload, abortUploadSession,
@@ -76,6 +76,7 @@ export function serializeFile(f: {
   durationSeconds: number | null; durationMs: number | null; originalFilename: string; scanStatus: string;
   uploadedAt: Date; role: string; parentFileId: string | null; sha256VerifiedAt: Date | null;
   pageCount: number | null; width: number | null; height: number | null; mediaState: string;
+  duplicateOf?: { evidenceId: string } | null;
 }) {
   return {
     id: f.id,
@@ -86,6 +87,7 @@ export function serializeFile(f: {
     byte_size: Number(f.byteSize),
     checksum_sha256: f.checksumSha256,
     sha256_verified_at: f.sha256VerifiedAt?.toISOString() ?? null,
+    duplicate_of_evidence_id: f.duplicateOf?.evidenceId ?? null,
     duration_seconds: f.durationSeconds,
     duration_ms: f.durationMs,
     page_count: f.pageCount,
@@ -142,6 +144,16 @@ const toDate = (v: string | null | undefined) => (v === undefined ? undefined : 
 
 export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env }) => {
   const s3 = createS3Client(env);
+
+  // CCR-026 / FR-012: before any bytes move, the client asks whether these exact
+  // bytes are already in the caller's own portfolio.
+  app.get('/me/files/duplicates', { config: { operationId: 'findMyDuplicateFiles' } }, async (request) => {
+    const auth = request.auth!;
+    const { checksum_sha256 } = z.object({ checksum_sha256: z.string().regex(/^[a-f0-9]{64}$/) }).parse(request.query);
+    if (!auth.personId) return [];
+    const rows = await findOwnerFilesByChecksum(auth.personId, checksum_sha256);
+    return rows.map((r) => ({ evidence_id: r.evidenceId, file_id: r.fileId, title: r.title, uploaded_at: r.uploadedAt.toISOString() }));
+  });
 
   app.get('/evidence', { config: { operationId: 'listEvidence' } }, async (request) => {
     const auth = request.auth!;

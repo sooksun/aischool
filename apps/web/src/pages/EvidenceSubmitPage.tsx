@@ -11,7 +11,7 @@
 // or IndexedDB-backed queue, out of scope for this first pass. Documented here
 // rather than silently shipped as if the full design were implemented.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, unwrap } from '../api/client';
 import { ApiError, thaiMessageFor } from '../api/errors';
 import { useAuth } from '../hooks/useAuth';
@@ -34,6 +34,9 @@ export function EvidenceSubmitPage() {
 
   const [step, setStep] = useState<Step>('pick');
   const [file, setFile] = useState<File | null>(null);
+  // FR-012 / CCR-026: the same bytes already in my portfolio, found before upload.
+  const [duplicates, setDuplicates] = useState<components['schemas']['DuplicateFile'][]>([]);
+  const checksumRef = useRef<{ file: File; sha: string } | null>(null);
   const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
 
   const [categories, setCategories] = useState<EvidenceCategory[] | null>(null);
@@ -89,6 +92,17 @@ export function EvidenceSubmitPage() {
 
   function onFilePicked(f: File) {
     setFile(f);
+    setDuplicates([]);
+    // Hash once, here: the duplicate check needs it before any bytes move, and
+    // the upload session reuses it.
+    void sha256Hex(f).then(async (sha) => {
+      checksumRef.current = { file: f, sha };
+      try {
+        setDuplicates(unwrap(await api.GET('/me/files/duplicates', { params: { query: { checksum_sha256: sha } } })));
+      } catch {
+        // The check is a courtesy; the server re-hashes and flags duplicates anyway.
+      }
+    });
     setTitle((prev) => prev || f.name.replace(/\.[^.]+$/, ''));
     if (f.type.startsWith('video/')) {
       readVideoDurationSeconds(f).then(setDurationSeconds);
@@ -146,7 +160,7 @@ export function EvidenceSubmitPage() {
         if (session) {
           session = unwrap(await api.GET('/uploads/{uploadId}', { params: { path: { uploadId: session.id } } }));
         } else {
-          const checksum = await sha256Hex(file);
+          const checksum = checksumRef.current?.file === file ? checksumRef.current.sha : await sha256Hex(file);
           session = unwrap(await api.POST('/uploads', {
             params: { header: { 'Idempotency-Key': ids.uploadKey } },
             body: {
@@ -195,6 +209,18 @@ export function EvidenceSubmitPage() {
 
       {step === 'pick' && (
         <PickFileStep accept={acceptTypes} onPick={onFilePicked} onCancel={() => navigate('/')} />
+      )}
+
+      {step === 'details' && duplicates.length > 0 && (
+        <div className="alert alert-info" role="status" aria-label="ไฟล์ซ้ำ">
+          <span>
+            ไฟล์นี้มีอยู่แล้วในหลักฐาน{' '}
+            {duplicates.map((d, i) => (
+              <span key={d.file_id}>{i > 0 && ', '}<Link to={`/evidence/${d.evidence_id}`}>“{d.title}”</Link></span>
+            ))}
+            {' '}— ไม่ต้องส่งซ้ำ ใช้หลักฐานเดิมจับคู่ตัวชี้วัดเพิ่มได้เลย (ถ้าต้องการเก็บอีกชิ้นก็ส่งต่อได้)
+          </span>
+        </div>
       )}
 
       {step === 'details' && file && (

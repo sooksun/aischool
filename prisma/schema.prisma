@@ -782,6 +782,8 @@ model EvidenceFile {
   parentFileId     String?         @map("parent_file_id") @db.Uuid
   /// Set when the worker re-hashed the stored object and it matched checksum_sha256.
   sha256VerifiedAt DateTime?       @map("sha256_verified_at")
+  /// CCR-026: the owner's earlier file with the same verified bytes (a warning only).
+  duplicateOfFileId String?        @map("duplicate_of_file_id") @db.Uuid
   pageCount        Int?            @map("page_count")
   width            Int?
   height           Int?
@@ -801,9 +803,12 @@ model EvidenceFile {
 
   evidence      Evidence       @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
   uploadSession UploadSession?
+  duplicateOf   EvidenceFile?  @relation("FileDuplicate", fields: [duplicateOfFileId], references: [id], onDelete: SetNull)
+  duplicates    EvidenceFile[] @relation("FileDuplicate")
 
   @@index([evidenceId])
   @@index([scanStatus])
+  @@index([checksumSha256])
   /// The rescan sweep's query: "never really scanned", oldest first.
   @@index([scannedAt])
   @@map("evidence_file")

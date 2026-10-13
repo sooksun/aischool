@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **P2 started — duplicate files (SEIP-P2-001, in review, contract 4.8.0 / CCR-026 additive):** when a person picks a file their portfolio already holds, the web warns them and links to the earlier item before any bytes are sent. After the server re-hashes the file, it marks the later copy.
+>
 > **Owner decisions applied (SEIP-P1-016, CCR-025, permissions 2.7.0):** a director's agreement (ว10) is acknowledged by the area admin, not by anyone in the school. After a teacher moves, the old school keeps only the items its own evaluation mapped. A school admin may still reset a director's password (CCR-022, unchanged).
 >
 > **Evidence context (SEIP-P1-015, in review, contract 4.7.0 / CCR-024 additive):** an item a school admin uploads for a teacher counts only after the teacher accepts it. A person at two schools moves an item filed under the wrong school, within one สพท., and the move is audited.

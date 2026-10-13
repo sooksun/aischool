@@ -169,7 +169,7 @@ export async function getEvidenceDetail(evidenceId: string) {
   return prisma.evidence.findFirst({
     where: { id: evidenceId, deletedAt: null },
     include: {
-      files: { orderBy: { uploadedAt: 'asc' } },
+      files: { orderBy: { uploadedAt: 'asc' }, include: { duplicateOf: { select: { evidenceId: true } } } },
       mappings: { orderBy: { ownerConfirmedAt: 'desc' } },
     },
   });
@@ -498,4 +498,40 @@ export async function acceptEvidenceByOwner(evidenceId: string, now = new Date()
     data: { ownerAcceptedAt: now, version: { increment: 1 } },
   });
   return getEvidenceDetail(evidenceId);
+}
+
+/**
+ * FR-012 / CCR-026: the person's live items holding these exact, server-verified
+ * bytes, newest first. `excludeEvidenceId` leaves out the item being uploaded.
+ */
+export async function findOwnerFilesByChecksum(ownerPersonId: string, checksumSha256: string, excludeEvidenceId?: string) {
+  const rows = await prisma.evidenceFile.findMany({
+    where: {
+      checksumSha256, sha256VerifiedAt: { not: null },
+      evidence: { ownerPersonId, deletedAt: null, ...(excludeEvidenceId ? { id: { not: excludeEvidenceId } } : {}) },
+    },
+    select: { id: true, evidenceId: true, uploadedAt: true, evidence: { select: { title: true } } },
+    orderBy: { uploadedAt: 'desc' },
+    take: 20,
+  });
+  return rows.map((r) => ({ fileId: r.id, evidenceId: r.evidenceId, title: r.evidence.title, uploadedAt: r.uploadedAt }));
+}
+
+/** After the server's re-hash: record the owner's earlier file with the same bytes, if any. */
+export async function markDuplicateIfAny(fileId: string) {
+  const file = await prisma.evidenceFile.findUnique({
+    where: { id: fileId }, select: { checksumSha256: true, evidenceId: true, uploadedAt: true, evidence: { select: { ownerPersonId: true } } },
+  });
+  if (!file) return null;
+  const earlier = await prisma.evidenceFile.findFirst({
+    where: {
+      id: { not: fileId }, checksumSha256: file.checksumSha256, sha256VerifiedAt: { not: null },
+      evidence: { ownerPersonId: file.evidence.ownerPersonId, deletedAt: null, id: { not: file.evidenceId } },
+    },
+    orderBy: { uploadedAt: 'asc' },
+    select: { id: true, evidenceId: true },
+  });
+  if (!earlier) return null;
+  await prisma.evidenceFile.update({ where: { id: fileId }, data: { duplicateOfFileId: earlier.id } });
+  return earlier;
 }

@@ -224,6 +224,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/files/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Files in my portfolio with these exact bytes (CCR-026, FR-012)
+         * @description Called with the SHA-256 the client computed, before any bytes are sent, so a duplicate costs no data. Only the caller's own live items, and only files whose bytes the server has verified. Empty when there is none.
+         */
+        get: operations["findMyDuplicateFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me/personnel/confirm": {
         parameters: {
             query?: never;
@@ -1611,6 +1631,15 @@ export interface components {
             /** @enum {string} */
             status: "active" | "inactive";
         };
+        DuplicateFile: {
+            /** Format: uuid */
+            evidence_id: string;
+            /** Format: uuid */
+            file_id: string;
+            title: string;
+            /** Format: date-time */
+            uploaded_at: string;
+        };
         PersonnelCorrectionRequest: {
             note: string;
         };
@@ -2055,6 +2084,11 @@ export interface components {
              * @description Set when the worker re-hashed the stored object and it matched checksum_sha256. Clients delete a local copy only after this is set and scan_status is clean or sanitised.
              */
             sha256_verified_at?: string | null;
+            /**
+             * Format: uuid
+             * @description CCR-026 (FR-012): another of the owner's items already holds these exact bytes, confirmed by the server's re-hash. A warning, not a refusal — the person decides whether to keep both.
+             */
+            duplicate_of_evidence_id?: string | null;
             duration_ms?: number | null;
             page_count?: number | null;
             width?: number | null;
@@ -3254,6 +3288,30 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    findMyDuplicateFiles: {
+        parameters: {
+            query: {
+                checksum_sha256: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matches, newest first (possibly none) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DuplicateFile"][];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     confirmMyPersonnel: {

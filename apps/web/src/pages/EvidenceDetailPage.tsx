@@ -172,6 +172,11 @@ export function EvidenceDetailPage() {
         {evidence.files.map((f) => (
           <li key={f.id} className="evidence-card">
             <div className="title">{f.original_filename}</div>
+            {f.duplicate_of_evidence_id && (
+              <p className="field-hint" role="note">
+                ไฟล์นี้ตรงกับไฟล์ใน<Link to={`/evidence/${f.duplicate_of_evidence_id}`}>หลักฐานอีกชิ้นของคุณ</Link>ทุกไบต์
+              </p>
+            )}
             <span className="status-badge">
               <span className="status-dot" data-state={f.scan_status} aria-hidden="true" />
               {scanStatusLabel(f.scan_status)}

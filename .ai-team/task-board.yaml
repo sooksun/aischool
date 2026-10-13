@@ -1602,3 +1602,27 @@ tasks:
       - "teacher's agreement: area admin PERM-004"                             # DONE
       - "old school keeps mapped items only after the move"                   # DONE
 
+  - id: SEIP-P2-001
+    title: "P2 — FR-012 same bytes twice in one portfolio: warn before upload, confirm after re-hash (CCR-026, contract 4.8.0)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [CCR-026]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-026-duplicate-files-in-portfolio.md
+      - prisma/migrations/20261013000900_file_duplicate_of/migration.sql
+      - packages/database/src/repositories/evidence.ts
+      - apps/worker/src/jobs/file-process.ts
+      - apps/api/src/routes/evidence.ts
+      - apps/web/src/pages/EvidenceSubmitPage.tsx
+      - apps/api/test/duplicates.test.mjs
+    notes: >
+      A warning, never a refusal. The pre-check uses the client hash against
+      server-verified files only; the worker flags duplicate_of_file_id after its own
+      re-hash. Not done: skipping AI for duplicates (P3), near-duplicates (FR-013),
+      and the mobile client check.
+    acceptance_criteria:
+      - "owner sees duplicates before bytes move; never another person's"   # DONE
+      - "worker marks the later copy after re-hash"                          # DONE
+

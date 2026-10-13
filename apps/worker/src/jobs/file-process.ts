@@ -11,6 +11,7 @@ import {
   getEvidenceFileById,
   setFileScanStatus,
   markFileSha256Verified,
+  markDuplicateIfAny,
   setFileMediaState,
   enqueueOutboxEvent,
   markOutboxPublished,
@@ -182,7 +183,12 @@ export async function processFileJob(
   let hashMismatch = false;
   if (!sizeMismatch) {
     hashMismatch = (await sha256OfStoredObject(env, s3, file.storageUri)) !== file.checksumSha256;
-    if (!hashMismatch) await markFileSha256Verified(file.id);
+    if (!hashMismatch) {
+      await markFileSha256Verified(file.id);
+      // FR-012: the same bytes already in this person's portfolio — a warning on
+      // the file, never a refusal; the duplicate is not analysed again (P3).
+      await markDuplicateIfAny(file.id);
+    }
     await enqueueOutboxEvent({
       eventType: 'evidence.file.verified',
       schoolId: payload.school_id,
