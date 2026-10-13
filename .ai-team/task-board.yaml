@@ -1295,7 +1295,7 @@ tasks:
 
   - id: SEIP-P1-006
     title: "P1 — identity slice 4: Flutter SEIP ID sign-in (PKCE, offline session per device) + step-up expiry (ADR-0014 §5)"
-    status: review              # 2026-10-13 — local gates + flutter analyze/test green; CI pending
+    status: review              # 2026-10-13 — CI green (run 38338182959), incl. mobile + dart client
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P1-003, SEIP-P1-005]
     decisions: [ADR-0014]
@@ -1328,5 +1328,5 @@ tasks:
       - "flutter analyze --fatal-infos; flutter test (SEIP ID sign-in, renewal, shared renewal, revoked device, restore, step-up, sign-out)"   # DONE (9 tests)
       - "API accepts a seip-mobile PKCE offline token and its renewal; deleting the offline session stops renewal"                          # DONE — step-up.test
       - "a second factor older than 15 min counts as acr 1 (bearer + web session)"                                                          # DONE — oidc.test + web-session.test
-      - "CI green on the pushed commit"                                                                                                       # OPEN
+      - "CI green on the pushed commit"                                                                                                       # DONE — run 38338182959 on 1f5d4d5
       - "run on an Android emulator / iOS simulator against the dev realm"                                                                   # OPEN — no emulator in this environment
