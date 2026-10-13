@@ -162,6 +162,12 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P2-005, server-measured media)
+
+| Command | Result |
+|---|---|
+| worker integration | 26 (+2 FR-021: a real 3 s ffmpeg clip measured at 3000 ms and 320×240; the same clip blocked under a 1 s cap) |
+
 ## Verified runs (2026-10-13, local — SEIP-P2-004, app capture first cut)
 
 | Command | Result |

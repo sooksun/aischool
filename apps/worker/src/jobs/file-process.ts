@@ -2,8 +2,10 @@
 // 1) HEAD the object — it must exist and be the size that was declared
 // 2) Re-hash it: SHA-256 of the stored bytes must equal the declared checksum
 //    (ADR-0018) — evidence.file.verified, and the sha256_verified_at receipt
-// 3) Malware scan via clamd when SCAN_PROVIDER=clamav (ADR-0009)
-// 4) Emit evidence.file.scan_completed + mark the registered outbox published
+// 3) Measure video/audio with ffprobe (FR-021) — the server's length replaces
+//    the client's, and a clip longer than its category allows is blocked
+// 4) Malware scan via clamd when SCAN_PROVIDER=clamav (ADR-0009)
+// 5) Emit evidence.file.scan_completed + mark the registered outbox published
 import type { S3Client } from '@aws-sdk/client-s3';
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
@@ -12,6 +14,7 @@ import {
   setFileScanStatus,
   markFileSha256Verified,
   markDuplicateIfAny,
+  recordMediaProbe,
   setFileMediaState,
   enqueueOutboxEvent,
   markOutboxPublished,
@@ -19,6 +22,7 @@ import {
 } from '@seip/database';
 import { headObject, getObjectStream } from '../s3.js';
 import { scanStream } from '../clamav.js';
+import { isProbeable, probeMedia } from '../media-probe.js';
 import type { Env } from '../env.js';
 
 export interface FileProcessPayload {
@@ -106,20 +110,15 @@ async function scanIfEnabled(
 }
 
 /**
- * There is deliberately NO duration probe here.
- *
- * This used to estimate duration as byteSize / 500KB/s, clamped to 1..600s, and
- * write it to evidence_file.duration_seconds — a column the API serves and the
- * ว9 ≤600s rule is expressed in. Two problems: the number was invented rather
- * than measured, and the clamp meant it could never exceed the cap, so it looked
- * like a check while guaranteeing a pass. Enforcement now happens at initiate,
- * which requires the client to declare a duration for a capped category
- * (VAL-002) instead of letting a fabricated value stand in for one.
- *
- * A real probe means reading the container header (ffprobe or equivalent). Until
- * that exists, duration_seconds stays null when the client did not supply it —
- * null is honest, an estimate is not (2026-07-18 audit).
+ * Duration is MEASURED (FR-021): ffprobe reads the stored object's container
+ * header (media-probe.ts). It once was estimated as byteSize / 500KB/s, clamped
+ * to the cap, which looked like a check while guaranteeing a pass (2026-07-18
+ * audit). The client's declared length still gates initiate (VAL-002); the
+ * measured one replaces it, and a clip longer than its category's cap (with 1 s
+ * of container slack) is blocked. Without ffprobe the length stays as declared
+ * and is never invented.
  */
+const DURATION_SLACK_MS = 1000;
 
 /** SHA-256 (hex) of the stored object, streamed — never buffered whole. */
 async function sha256OfStoredObject(env: Env, s3: S3Client, key: string): Promise<string> {
@@ -197,7 +196,19 @@ export async function processFileJob(
     });
   }
 
-  const outcome: ScanOutcome = sizeMismatch || hashMismatch
+  // FR-021: measure, then enforce the category's cap on the measured length.
+  let tooLong = false;
+  if (!sizeMismatch && !hashMismatch && env.MEDIA_PROBE === 'ffprobe' && isProbeable(file.contentType)) {
+    const probe = await probeMedia(env.FFPROBE_PATH, (await getObjectStream(s3, env.S3_BUCKET, file.storageUri)) as Readable);
+    if (probe) {
+      await recordMediaProbe(file.id, probe);
+      const cap = file.evidence.category?.maxDurationSeconds;
+      tooLong = cap != null && probe.durationMs !== null && probe.durationMs > cap * 1000 + DURATION_SLACK_MS;
+      if (tooLong) console.warn(`[file.process] file ${file.id} BLOCKED — measured ${probe.durationMs} ms > cap ${cap}s`);
+    }
+  }
+
+  const outcome: ScanOutcome = sizeMismatch || hashMismatch || tooLong
     // Refused on integrity alone — no scanner involved, so no receipt, and a
     // re-scan will make the same judgement from the same evidence.
     ? { status: 'blocked', scanned: false }
@@ -205,7 +216,7 @@ export async function processFileJob(
   await setFileScanStatus(file.id, outcome.status, { scanned: outcome.scanned });
   // Renditions (720p review copy, audio proxy, OCR) arrive in P2/P3; until then
   // a verified original is the whole of the item.
-  await setFileMediaState(file.id, sizeMismatch || hashMismatch ? 'failed' : 'ready');
+  await setFileMediaState(file.id, sizeMismatch || hashMismatch || tooLong ? 'failed' : 'ready');
   const scanStatus = outcome.status;
 
   await enqueueOutboxEvent({

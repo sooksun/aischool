@@ -270,6 +270,8 @@ jobs:
         run: npm run test:integration --workspace apps/api
       - name: packages/database repository integration tests
         run: npm run test:integration --workspace packages/database
+      - name: Install ffmpeg (FR-021 — the worker measures video/audio with ffprobe)
+        run: command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
       - name: apps/worker outbox/scan/duration/GC integration tests
         run: npm run test:integration --workspace apps/worker
 

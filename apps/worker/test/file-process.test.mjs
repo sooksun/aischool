@@ -4,6 +4,10 @@ process.env.NODE_ENV = 'test';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createPrismaClient } from '../../../prisma/client.mjs';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import {
@@ -36,6 +40,9 @@ const env = {
   // treated as a failed scan and left the file `pending`. Fail-closed did its
   // job; the test was simply lying about the environment.
   CLAMAV_MAX_BYTES: 25 * 1024 * 1024,
+  // FR-021: the probe runs for video/audio. CI installs ffmpeg for this suite.
+  MEDIA_PROBE: 'ffprobe',
+  FFPROBE_PATH: process.env.FFPROBE_PATH ?? 'ffprobe',
 };
 
 const s3 = new S3Client({
@@ -471,4 +478,51 @@ test('FR-012: the same verified bytes twice in one portfolio mark the later file
   assert.equal(b.duplicateOfFileId, a.id, 'the later copy points at it');
   assert.equal(c.duplicateOfFileId, null, "another person's identical file is theirs, not a duplicate");
   assert.equal(b.mediaState, 'ready', 'a warning, never a refusal');
+});
+
+
+/** A real 3-second 320x240 MP4, made by ffmpeg. */
+function clip(seconds = 3) {
+  const dir = mkdtempSync(join(tmpdir(), 'seip-clip-'));
+  const out = join(dir, 'clip.mp4');
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `testsrc=size=320x240:rate=10:duration=${seconds}`, '-pix_fmt', 'yuv420p', out]);
+  return readFileSync(out);
+}
+
+async function videoFixture(maxDurationSeconds, bytes) {
+  const base = await fixture('probe.pdf');
+  const cat = await prisma.evidenceCategory.create({
+    data: { code: `probe-${randomUUID()}`, labelTh: 'วิดีโอ', allowedMimeTypes: ['video/mp4'], maxDurationSeconds },
+  });
+  const evidence = await prisma.evidence.create({
+    data: { originSchoolId: base.school.id, ownerPersonId: base.evidence.ownerPersonId, uploadedByUserId: base.user.id, categoryId: cat.id, title: 'v', status: 'draft' },
+  });
+  const fileId = randomUUID();
+  const key = `evidence/${base.school.id}/${evidence.id}/${fileId}/clip.mp4`;
+  await putObject(key, bytes, 'video/mp4');
+  const file = await registerEvidenceFileWithWorkerJobs({
+    id: fileId, evidenceId: evidence.id, storageUri: key, contentType: 'video/mp4', byteSize: BigInt(bytes.length),
+    checksumSha256: createHash('sha256').update(bytes).digest('hex'),
+    // What the client claimed: far shorter than the truth.
+    durationSeconds: 1, originalFilename: 'clip.mp4', schoolId: base.school.id, actorUserId: base.user.id,
+  });
+  return file;
+}
+
+test('FR-021: the server measures a video and its length replaces the declared one', async () => {
+  const file = await videoFixture(600, clip(3));
+  await runOnce(env, s3, { scheduleGc: false });
+  const row = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
+  assert.ok(Math.abs(row.durationMs - 3000) < 200, `measured ${row.durationMs} ms`);
+  assert.equal(row.durationSeconds, 3);
+  assert.deepEqual([row.width, row.height], [320, 240]);
+  assert.equal(row.mediaState, 'ready');
+});
+
+test('FR-021: a clip longer than its category allows is blocked on the measured length', async () => {
+  const file = await videoFixture(1, clip(3));
+  await runOnce(env, s3, { scheduleGc: false });
+  const row = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
+  assert.equal(row.scanStatus, 'blocked');
+  assert.equal(row.mediaState, 'failed');
 });

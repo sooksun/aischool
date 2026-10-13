@@ -1700,3 +1700,27 @@ tasks:
     acceptance_criteria:
       - "capture offline → queued with category/title/duration, shown as รอส่ง"   # DONE — capture_flow_test
 
+  - id: SEIP-P2-005
+    title: "P2 — FR-021 server measures video/audio (ffprobe); the measured length replaces the declared one and enforces the cap"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0018]
+    primary_paths:
+      - apps/worker/src/media-probe.ts
+      - apps/worker/src/jobs/file-process.ts
+      - infra/docker/Dockerfile.worker
+      - apps/worker/test/file-process.test.mjs
+    notes: >
+      No contract change: duration_seconds, duration_ms, width and height already
+      exist on EvidenceFile. After the re-hash matches, the worker runs ffprobe on a
+      temp copy, records what it measured (replacing the client's declared length),
+      and blocks a clip longer than its category's max_duration_seconds by more than
+      1 s of slack. MEDIA_PROBE=none or a missing binary leaves the length
+      unmeasured, never estimated. The worker image and CI install ffmpeg. Not done:
+      thumbnails, the 720p browser rendition, and stripping EXIF GPS from
+      derivatives.
+    acceptance_criteria:
+      - "measured length replaces the declared one"     # DONE — file-process.test
+      - "over-cap clip blocked on the measured length"  # DONE — file-process.test
+

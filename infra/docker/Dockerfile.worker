@@ -20,6 +20,10 @@ RUN npm run build:libs \
  && npm run build --workspace apps/worker
 
 FROM node:24-bookworm-slim AS runtime
+# FR-021: ffprobe measures video/audio length and resolution (MEDIA_PROBE=ffprobe).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./

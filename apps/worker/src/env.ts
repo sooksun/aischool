@@ -21,6 +21,9 @@ const EnvSchema = z.object({
   // that meant to scan and quietly stopped is the exact failure ADR-0009 exists
   // to prevent, so switching it off has to be something someone wrote down.
   SCAN_PROVIDER: z.enum(['none', 'clamav']).default('none'),
+  /** FR-021: measure video/audio with ffprobe. `none` leaves the length unmeasured (null). */
+  MEDIA_PROBE: z.enum(['ffprobe', 'none']).default('ffprobe'),
+  FFPROBE_PATH: z.string().min(1).default('ffprobe'),
   CLAMAV_HOST: z.string().default('127.0.0.1'),
   CLAMAV_PORT: z.coerce.number().int().positive().default(3310),
   CLAMAV_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),

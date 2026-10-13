@@ -335,7 +335,20 @@ export async function countFilesForEvidence(evidenceId: string): Promise<number>
 export async function getEvidenceFileById(schoolId: string, fileId: string) {
   return prisma.evidenceFile.findFirst({
     where: { id: fileId, evidence: { originSchoolId: schoolId } },
-    include: { evidence: { select: { id: true, originSchoolId: true, deletedAt: true } } },
+    include: { evidence: { select: { id: true, originSchoolId: true, deletedAt: true, category: { select: { maxDurationSeconds: true } } } } },
+  });
+}
+
+/** FR-021: what the server measured replaces what the client declared. */
+export async function recordMediaProbe(fileId: string, probe: { durationMs: number | null; width: number | null; height: number | null }) {
+  return prisma.evidenceFile.update({
+    where: { id: fileId },
+    data: {
+      durationMs: probe.durationMs,
+      durationSeconds: probe.durationMs === null ? null : Math.ceil(probe.durationMs / 1000),
+      width: probe.width,
+      height: probe.height,
+    },
   });
 }
 

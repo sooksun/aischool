@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Server-measured media (SEIP-P2-005, in review):** the worker now measures each video and audio file with ffprobe. The real length and resolution replace what the client declared, and a clip longer than its category allows is blocked. Thumbnails and the 720p copy come later.
+>
 > **App capture, first cut (SEIP-P2-004, in review):** the app's home screen takes a photo or video, or picks one from the gallery, into the offline outbox. Each item shows its status in Thai (รอส่ง / กำลังส่ง / กำลังตรวจ). Not done yet: several photos in one item, document scan, share-in, background sending and a device run.
 >
 > **Web multi-file upload (SEIP-P2-003, in review):** "ส่งหลายไฟล์" takes several files at once, by drag and drop or by picking them. Each file becomes its own evidence item, with progress and a status per file. A failed file retries without duplicating.
