@@ -227,12 +227,17 @@ jobs:
       # v2 committee scoring + reports (ADR-0017) stay frozen in product but are
       # exercised here, so the frozen code keeps passing its tests (CCR-017).
       FEATURE_SCORING: "true"
+      # ADR-0014: the dev realm, for apps/api/test/step-up.test.mjs (which fails
+      # rather than skips when CI=true and this is missing).
+      KEYCLOAK_ISSUER: http://localhost:8180/realms/seip
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Start Keycloak (ADR-0014; boots while the job installs)
+        run: scripts/ci/keycloak.sh start
       - name: Start SeaweedFS (S3 API, ADR-0013)
         run: scripts/ci/start-seaweedfs.sh
       - name: Create seip_migrator / seip_app (ADR-0012 §4)
@@ -259,6 +264,8 @@ jobs:
           node scripts/ci/ensure-bucket.mjs
       - name: S3 conformance (ADR-0013 §4) — multipart, checksums, ListParts resume, Object Lock
         run: npm run test:storage
+      - name: Wait for Keycloak
+        run: scripts/ci/keycloak.sh wait
       - name: apps/api evidence-workflow integration tests
         run: npm run test:integration --workspace apps/api
       - name: packages/database repository integration tests

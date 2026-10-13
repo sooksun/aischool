@@ -17,7 +17,7 @@ import {
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { requireCurrentSchool } from '../plugins/auth.js';
-import { resolveGrant } from '../lib/permission-guard.js';
+import { resolveGrant, requireAcr } from '../lib/permission-guard.js';
 import { authorizeEvidence, isOwner, ownGrant } from '../lib/evidence-access.js';
 import { etag, idempotent, requireIfMatch, staleOrMissing } from '../lib/concurrency.js';
 import { serializeMapping } from './evidence.js';
@@ -123,6 +123,7 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
       if (grant === 'school') validatorRole = 'director';
       else if (grant === 'committee') validatorRole = 'committee';
       else throw forbiddenRole();
+      requireAcr(auth, 'actOnMapping', body.action);
       if (body.action === 'return' && !body.return_note?.trim()) {
         throw new ApiError('VAL-002', 'return_note is required when returning a mapping', [{ field: 'return_note', issue: 'required' }]);
       }

@@ -2,7 +2,7 @@
 // straight from permissions.yaml (via @seip/backend-shared, which loads the LOCKED
 // contract file itself — see packages/backend-shared/src/permissions.ts). There is
 // no hand-typed copy of the matrix in apps/api to drift from it.
-import { grantFor, type Role } from '@seip/backend-shared';
+import { grantFor, minAcrFor, type Role } from '@seip/backend-shared';
 import { ApiError, forbiddenRole } from '@seip/backend-shared';
 import type { AuthedRequest } from '../plugins/auth.js';
 import { getSchoolAreaId, listEvaluateePersonnelIdsForCommitteeMember } from '@seip/database';
@@ -40,6 +40,20 @@ export async function resolveGrant(
   }
 
   throw forbiddenRole();
+}
+
+/**
+ * Step-up (ADR-0014, permissions.yaml `min_acr`). Call AFTER the role check, so a
+ * caller who could never do this gets PERM-001 rather than being sent to
+ * re-authenticate for nothing. Pass `action` for an action-keyed entry
+ * (actOnMapping); without it the strictest action applies.
+ */
+export function requireAcr(auth: AuthedRequest, operationId: string, action?: string): void {
+  if (!auth.enforceMinAcr) return;
+  const needed = minAcrFor(operationId, action);
+  if (auth.acr < needed) {
+    throw new ApiError('AUTH-006', `Step-up authentication required (acr ${needed}, token has ${auth.acr})`);
+  }
 }
 
 /** For operations with an 'own' grant: verify the resource's owner matches the

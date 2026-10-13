@@ -162,6 +162,23 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-003, Keycloak + step-up)
+
+Keycloak 26.7.5 with `infra/keycloak/seip-realm.dev.json`, `KEYCLOAK_ISSUER` set.
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `test:unit` | pass (auth +5 OIDC, backend-shared +4 min_acr) |
+| `gate:contracts` · `gate:ownership` · `gate:secret-scan` | pass |
+| api · security · `test:backend` · database · worker | 93 · 9 · 27 · 23 · 23 — all pass (+8 step-up, against the real realm) |
+| `test:e2e` | 13/13 |
+
+CI now starts Keycloak in the integration job (`scripts/ci/keycloak.sh`). The step-up
+suite fails rather than skips when `CI=true` and `KEYCLOAK_ISSUER` is missing.
+
+**Caveat:** `ENFORCE_MIN_ACR` defaults to false. The step-up suite proves the
+enforcement works when it is on. It does not mean a deployment enforces it.
+
 ## Verified runs (2026-10-13, local and CI — SEIP-P1-002, RLS backstop)
 
 CI: run [38325277042](https://github.com/sooksun/aischool/actions/runs/38325277042) on `7a6a9d3` — green.

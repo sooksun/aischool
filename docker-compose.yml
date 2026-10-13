@@ -3,7 +3,7 @@
 # ap-southeast-7 (ADR-0011). Credentials here are throwaway and intentionally
 # obvious; never copy them to a real deployment (SEC-REPO-1).
 #
-#   docker compose up -d                 # postgres + seaweedfs (+ bucket)
+#   docker compose up -d                 # postgres + seaweedfs (+ bucket) + keycloak
 #   npm run db:migrate && npm run db:seed
 services:
   postgres:
@@ -59,6 +59,29 @@ services:
       echo 's3.bucket.create -name seip-evidence' | weed shell -master=seaweedfs:9333 &&
       echo 'bucket seip-evidence ready (private)'
       "
+
+  # Identity (ADR-0014): Keycloak, realm `seip` imported from
+  # infra/keycloak/seip-realm.dev.json on first boot. Dev mode (in-memory-ish H2
+  # under the container, HTTP). The admin console is http://localhost:8180/admin
+  # (admin / seip_kc_admin_dev_only). The api trusts it when KEYCLOAK_ISSUER is set.
+  keycloak:
+    image: keycloak/keycloak:26.7.5
+    container_name: seip-keycloak
+    command: start-dev --import-realm --http-port=8180 --health-enabled=true
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: seip_kc_admin_dev_only
+    ports:
+      - "8180:8180"
+    volumes:
+      - ./infra/keycloak/seip-realm.dev.json:/opt/keycloak/data/import/seip-realm.json:ro
+    healthcheck:
+      # The image has no curl; bash /dev/tcp against the management port (9000).
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
 
   # Malware scanning (ADR-0009). Opt-in locally because the image pulls ~250 MB of
   # signatures and holds ~1 GB resident — most local work does not need it:

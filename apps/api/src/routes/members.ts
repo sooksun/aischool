@@ -14,7 +14,7 @@ import {
 import { generateInviteToken, hashInviteToken, inviteTokenExpiryDate } from '@seip/auth';
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import { requireCurrentSchool } from '../plugins/auth.js';
-import { resolveGrant } from '../lib/permission-guard.js';
+import { resolveGrant, requireAcr } from '../lib/permission-guard.js';
 
 function serializePersonnel(p: {
   id: string; fullName: string; employeeCode: string | null;
@@ -91,6 +91,7 @@ export const memberRoutes: FastifyPluginAsync = async (app) => {
     const schoolId = requireCurrentSchool(auth);
     const grant = await resolveGrant('inviteMember', auth, schoolId);
     if (grant === 'area-r') throw forbiddenAreaWrite();
+    requireAcr(auth, 'inviteMember');
 
     const body = z.object({
       email: z.string().email().max(320),
@@ -163,6 +164,7 @@ export const memberRoutes: FastifyPluginAsync = async (app) => {
     const schoolId = requireCurrentSchool(auth);
     const grant = await resolveGrant('endMembership', auth, schoolId);
     if (grant === 'area-r') throw forbiddenAreaWrite();
+    requireAcr(auth, 'endMembership');
 
     const { membershipId } = z.object({ membershipId: z.string().uuid() }).parse(request.params);
 

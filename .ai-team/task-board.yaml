@@ -1134,7 +1134,7 @@ tasks:
       - "test:backend 20, database 18, worker 23, api 85, security 9, storage 4, e2e 13"              # DONE (local, fresh DB)
       - "dart client generate + analyze + test; mobile analyze + test"                                # DONE (local)
       - "CI green on the pushed commit"                                                               # DONE — run 38321728017 on 03f64b8, 15/15 jobs
-      - "min_acr (acr ≥ 2 for validate / return / cross-person export) enforced"                     # OPEN — needs step-up auth (ADR-0014), P2
+      - "min_acr (acr ≥ 2 for validate / return / cross-person export) enforced"                     # PARTIAL — enforced behind ENFORCE_MIN_ACR (SEIP-P1-003); on in staging once clients use Keycloak
       - "web hides v2 screens when FEATURE_SCORING=false"                                            # DONE — vite.config reads the same FEATURE_SCORING; capabilities mask the v2 affordances
 
   - id: SEIP-P1-002
@@ -1171,3 +1171,47 @@ tasks:
       - "CI green on the pushed commit"                                                                  # DONE — run 38325277042 on 7a6a9d3
       - "owner accepts ADR-0019"                                                                         # DONE — 2026-10-13
       - "raw-SQL tenant reads (P3 vector search) go through withAreaScope"                               # OPEN — P3
+
+  - id: SEIP-P1-003
+    title: "P1 — identity slice 1: dev Keycloak realm, Keycloak tokens in the API, min_acr step-up (ADR-0014)"
+    status: review              # 2026-10-13 — local gates green; CI pending
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0014]
+    primary_paths:
+      - infra/keycloak/seip-realm.dev.json
+      - docker-compose.yml
+      - scripts/ci/keycloak.sh
+      - packages/auth/src/oidc.ts
+      - packages/backend-shared/src/permissions.ts
+      - apps/api/src/plugins/auth.ts
+      - apps/api/src/lib/permission-guard.ts
+      - apps/api/test/step-up.test.mjs
+      - tests/helpers/keycloak.mjs
+    notes: >
+      Keycloak 26.7.5 (docker compose + CI), realm `seip` from
+      infra/keycloak/seip-realm.dev.json: 60 s access tokens, 30 min idle / 8 h
+      SSO, browser flow with step-up (password = acr "pwd" / LoA 1, TOTP =
+      "mfa" / LoA 2), client scope seip-api (sub, aud seip-api, seip_uid, acr),
+      clients seip-mobile (public PKCE), seip-web (confidential, for the BFF),
+      seip-test (dev realm only). seip_uid is an admin-only user attribute
+      (unmanagedAttributePolicy ADMIN_EDIT). The API routes a token by its
+      header alg: HS256 = its own (acr 1), anything else = Keycloak via JWKS
+      (issuer + audience checked; no seip_uid → AUTH-001; unknown account →
+      AUTH-003). requireAcr runs after the role check (PERM-001 first) on
+      createAssignment, inviteMember, endMembership and actOnMapping
+      validate/return, behind ENFORCE_MIN_ACR (default false). Finding: a
+      direct grant yields acr "pwd" even with a TOTP code, so direct grants
+      can never stand in for step-up; all realm clients have them disabled.
+    acceptance_criteria:
+      - "a password-only Keycloak token gets AUTH-006 on validate / return; the TOTP token passes"   # DONE — step-up.test
+      - "every min_acr operation is tested or phase-gated (derived from permissions.yaml)"           # DONE
+      - "role check before step-up (PERM-001, not AUTH-006)"                                          # DONE
+      - "unlinked or unknown Keycloak users and an untrusted realm are refused"                       # DONE
+      - "CI starts the realm and runs the step-up suite (fails, not skips, when missing)"             # DONE (ci.yml)
+      - "CI green on the pushed commit"                                                               # OPEN
+      - "web logs in through the Keycloak BFF (cookie __Host-seip, ADR-0014 §4)"                      # OPEN — next slice
+      - "Flutter logs in with PKCE (flutter_appauth)"                                                 # OPEN — next slice
+      - "SEIP accounts provisioned into Keycloak on invite / accept"                                  # OPEN — next slice
+      - "ENFORCE_MIN_ACR=true in staging once both clients use Keycloak"                              # OPEN
+      - "ThaID brokered IdP (sandbox) — needs the สพท. RP registration"                               # BLOCKED — external

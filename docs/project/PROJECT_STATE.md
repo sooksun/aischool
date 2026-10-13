@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Identity slice 1 (SEIP-P1-003, in review):** Keycloak 26.7.5 runs in docker compose and CI with the dev realm `seip` (infra/keycloak). The API accepts its access tokens next to its own (JWKS; account = the admin-only `seip_uid` claim) and enforces `min_acr` step-up (password = acr 1, TOTP = acr 2 → AUTH-006 below) behind `ENFORCE_MIN_ACR`, which stays off until the web BFF and Flutter log in through Keycloak (next slices). ThaID waits on the สพท. RP registration.
+>
 > **RLS backstop by สพท. (SEIP-P1-002, done; ADR-0019 accepted 2026-10-13):** a read-only role `seip_scoped` and `withAreaScope` in `packages/database`. Inside the scope, PostgreSQL hides evidence, its files, mappings and upload sessions, and personnel profiles outside the caller's areas, schools and persons — even for raw SQL with no tenant filter (P1 exit criterion). `listEvidence` reads through it. The backstop is opt-in: other paths still rely on the API's authorization alone. All local gates and suites green, and CI (run 38325277042).
 >
 > **Contract 4.0.0 is in force (SEIP-P1-001, in review):** the owner approved [CCR-017](../reviews/CCR-017-contract-4.0.0.md) on 2026-10-12, and it is applied. CI is green on 03f64b8 (run 38321728017, 15/15 jobs).
@@ -21,7 +23,7 @@ School Evidence Intelligence Platform (SEIP)
 >
 > The web reads the same `FEATURE_SCORING` at build time and hides the scoring and report screens when it is off.
 >
-> Still open: `min_acr` is not enforced until step-up authentication lands in P2.
+> Still open: `min_acr` is enforced only with `ENFORCE_MIN_ACR=true` (SEIP-P1-003), which waits for the clients to log in through Keycloak.
 >
 > **Flutter skeleton (SEIP-P0-006):** `apps/mobile` signs in and reads `/auth/me` through the generated client — live test against the real API passes; emulator run still to do. **S3 conformance suite (SEIP-P0-005)** green on SeaweedFS.
 >

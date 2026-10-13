@@ -6,6 +6,7 @@ import fp from 'fastify-plugin';
 import type { FastifyPluginAsync, FastifyInstance, FastifyRequest } from 'fastify';
 import {
   verifyAccessToken, AccessTokenExpiredError, resolveTenancy, hasSchoolRole, hasAreaReadAccess,
+  createOidcVerifier, isExternalToken, OWN_TOKEN_ACR,
   type TenancyContext,
 } from '@seip/auth';
 import { getUserById, getMembershipsForUser, getPersonnelForUser, getSchoolAreaId } from '@seip/database';
@@ -21,6 +22,11 @@ export interface AuthedRequest {
   /** The person this account belongs to (ADR-0015) — the owner key of a
    * portfolio. Null only for an account that has no person yet. */
   personId: string | null;
+  /** Level of authentication of this token (ADR-0014): 1 password, 2 second
+   * factor. The API's own tokens are 1; Keycloak's say what the login did. */
+  acr: number;
+  /** Whether permissions.yaml `min_acr` is enforced (ENFORCE_MIN_ACR). */
+  enforceMinAcr: boolean;
 }
 
 declare module 'fastify' {
@@ -36,6 +42,10 @@ declare module 'fastify' {
 }
 
 export const authPlugin: FastifyPluginAsync<{ env: Env }> = fp(async (app: FastifyInstance, { env }: { env: Env }) => {
+  const verifyOidc = env.KEYCLOAK_ISSUER
+    ? createOidcVerifier({ issuer: env.KEYCLOAK_ISSUER, audience: env.KEYCLOAK_AUDIENCE })
+    : null;
+
   app.addHook('preHandler', async (request: FastifyRequest) => {
     const operationId = request.routeOptions?.config?.operationId as string | undefined;
     if (operationId && isExempt(operationId) === 'unauthenticated') return;
@@ -44,9 +54,16 @@ export const authPlugin: FastifyPluginAsync<{ env: Env }> = fp(async (app: Fasti
     if (!header?.startsWith('Bearer ')) throw new ApiError('AUTH-001', 'Missing bearer token');
     const token = header.slice('Bearer '.length);
 
+    // HS256 is ours; anything else is Keycloak's, and only if a realm is
+    // configured. Without one an RS256 token is simply invalid (AUTH-001).
     let userId: string;
+    let acr = OWN_TOKEN_ACR;
     try {
-      ({ sub: userId } = await verifyAccessToken(token, env.JWT_SECRET));
+      if (verifyOidc && isExternalToken(token)) {
+        ({ userId, acr } = await verifyOidc(token));
+      } else {
+        ({ sub: userId } = await verifyAccessToken(token, env.JWT_SECRET));
+      }
     } catch (e) {
       if (e instanceof AccessTokenExpiredError) throw new ApiError('AUTH-002', 'Token expired');
       throw new ApiError('AUTH-001', 'Invalid token');
@@ -60,7 +77,10 @@ export const authPlugin: FastifyPluginAsync<{ env: Env }> = fp(async (app: Fasti
     const currentSchoolId = await resolveCurrentSchool(request, tenancy);
     const personnel = currentSchoolId ? await getPersonnelForUser(userId, currentSchoolId) : null;
 
-    request.auth = { userId, tenancy, currentSchoolId, personnel, personId: user.personId ?? null };
+    request.auth = {
+      userId, tenancy, currentSchoolId, personnel, personId: user.personId ?? null,
+      acr, enforceMinAcr: env.ENFORCE_MIN_ACR,
+    };
   });
 });
 

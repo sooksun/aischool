@@ -15,6 +15,14 @@ const EnvSchema = z.object({
   /** ADR-0017: committee scoring and report approval are v2. Their routes are
    * registered only when this is true; the code stays compiled and tested. */
   FEATURE_SCORING: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  /** ADR-0014: when set, access tokens signed by this Keycloak realm are accepted
+   * alongside the API's own (e.g. http://localhost:8180/realms/seip). */
+  KEYCLOAK_ISSUER: z.string().url().optional(),
+  KEYCLOAK_AUDIENCE: z.string().min(1).default('seip-api'),
+  /** permissions.yaml `min_acr` → 403 AUTH-006 below the level. Off until the
+   * clients can step up through Keycloak; the API's own tokens are acr 1, so
+   * turning this on without Keycloak locks out every step-up operation. */
+  ENFORCE_MIN_ACR: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

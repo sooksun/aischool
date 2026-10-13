@@ -13,7 +13,7 @@ import {
   findAgreementForCycleAndPersonnel,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
-import { resolveGrant, requireOwnership } from '../lib/permission-guard.js';
+import { resolveGrant, requireOwnership, requireAcr } from '../lib/permission-guard.js';
 import { serializeChallenge } from '../lib/serialize-agreement.js';
 
 function serializeCommitteeMember(m: { evaluatorUserId: string; committeeRole: string; seatNumber: number }) {
@@ -93,6 +93,7 @@ export const scoringRoutes: FastifyPluginAsync<{ featureScoring?: boolean }> = a
     if (!round) throw new ApiError('RES-001', 'Round not found');
     const grant = await resolveGrant('createAssignment', auth, round.cycle.schoolId);
     if (grant === 'area-r') throw forbiddenAreaWrite();
+    requireAcr(auth, 'createAssignment');
 
     const body = z.object({
       evaluatee_personnel_id: z.string().uuid(),

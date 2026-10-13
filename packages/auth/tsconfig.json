@@ -16,7 +16,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "noEmitOnError": true
+    "noEmitOnError": true,
+    "rewriteRelativeImportExtensions": true
   },
   "include": [
     "src/**/*.ts"
