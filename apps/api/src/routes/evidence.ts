@@ -132,7 +132,9 @@ const evidenceFields = {
   title: z.string().min(1).max(300),
   description: z.string().max(2000).nullable().optional(),
   captured_at: z.string().datetime().nullable().optional(),
-  link_url: z.string().url().max(2000).nullable().optional(),
+  // FR-015: a web address only — javascript:, data:, file: and the like are
+  // refused, since the link is rendered as a clickable href.
+  link_url: z.string().url().max(2000).refine((u) => /^https?:\/\//i.test(u), 'http(s) only').nullable().optional(),
   note_text: z.string().max(10000).nullable().optional(),
   performed_from: optDate,
   performed_to: optDate,

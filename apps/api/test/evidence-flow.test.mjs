@@ -354,3 +354,19 @@ test('link evidence is active at once and refuses an upload', async () => {
   });
   assert.equal(up.statusCode, 422);
 });
+
+test('FR-015: a link must be a web address — script, data and file URLs are refused', async () => {
+  for (const link_url of ['javascript:alert(1)', 'data:text/html,<b>x</b>', 'file:///etc/passwd']) {
+    const res = await postEvidence(app, teacherToken, { category_id: categoryId, title: 'bad link', kind: 'link', link_url });
+    assert.equal(res.statusCode, 400, link_url);
+    assert.equal(res.json().code, 'VAL-001');
+    assert.equal(res.json().details[0].field, 'link_url');
+  }
+});
+
+test('FR-015: a note is active at once and reads back as written', async () => {
+  const res = await postEvidence(app, teacherToken, { category_id: categoryId, title: 'บันทึกหลังสอน', kind: 'note', note_text: 'นักเรียนอ่านคล่องขึ้น\nบรรทัดสอง' });
+  assert.equal(res.statusCode, 201, res.body);
+  assert.equal(res.json().status, 'active');
+  assert.equal(res.json().note_text, 'นักเรียนอ่านคล่องขึ้น\nบรรทัดสอง');
+});

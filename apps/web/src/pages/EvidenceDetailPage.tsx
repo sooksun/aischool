@@ -148,6 +148,18 @@ export function EvidenceDetailPage() {
       <Link to="/" className="field-hint">← กลับ</Link>
       <h1>{evidence.title}</h1>
       {evidence.description && <p>{evidence.description}</p>}
+      {/* FR-015: the server accepts http(s) only; still shown as text plus a
+          plain anchor that opens apart from this page. Never fetched by SEIP. */}
+      {evidence.kind === 'link' && evidence.link_url && (
+        <p>
+          ลิงก์: <a href={evidence.link_url} target="_blank" rel="noopener noreferrer nofollow">{evidence.link_url}</a>
+        </p>
+      )}
+      {evidence.kind === 'note' && evidence.note_text && (
+        <blockquote style={{ whiteSpace: 'pre-wrap', margin: '8px 0', paddingLeft: 12, borderLeft: '3px solid var(--border, #ccc)' }}>
+          {evidence.note_text}
+        </blockquote>
+      )}
 
       {isOwnItem && !evidence.owner_accepted_at && (
         <div className="alert alert-info" role="region" aria-label="หลักฐานที่อัปโหลดแทน">
@@ -166,8 +178,8 @@ export function EvidenceDetailPage() {
       )}
       {ownerErr && <div className="field-error" role="alert">{ownerErr}</div>}
 
-      <h2>ไฟล์</h2>
-      {!evidence.files.some((f) => f.role === 'original') && <p className="field-hint">ยังไม่มีไฟล์</p>}
+      {evidence.kind === 'file' && <h2>ไฟล์</h2>}
+      {evidence.kind === 'file' && !evidence.files.some((f) => f.role === 'original') && <p className="field-hint">ยังไม่มีไฟล์</p>}
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {/* Renditions (720p copy, preview picture, FR-021) belong to their original, not the list. */}
         {evidence.files.filter((f) => f.role === 'original').map((f) => {

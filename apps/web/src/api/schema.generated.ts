@@ -1958,7 +1958,7 @@ export interface components {
             kind: components["schemas"]["EvidenceKind"];
             /**
              * Format: uri
-             * @description kind=link only. SEIP stores the URL and its description; linked content is never fetched or analysed (ADR-0017 out of scope).
+             * @description kind=link only, http(s) only (else VAL-001). SEIP stores the URL and its description; linked content is never fetched or analysed (ADR-0017 out of scope).
              */
             link_url?: string | null;
             /** @description kind=note only. */
@@ -2001,7 +2001,7 @@ export interface components {
             kind: components["schemas"]["EvidenceKind"];
             /**
              * Format: uri
-             * @description kind=link only. SEIP stores the URL and its description; linked content is never fetched or analysed (ADR-0017 out of scope).
+             * @description kind=link only, http(s) only (else VAL-001). SEIP stores the URL and its description; linked content is never fetched or analysed (ADR-0017 out of scope).
              */
             link_url?: string | null;
             /** @description kind=note only. */
@@ -2034,7 +2034,7 @@ export interface components {
             captured_at?: string | null;
             /**
              * Format: uri
-             * @description kind=link only. SEIP stores the URL and its description; linked content is never fetched or analysed (ADR-0017 out of scope).
+             * @description kind=link only, http(s) only (else VAL-001). SEIP stores the URL and its description; linked content is never fetched or analysed (ADR-0017 out of scope).
              */
             link_url?: string | null;
             /** @description kind=note only. */

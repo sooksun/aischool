@@ -1797,3 +1797,28 @@ tasks:
       - "3 grouped photos -> 1 evidence create, 3 upload sessions, 3 files"  # DONE — outbox_test
       - "widget: shoot 3, save once, one row '3 รูป · รอส่ง'"                 # DONE — capture_flow_test
 
+  - id: SEIP-P2-009
+    title: "P2 — FR-015 link and note evidence on the web; links are http(s) only"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0017]
+    primary_paths:
+      - apps/api/src/routes/evidence.ts
+      - apps/web/src/pages/LinkNotePage.tsx
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+      - apps/api/test/evidence-flow.test.mjs
+    notes: >
+      The API already took kind=link and kind=note (contract 4.0.0). It now refuses a
+      link_url that is not http(s) — javascript:, data: and file: are VAL-001 — because
+      the detail page renders the link as an href. The contract description says so; no
+      schema change. A new page, /evidence/link-note ("ลิงก์/บันทึก" in the nav), is
+      idempotent per form. The detail page shows the link (noopener, noreferrer,
+      nofollow) or the note as plain text, and hides the file section for those kinds.
+      Not done: snapshot policy and broken-link checks (FR-015 P5), and link and note
+      kinds in the app.
+    acceptance_criteria:
+      - "javascript:/data:/file: links refused (VAL-001)"  # DONE — evidence-flow.test
+      - "note active at once, text round-trips"            # DONE
+      - "web form validates http(s)"                       # DONE — LinkNotePage.test
+
