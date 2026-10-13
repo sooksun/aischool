@@ -45,8 +45,10 @@ export interface OidcClaims {
   userId: string;
   /** Level of authentication (ACR_LEVELS), after effectiveAcr. */
   acr: number;
-  /** Keycloak session id, for device-session revocation (P2). */
+  /** Keycloak session id, for device-session revocation (FR-093). */
   sessionId: string | null;
+  /** The client the token was issued to (`azp`) — seip-mobile for the app. */
+  clientId: string | null;
 }
 
 export interface OidcVerifierOptions {
@@ -89,6 +91,7 @@ export function createOidcVerifier(opts: OidcVerifierOptions): (token: string) =
     const authTime = typeof payload.auth_time === 'number' ? payload.auth_time : null;
     const acr = effectiveAcr(level, authTime);
     const sessionId = typeof payload.sid === 'string' ? payload.sid : null;
-    return { userId, acr, sessionId };
+    const clientId = typeof payload.azp === 'string' ? payload.azp : null;
+    return { userId, acr, sessionId, clientId };
   };
 }

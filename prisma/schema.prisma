@@ -315,6 +315,7 @@ model UserAccount {
   workloadDecls     WorkloadDeclaration[]
   approvals         Approval[]
   refreshTokens     RefreshToken[]
+  deviceSessions DeviceSession[]
   webSessions       WebSession[]
 
   @@map("user_account")
@@ -364,6 +365,24 @@ model WebSession {
 
   @@index([userId, revokedAt])
   @@map("web_session")
+}
+
+/// FR-093: an app sign-in (a Keycloak offline session of seip-mobile). Revoking
+/// it ends the Keycloak session and refuses its tokens at once.
+model DeviceSession {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  kcSessionId String    @unique @map("kc_session_id")
+  platform    String // 'android' | 'ios' (CHECK in the migration)
+  appVersion  String?   @map("app_version")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  revokedAt   DateTime? @map("revoked_at")
+
+  user UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@map("device_session")
 }
 
 /// Role of a user within a school, or across an area (area_admin, read-only per

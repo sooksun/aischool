@@ -19,7 +19,8 @@ function kcToken(claims: Record<string, unknown>, { exp = '60s', iss = ISSUER, a
 }
 
 test('maps seip_uid to the account and acr to its level', async () => {
-  assert.deepEqual(await verify(await kcToken({})), { userId: UID, acr: 1, sessionId: 's1' });
+  assert.deepEqual(await verify(await kcToken({})), { userId: UID, acr: 1, sessionId: 's1', clientId: null });
+  assert.equal((await verify(await kcToken({ azp: 'seip-mobile' }))).clientId, 'seip-mobile', 'azp names the device client');
   assert.equal((await verify(await kcToken({ acr: 'mfa' }))).acr, 2);
 });
 

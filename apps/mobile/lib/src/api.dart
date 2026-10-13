@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:seip_api/seip_api.dart';
 
 import 'auth.dart';
@@ -11,6 +12,13 @@ const apiBaseUrl = String.fromEnvironment(
   'SEIP_API_URL',
   defaultValue: 'http://10.0.2.2:3011/api/v1',
 );
+
+/// `--dart-define=SEIP_APP_VERSION=…` (the pubspec version by default).
+const appVersion = String.fromEnvironment('SEIP_APP_VERSION', defaultValue: '0.1.0');
+
+/// How the API labels this device in the person's device list (FR-093).
+String userAgent([TargetPlatform? platform]) =>
+    'SEIP-Mobile/$appVersion (${(platform ?? defaultTargetPlatform) == TargetPlatform.iOS ? 'ios' : 'android'})';
 
 /// Holds the session and the generated client.
 ///
@@ -26,6 +34,7 @@ class SeipSession {
       onRequest: (options, handler) {
         final token = _accessToken;
         if (token != null) options.headers['Authorization'] = 'Bearer $token';
+        options.headers['User-Agent'] = userAgent();
         handler.next(options);
       },
       onError: _renewOn401,

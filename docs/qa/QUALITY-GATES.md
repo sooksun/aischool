@@ -162,6 +162,14 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-012, device sessions, no contract change)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `test:unit` · `gate:contracts` · `gate:ownership` | pass. Auth unit 25 (+azp), web unit 45 |
+| api · security · database · `test:backend` | 122 (+2 devices, real Keycloak) · 12 · 23 · 27 |
+| mobile analyse · test | pass, 10 (+1 User-Agent) |
+
 ## Verified runs (2026-10-13, local — SEIP-P1-011, transfer within one สพท., no contract change)
 
 | Command | Result |

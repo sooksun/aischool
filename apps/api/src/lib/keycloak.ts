@@ -43,6 +43,8 @@ export type ProvisionResult = 'created' | 'exists' | 'conflict';
 
 export interface Provisioner {
   ensureAccount(input: ProvisionInput): Promise<ProvisionResult>;
+  /** Deletes a user session — offline (an app's) or online. Gone already is fine. */
+  endSession(kcSessionId: string, offline: boolean): Promise<void>;
 }
 
 export interface Keycloak {
@@ -102,6 +104,12 @@ function createProvisioner(issuer: string, clientId: string, secret: string): Pr
       if (created.status === 201) return 'created';
       if (created.status === 409) return 'conflict';
       throw new Error(`keycloak create user ${created.status}`);
+    },
+    async endSession(kcSessionId, offline) {
+      // The admin "sign out" of a user does not reliably end offline sessions;
+      // deleting the session itself does (tests/helpers/keycloak.mjs).
+      const res = await call(`/sessions/${encodeURIComponent(kcSessionId)}?isOffline=${offline}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 404) throw new Error(`keycloak delete session ${res.status}`);
     },
   };
 }

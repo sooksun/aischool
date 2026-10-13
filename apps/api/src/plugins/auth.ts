@@ -11,7 +11,7 @@ import {
 } from '@seip/auth';
 import {
   getUserById, getMembershipsForUser, getPersonnelForUser, getSchoolAreaId,
-  getLiveWebSession, touchWebSession, claimKeycloakCheck, recordKeycloakCheck, revokeWebSession,
+  getLiveWebSession, touchWebSession, claimKeycloakCheck, recordKeycloakCheck, revokeWebSession, seeDeviceSession,
 } from '@seip/database';
 import { ApiError, isExempt } from '@seip/backend-shared';
 import type { Env } from '../env.js';
@@ -38,6 +38,23 @@ export interface AuthedRequest {
   acr: number;
   /** Whether permissions.yaml `min_acr` is enforced (ENFORCE_MIN_ACR). */
   enforceMinAcr: boolean;
+  /** The device_session / web_session this request came through, if any (FR-093). */
+  sessionId?: string | null;
+}
+
+interface Identity { userId: string; acr: number; sessionId?: string | null }
+
+/** The app's Keycloak client (infra/keycloak/seip-realm.dev.json). */
+export const MOBILE_CLIENT_ID = 'seip-mobile';
+
+/**
+ * The app sends `User-Agent: SEIP-Mobile/<version> (<android|ios>)`. Anything
+ * else from the mobile client is recorded as android — the pilot's devices —
+ * rather than refused; the platform is a label, never a security decision.
+ */
+export function clientOf(ua: string | undefined): { platform: 'android' | 'ios'; appVersion: string | null } {
+  const m = /SEIP-Mobile\/([\w.+-]{1,32})/.exec(ua ?? '');
+  return { platform: /\b(ios|iphone|ipad)\b/i.test(ua ?? '') ? 'ios' : 'android', appVersion: m ? m[1] : null };
 }
 
 declare module 'fastify' {
@@ -58,12 +75,27 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = fp(async (app: 
   /** Bearer token (mobile, scripts, tests): HS256 is ours; anything else is
    * Keycloak's, and only if a realm is configured. Without one an RS256 token is
    * simply invalid (AUTH-001). */
-  async function fromBearer(token: string): Promise<{ userId: string; acr: number }> {
+  async function fromBearer(request: FastifyRequest, token: string): Promise<Identity> {
+    let claims;
     try {
-      if (keycloak && isExternalToken(token)) {
-        const { userId, acr } = await keycloak.verifyAccessToken(token);
-        return { userId, acr };
+      if (keycloak && isExternalToken(token)) claims = await keycloak.verifyAccessToken(token);
+    } catch (e) {
+      if (e instanceof AccessTokenExpiredError) throw new ApiError('AUTH-002', 'Token expired');
+      throw new ApiError('AUTH-001', 'Invalid token');
+    }
+    if (claims) {
+      // The app's sign-in is a device session (FR-093): recorded on first sight,
+      // and once revoked here its tokens are refused at once.
+      if (claims.clientId === MOBILE_CLIENT_ID && claims.sessionId) {
+        const device = await seeDeviceSession({
+          userId: claims.userId, kcSessionId: claims.sessionId, ...clientOf(request.headers['user-agent']),
+        });
+        if (!device) throw new ApiError('AUTH-001', 'This device was signed out');
+        return { userId: claims.userId, acr: claims.acr, sessionId: device.id };
       }
+      return { userId: claims.userId, acr: claims.acr };
+    }
+    try {
       const { sub } = await verifyAccessToken(token, env.JWT_SECRET);
       return { userId: sub, acr: OWN_TOKEN_ACR };
     } catch (e) {
@@ -75,7 +107,7 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = fp(async (app: 
   /** Cookie session (web BFF, CCR-018): live row, CSRF on writes, and at most
    * once a minute a refresh against Keycloak so a session ended there (logout
    * elsewhere, admin revoke) ends here too. */
-  async function fromSession(request: FastifyRequest, cookie: string): Promise<{ userId: string; acr: number }> {
+  async function fromSession(request: FastifyRequest, cookie: string): Promise<Identity> {
     const session = await getLiveWebSession(sha256(cookie));
     if (!session) throw new ApiError('AUTH-001', 'Session expired or unknown');
     if (!SAFE_METHODS.has(request.method)) {
@@ -102,7 +134,7 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = fp(async (app: 
     }
     await touchWebSession(session);
     // The session's sign-in is its auth time; a step-up does not last its 8 h.
-    return { userId: session.userId, acr: effectiveAcr(session.acr, session.createdAt.getTime() / 1000) };
+    return { userId: session.userId, acr: effectiveAcr(session.acr, session.createdAt.getTime() / 1000), sessionId: session.id };
   }
 
   app.addHook('preHandler', async (request: FastifyRequest) => {
@@ -111,11 +143,11 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = fp(async (app: 
 
     const header = request.headers.authorization;
     const cookie = parseCookies(request.headers.cookie)[SESSION_COOKIE];
-    let identity: { userId: string; acr: number };
-    if (header?.startsWith('Bearer ')) identity = await fromBearer(header.slice('Bearer '.length));
+    let identity: Identity;
+    if (header?.startsWith('Bearer ')) identity = await fromBearer(request, header.slice('Bearer '.length));
     else if (cookie) identity = await fromSession(request, cookie);
     else throw new ApiError('AUTH-001', 'Missing bearer token or session');
-    const { userId, acr } = identity;
+    const { userId, acr, sessionId = null } = identity;
 
     const user = await getUserById(userId);
     if (!user || user.status !== 'active') throw new ApiError('AUTH-003', 'Account disabled or not found');
@@ -127,7 +159,7 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = fp(async (app: 
 
     request.auth = {
       userId, tenancy, currentSchoolId, personnel, personId: user.personId ?? null,
-      acr, enforceMinAcr: env.ENFORCE_MIN_ACR,
+      acr, enforceMinAcr: env.ENFORCE_MIN_ACR, sessionId,
     };
   });
 });

@@ -18,6 +18,7 @@ import { EvaluatorRoundPage } from './pages/evaluator/EvaluatorRoundPage';
 import { AssignmentScorePage } from './pages/evaluator/AssignmentScorePage';
 import { MembersPage } from './pages/admin/MembersPage';
 import { AreaSchoolsPage } from './pages/area/AreaSchoolsPage';
+import { DevicesPage } from './pages/DevicesPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AgreementPage } from './pages/agreements/AgreementPage';
 
@@ -109,6 +110,9 @@ function AppNav() {
           งานกรรมการ
         </Link>
       )}
+      <Link to="/devices" className={location.pathname === '/devices' ? 'active' : ''}>
+        อุปกรณ์
+      </Link>
       {viewReports && (
         <Link to="/reports" className={location.pathname.startsWith('/reports') ? 'active' : ''}>
           รายงาน PA
@@ -185,6 +189,8 @@ export function App() {
         <Route path="/admin/members" element={
           <RequireCapability capability="manageMembers"><MembersPage /></RequireCapability>
         } />
+
+        <Route path="/devices" element={<RequireAuth><DevicesPage /></RequireAuth>} />
 
         <Route path="/area/schools" element={
           <RequireCapability capability="manageAreaSchools"><AreaSchoolsPage /></RequireCapability>

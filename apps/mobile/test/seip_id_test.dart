@@ -130,6 +130,11 @@ void main() {
     expect(m.idp.authorizeAcrs, isEmpty, reason: 'no browser round trip');
   });
 
+  test('requests name the app and platform for the device list', () {
+    expect(userAgent(TargetPlatform.iOS), 'SEIP-Mobile/$appVersion (ios)');
+    expect(userAgent(TargetPlatform.android), 'SEIP-Mobile/$appVersion (android)');
+  });
+
   test('step-up signs in again asking for the second factor', () async {
     final m = _make();
     await m.session.signInWithSeipId();

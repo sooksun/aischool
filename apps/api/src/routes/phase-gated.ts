@@ -17,12 +17,11 @@ const GATED: [Method, string, string, string][] = [
   ['post', '/suggestions/:suggestionId/accept', 'acceptSuggestion', 'P3'],
   ['post', '/suggestions/accept-batch', 'acceptSuggestions', 'P3'],
   ['post', '/suggestions/:suggestionId/reject', 'rejectSuggestion', 'P3'],
-  // Offline sync and devices — P2 (capture once, offline outbox)
+  // Offline sync and push tokens — P2 (capture once, offline outbox). The device
+  // list and revocation are served since SEIP-P1-012 (routes/devices.ts).
   ['get', '/sync/changes', 'getChanges', 'P2'],
-  ['get', '/devices', 'listDeviceSessions', 'P2'],
   ['put', '/devices/current/push-token', 'registerPushToken', 'P2'],
   ['delete', '/devices/current/push-token', 'removePushToken', 'P2'],
-  ['delete', '/devices/:deviceSessionId', 'revokeDeviceSession', 'P2'],
   // Notifications, coverage, committee evidence view — P4
   ['get', '/notifications', 'listNotifications', 'P4'],
   ['post', '/notifications/read', 'markNotificationsRead', 'P4'],

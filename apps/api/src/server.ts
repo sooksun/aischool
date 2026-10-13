@@ -13,6 +13,7 @@ import { scoringRoutes } from './routes/scoring.js';
 import { reportRoutes } from './routes/reports.js';
 import { memberRoutes } from './routes/members.js';
 import { areaRoutes } from './routes/areas.js';
+import { deviceRoutes } from './routes/devices.js';
 import { agreementRoutes } from './routes/agreements.js';
 import { phaseGatedRoutes } from './routes/phase-gated.js';
 import { webAuthRoutes } from './routes/web-auth.js';
@@ -61,6 +62,7 @@ export async function buildServer() {
     await v1.register(phaseGatedRoutes);
     await v1.register(memberRoutes);
     await v1.register(areaRoutes);
+    await v1.register(deviceRoutes, { keycloak });
     await v1.register(agreementRoutes);
   }, { prefix: '/api/v1' });
 

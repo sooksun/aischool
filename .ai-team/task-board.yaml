@@ -1472,3 +1472,34 @@ tasks:
       - "old school cannot find or open evidence added after the move"       # DONE — transfer.test
       - "mapping confirmed after the move is validated by the new school"     # DONE — transfer.test
 
+  - id: SEIP-P1-012
+    title: "P1 — FR-093 device sessions: list each app sign-in and browser, revoke one"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-004, SEIP-P1-006]
+    decisions: [ADR-0014]
+    primary_paths:
+      - prisma/migrations/20261013000500_device_session/migration.sql
+      - apps/api/src/routes/devices.ts
+      - apps/api/src/plugins/auth.ts
+      - apps/api/src/lib/keycloak.ts
+      - packages/database/src/repositories/device-sessions.ts
+      - apps/web/src/pages/DevicesPage.tsx
+      - apps/mobile/lib/src/api.dart
+      - apps/api/test/devices.test.mjs
+    notes: >
+      No contract change: listDeviceSessions and revokeDeviceSession were already in
+      contract 4.0.0, phase-gated for P2, and are served now. An app sign-in (a
+      seip-mobile Keycloak session, the token's sid) becomes a device_session row
+      on first sight. The platform and version come from the app's User-Agent
+      "SEIP-Mobile/<v> (<android|ios>)". Revoking marks the row first, so the app's
+      tokens are refused at once, then deletes the Keycloak offline session, so it
+      cannot renew. The app then wipes its stored session (SeipSession.signOut).
+      Browser sessions come from web_session. Not done: push tokens (P2) and
+      device labels.
+    acceptance_criteria:
+      - "user lists app and browser sessions; current flagged"                # DONE — devices.test
+      - "revoke refuses the device's tokens at once and ends the Keycloak session" # DONE — devices.test
+      - "another person's session is RES-001"                                 # DONE — devices.test
+      - "app wipes local session when renewal is refused"                     # DONE — seip_id_test (SEIP-P1-006)
+
