@@ -24,11 +24,14 @@ class OutboxItem {
     required this.clientUuid,
     required this.categoryId,
     required this.title,
-    required this.filename,
-    required this.contentType,
-    required this.byteSize,
-    required this.sha256,
-    required this.path,
+    this.filename = '',
+    this.contentType = '',
+    this.byteSize = 0,
+    this.sha256 = '',
+    this.path = '',
+    this.kind = EvidenceKind.file,
+    this.linkUrl,
+    this.noteText,
     this.durationMs,
     this.groupUuid,
     this.evidenceId,
@@ -49,6 +52,11 @@ class OutboxItem {
 
   /// Where the bytes are, in the app's private storage (never the public gallery).
   final String path;
+
+  /// FR-015: a link or a note has no bytes — the item alone is the evidence.
+  final EvidenceKind kind;
+  final String? linkUrl;
+  final String? noteText;
 
   /// Video/audio length as the capture screen measured it; video categories need it.
   final int? durationMs;
@@ -79,6 +87,9 @@ class OutboxItem {
     'path': path,
     'duration_ms': durationMs,
     'group_uuid': groupUuid,
+    'kind': kind.name,
+    'link_url': linkUrl,
+    'note_text': noteText,
     'evidence_id': evidenceId,
     'upload_id': uploadId,
     'file_id': fileId,
@@ -98,6 +109,9 @@ class OutboxItem {
     path: j['path']! as String,
     durationMs: j['duration_ms'] as int?,
     groupUuid: j['group_uuid'] as String?,
+    kind: j['kind'] == null ? EvidenceKind.file : EvidenceKind.values.byName(j['kind']! as String),
+    linkUrl: j['link_url'] as String?,
+    noteText: j['note_text'] as String?,
     evidenceId: j['evidence_id'] as String?,
     uploadId: j['upload_id'] as String?,
     fileId: j['file_id'] as String?,
@@ -284,8 +298,10 @@ class Outbox {
         body: EvidenceCreate(
           categoryId: item.categoryId,
           title: item.title,
-          kind: EvidenceKind.file,
+          kind: item.kind,
           clientUuid: item.evidenceClientUuid,
+          linkUrl: item.linkUrl,
+          noteText: item.noteText,
           containsLearners: EvidenceCreateContainsLearners.unknown,
         ),
       );
@@ -294,6 +310,9 @@ class Outbox {
       }
       await _save(items);
     }
+
+    // FR-015: a link or note is finished once the server has the item.
+    if (item.kind != EvidenceKind.file) return true;
 
     if (item.state != OutboxState.verifying) {
       UploadSession? session = item.uploadId == null ? null : await api.uploads.getUpload(uploadId: item.uploadId!);

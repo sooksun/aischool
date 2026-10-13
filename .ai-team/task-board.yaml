@@ -1815,10 +1815,13 @@ tasks:
       schema change. A new page, /evidence/link-note ("ลิงก์/บันทึก" in the nav), is
       idempotent per form. The detail page shows the link (noopener, noreferrer,
       nofollow) or the note as plain text, and hides the file section for those kinds.
-      Not done: snapshot policy and broken-link checks (FR-015 P5), and link and note
-      kinds in the app.
+      The app (same day) gained a "ลิงก์/บันทึก" dialog. The item rides the offline
+      outbox with kind, link_url and note_text, and is done once the server creates it,
+      since there is nothing to upload. Not done: snapshot policy and broken-link checks
+      (FR-015 P5).
     acceptance_criteria:
       - "javascript:/data:/file: links refused (VAL-001)"  # DONE — evidence-flow.test
       - "note active at once, text round-trips"            # DONE
       - "web form validates http(s)"                       # DONE — LinkNotePage.test
+      - "app: note queued offline, created once, no upload" # DONE — outbox_test, capture_flow_test
 

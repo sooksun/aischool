@@ -303,4 +303,18 @@ void main() {
     expect(await m.outbox.items(), isEmpty);
     expect(m.bytes.data, isEmpty);
   });
+
+  test('FR-015: a note queued offline is created once when the network is back, with no upload', () async {
+    final m = _make();
+    m.server.offline = true;
+    await m.outbox.add(OutboxItem(clientUuid: newClientUuid(), categoryId: 'c', title: 'บันทึกหลังสอน', kind: EvidenceKind.note, noteText: 'อ่านคล่องขึ้น'));
+    await m.outbox.drain();
+    expect((await m.outbox.items()).single.state, OutboxState.queued);
+    m.server.offline = false;
+    await m.outbox.drain();
+    await m.outbox.drain();
+    expect(await m.outbox.items(), isEmpty);
+    expect(m.server.evidenceCreated, 1);
+    expect(m.server.sessionsCreated, 0);
+  });
 }

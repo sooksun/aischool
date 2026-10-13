@@ -267,6 +267,26 @@ class _HomeScreenState extends State<HomeScreen> {
     await _sync();
   }
 
+  /// FR-015: a link or a typed note — no bytes; queued like a capture so it
+  /// works offline and is created once.
+  Future<void> _addLinkNote() async {
+    List<EvidenceCategory> categories;
+    try {
+      categories = await widget.session.api.taxonomy.listEvidenceCategories();
+    } catch (_) {
+      categories = const [];
+    }
+    if (!mounted) return;
+    if (categories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('ยังไม่ได้เชื่อมต่อ — โหลดประเภทหลักฐานไม่ได้')));
+      return;
+    }
+    final item = await showDialog<OutboxItem>(context: context, builder: (_) => LinkNoteDialog(categories: categories));
+    if (item == null) return;
+    await _outbox.add(item);
+    await _sync();
+  }
+
   @override
   Widget build(BuildContext context) {
     final me = widget.me;
@@ -319,6 +339,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () => _capture(CaptureKind.gallery),
                   icon: const Icon(Icons.photo_library_outlined),
                   label: const Text('เลือกจากคลัง'),
+                ),
+                OutlinedButton.icon(
+                  key: const Key('addLinkNote'),
+                  onPressed: _addLinkNote,
+                  icon: const Icon(Icons.link),
+                  label: const Text('ลิงก์/บันทึก'),
                 ),
               ],
             ),
@@ -385,6 +411,92 @@ class _DetailsDialogState extends State<_DetailsDialog> {
           onPressed: () => Navigator.pop(context, (_category, _title.text.trim().isEmpty ? widget.suggestedTitle : _title.text.trim())),
           child: const Text('บันทึก'),
         ),
+      ],
+    );
+  }
+}
+
+/// http(s) only — what the server accepts for a link.
+bool isWebAddress(String value) {
+  final u = Uri.tryParse(value.trim());
+  return u != null && (u.scheme == 'http' || u.scheme == 'https') && u.host.isNotEmpty;
+}
+
+class LinkNoteDialog extends StatefulWidget {
+  const LinkNoteDialog({super.key, required this.categories});
+  final List<EvidenceCategory> categories;
+
+  @override
+  State<LinkNoteDialog> createState() => _LinkNoteDialogState();
+}
+
+class _LinkNoteDialogState extends State<LinkNoteDialog> {
+  final _title = TextEditingController();
+  final _body = TextEditingController();
+  late EvidenceCategory _category = widget.categories.first;
+  EvidenceKind _kind = EvidenceKind.link;
+  String? _error;
+
+  void _save() {
+    final title = _title.text.trim();
+    final body = _body.text.trim();
+    if (title.isEmpty) return setState(() => _error = 'กรุณาระบุชื่อหลักฐาน');
+    if (_kind == EvidenceKind.link && !isWebAddress(body)) {
+      return setState(() => _error = 'ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://');
+    }
+    if (_kind == EvidenceKind.note && body.isEmpty) return setState(() => _error = 'กรุณาพิมพ์บันทึก');
+    Navigator.pop(
+      context,
+      OutboxItem(
+        clientUuid: newClientUuid(),
+        categoryId: _category.id,
+        title: title,
+        kind: _kind,
+        linkUrl: _kind == EvidenceKind.link ? body : null,
+        noteText: _kind == EvidenceKind.note ? body : null,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final link = _kind == EvidenceKind.link;
+    return AlertDialog(
+      title: const Text('ลิงก์หรือบันทึก'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SegmentedButton<EvidenceKind>(
+              key: const Key('linkNoteKind'),
+              segments: const [
+                ButtonSegment(value: EvidenceKind.link, label: Text('ลิงก์')),
+                ButtonSegment(value: EvidenceKind.note, label: Text('บันทึก')),
+              ],
+              selected: {_kind},
+              onSelectionChanged: (v) => setState(() => _kind = v.first),
+            ),
+            DropdownButtonFormField<EvidenceCategory>(
+              initialValue: _category,
+              decoration: const InputDecoration(labelText: 'ประเภท'),
+              items: [for (final c in widget.categories) DropdownMenuItem(value: c, child: Text(c.labelTh))],
+              onChanged: (c) => setState(() => _category = c ?? _category),
+            ),
+            TextField(key: const Key('lnTitle'), controller: _title, decoration: const InputDecoration(labelText: 'ชื่อหลักฐาน')),
+            TextField(
+              key: const Key('lnBody'),
+              controller: _body,
+              keyboardType: link ? TextInputType.url : TextInputType.multiline,
+              maxLines: link ? 1 : 6,
+              decoration: InputDecoration(labelText: link ? 'ลิงก์ (https://…)' : 'บันทึก'),
+            ),
+            if (_error != null) Text(_error!, key: const Key('lnError'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('ยกเลิก')),
+        FilledButton(key: const Key('lnSave'), onPressed: _save, child: const Text('บันทึก')),
       ],
     );
   }

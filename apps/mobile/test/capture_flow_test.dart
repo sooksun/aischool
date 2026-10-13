@@ -155,4 +155,34 @@ void main() {
     expect(find.text('3 รูป · รอส่ง'), findsOneWidget);
     expect(find.text('วันภาษาไทย'), findsOneWidget);
   });
+
+  testWidgets('FR-015: a link must be http(s); a good one is queued as รอส่ง', (tester) async {
+    final session = SeipSession(dio: Dio()..httpClientAdapter = _OfflineApi(), baseUrl: 'https://api.test/api/v1');
+    final store = MemoryOutboxStore();
+    final services = AppServices(
+      outboxFor: (api) => Outbox(api: api, store: store, bytes: _NoBytes(), objects: _NoObjects()),
+      capture: _FakeCapture(),
+      hash: (_) async => 'c' * 64,
+    );
+    const me = CurrentUser(id: 'u', email: 'kru@seip.local', displayName: 'ครูสมศรี', memberships: []);
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(session: session, me: me, services: services)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('addLinkNote')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('lnTitle')), 'คลิปสอน');
+    await tester.enterText(find.byKey(const Key('lnBody')), 'javascript:alert(1)');
+    await tester.tap(find.byKey(const Key('lnSave')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('lnError')), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('lnBody')), 'https://youtu.be/abc');
+    await tester.tap(find.byKey(const Key('lnSave')));
+    await tester.pumpAndSettle();
+    final queued = (await store.load()).single;
+    expect(queued.kind, EvidenceKind.link);
+    expect(queued.linkUrl, 'https://youtu.be/abc');
+    expect(find.text('คลิปสอน'), findsOneWidget);
+    expect(find.text('รอส่ง'), findsOneWidget);
+  });
 }

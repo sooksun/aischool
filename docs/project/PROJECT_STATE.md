@@ -6,7 +6,7 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
-> **Links and notes (SEIP-P2-009, in review):** on the web, evidence can now be a link (YouTube, Drive) or a typed note. It maps to indicators like a file. Links must start with http(s).
+> **Links and notes (SEIP-P2-009, in review):** on the web and in the app (offline too), evidence can now be a link (YouTube, Drive) or a typed note. It maps to indicators like a file. Links must start with http(s).
 >
 > **Several photos, one item (SEIP-P2-008, in review):** in the app, after a photo the person can take more ("ถ่ายเพิ่ม"). All the photos become one evidence item, which is created once even when sending is retried.
 >
