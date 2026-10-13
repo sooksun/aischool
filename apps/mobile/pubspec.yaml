@@ -17,6 +17,7 @@ dependencies:
     path: ../../clients/dart/seip_api
   flutter_appauth: ^12.1.0
   flutter_secure_storage: ^11.2.0
+  crypto: ^3.0.6
 
 dev_dependencies:
   flutter_test:

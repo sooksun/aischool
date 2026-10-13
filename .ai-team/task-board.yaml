@@ -1626,3 +1626,32 @@ tasks:
       - "owner sees duplicates before bytes move; never another person's"   # DONE
       - "worker marks the later copy after re-hash"                          # DONE
 
+  - id: SEIP-P2-002
+    title: "P2 — FR-006 / FR-009 offline outbox and resumable upload in the app (engine)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-006, SEIP-P2-001]
+    decisions: [ADR-0016, ADR-0018]
+    primary_paths:
+      - apps/mobile/lib/src/outbox.dart
+      - apps/mobile/test/outbox_test.dart
+      - apps/mobile/test/live_outbox_test.dart
+      - apps/mobile/android/app/src/main/AndroidManifest.xml
+    notes: >
+      No contract change. The engine keeps the queue in the platform keystore
+      (SecureOutboxStore). Evidence and upload creates replay with stable UUID
+      Idempotency-Keys derived from client_uuid. A resume sends only the parts the
+      server's ListParts lacks, and an expired session is replaced automatically.
+      The local copy is deleted only after sha256_verified_at plus a clean or
+      sanitised scan; a blocked file stays for the person. Android backup is off. Not
+      done: the capture screens (photo, scan, video, share-in), running the drain
+      from a background worker (WorkManager / BGTaskScheduler), encrypting the bytes
+      at rest, the iOS backup-exclusion flag, the 1 GB device test on a low-cost
+      phone, and the 720p rendition.
+    acceptance_criteria:
+      - "offline capture waits; sent when online"                                # DONE — outbox_test
+      - "drop + restart resumes from server ListParts, no part sent twice"         # DONE — outbox_test, live_outbox_test (17 MiB, real API + SeaweedFS)
+      - "expired session replaced automatically"                                  # DONE
+      - "20 replays while flaky make no duplicate"                                # DONE
+      - "local copy deleted only after re-hash + clean scan"                      # DONE
+

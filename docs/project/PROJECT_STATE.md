@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Offline outbox engine (SEIP-P2-002, in review, no contract change):** in the app, evidence captured offline waits in an outbox that survives the app being closed. Bytes go up resumably, sending only the parts the server lacks, and an expired session is replaced. Twenty flaky replays make no duplicate. The local copy is deleted only after the server's re-hash and a clean scan. This was verified live with a 17 MiB file against the real API, SeaweedFS and worker. The capture screens and background running come next.
+>
 > **P2 started — duplicate files (SEIP-P2-001, in review, contract 4.8.0 / CCR-026 additive):** when a person picks a file their portfolio already holds, the web warns them and links to the earlier item before any bytes are sent. After the server re-hashes the file, it marks the later copy.
 >
 > **Owner decisions applied (SEIP-P1-016, CCR-025, permissions 2.7.0):** a director's agreement (ว10) is acknowledged by the area admin, not by anyone in the school. After a teacher moves, the old school keeps only the items its own evaluation mapped. A school admin may still reset a director's password (CCR-022, unchanged).

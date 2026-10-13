@@ -162,6 +162,13 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P2-002, offline outbox engine)
+
+| Command | Result |
+|---|---|
+| mobile `flutter analyze --fatal-infos` · `flutter test` | pass, 15 (+5 outbox), 2 live skipped |
+| `SEIP_API_URL=… flutter test test/live_outbox_test.dart test/live_api_test.dart` | 2/2 against the real API + SeaweedFS + worker: 17 MiB, drop after part 1, restart, only part 2 resent, sha256 verified |
+
 ## Verified runs (2026-10-13, local — SEIP-P2-001, duplicate files, contract 4.8.0)
 
 | Command | Result |
