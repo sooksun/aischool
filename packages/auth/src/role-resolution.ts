@@ -11,6 +11,8 @@ export interface MembershipRow {
   status: string;
   effectiveFrom: Date;
   effectiveTo: Date | null;
+  /** CCR-021: false when the school has been closed by its area admin. */
+  schoolActive?: boolean;
 }
 
 export interface TenancyContext {
@@ -24,6 +26,8 @@ export interface TenancyContext {
 /** In effect at `now`: active, started, not ended. The one rule for access and for /auth/me. */
 export function isActiveNow(m: MembershipRow, now: Date): boolean {
   if (m.status !== 'active') return false;
+  // A closed school (CCR-021) grants nothing through its memberships.
+  if (m.schoolActive === false) return false;
   if (m.effectiveFrom > now) return false;
   if (m.effectiveTo && m.effectiveTo < now) return false;
   return true;

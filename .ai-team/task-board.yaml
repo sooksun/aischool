@@ -1421,3 +1421,28 @@ tasks:
       - "two schools: picker, remembered; one school: no picker"          # DONE — school-picker.spec + unit
       - "contract 4.3.0 additive (oasdiff clean)"                          # DONE
       - "CI green on the pushed commit"                                    # DONE — run 38348405185 on f3e0024
+
+  - id: SEIP-P1-010
+    title: "P1 — FR-090 area admin manages the schools of their area (CCR-021, contract 4.4.0, permissions 2.3.0)"
+    status: review              # 2026-10-13 — awaiting owner approval of CCR-021 before merge
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001, SEIP-P1-008]
+    decisions: [CCR-021]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - docs/reviews/CCR-021-area-admin-manages-schools.md
+      - apps/api/src/routes/areas.ts
+      - packages/database/src/repositories/schools.ts
+      - packages/auth/src/role-resolution.ts
+      - apps/web/src/pages/area/AreaSchoolsPage.tsx
+    notes: >
+      First writes for area_admin (closed list area_admin_writes, min_acr 2). Another
+      area is RES-001. A closed school ends member access through isActiveNow; data
+      is kept. Not done: OQ-33 (สศศ. schools), a per-tenant controller setting.
+    acceptance_criteria:
+      - "area admin lists/creates/renames/closes schools of own area only"   # DONE — area-schools.test
+      - "appoint school_admin via invite"                                    # DONE — area-schools.test
+      - "closed school ends member access"                                   # DONE — area-schools.test
+      - "matrix sweep + step-up cover the 4 ops"                              # DONE
+      - "owner approves CCR-021"                                              # PENDING

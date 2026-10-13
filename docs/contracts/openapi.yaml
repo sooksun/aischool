@@ -1,4 +1,7 @@
 openapi: 3.1.0
+# version 4.4.0 — CCR-021 (additive operations; permissions policy change awaiting
+#   owner approval): an area admin manages the schools of their own area — list,
+#   create, open/close, appoint a school admin (FR-090).
 # version 4.3.0 — CCR-020 (additive): CurrentUser.memberships[].school_name, for the
 #   school picker of a person who works at more than one school (FR-019).
 # version 4.2.0 — CCR-019 (additive): importMembers — bulk onboarding from a staff
@@ -15,7 +18,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.3.0
+  version: 4.4.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -121,8 +124,10 @@ tags:
 - name: auth
   description: Authentication and session identity
 - name: members
-  description: School membership, personnel and invitations (school admin). School-scoped like every other resource
-    — there is no cross-school write anywhere in this contract.
+  description: School membership, personnel and invitations (school admin). School-scoped like every other resource.
+- name: areas
+  description: CCR-021 — an area admin manages the schools of their own area (FR-090). The only writes an
+    area-scoped role makes; every school-data operation stays read-only for it.
 - name: taxonomy
   description: Read-only versioned indicator taxonomy (ADR-0003) and evidence categories
 - name: cycles
@@ -570,6 +575,133 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /areas/{areaId}/schools:
+    get:
+      operationId: listAreaSchools
+      summary: The schools of one of the caller's areas (CCR-021, FR-090)
+      tags:
+      - areas
+      parameters:
+      - $ref: '#/components/parameters/AreaId'
+      responses:
+        '200':
+          description: Schools in the area, open and closed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AreaSchool'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createSchool
+      summary: Add a school to one of the caller's areas (CCR-021)
+      description: 'Replaces the operator CLI for the common case (scripts/ops/provision-school.mjs
+        stays for bootstrapping). The school starts `active`. Its code is unique system-wide;
+        a taken code is RES-002.
+
+        '
+      tags:
+      - areas
+      parameters:
+      - $ref: '#/components/parameters/AreaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AreaSchoolCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AreaSchool'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /schools/{schoolId}:
+    patch:
+      operationId: updateSchool
+      summary: Rename a school, or open / close it (CCR-021)
+      description: 'Closing a school (`status: inactive`) ends access through every membership
+        at it: its staff can no longer act for it, though their own portfolios stay theirs
+        (ADR-0015). Area admins keep read access. Only an area admin of the school''s area
+        may call this; for anyone else the school does not exist (RES-001).
+
+        '
+      tags:
+      - areas
+      parameters:
+      - $ref: '#/components/parameters/SchoolIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AreaSchoolPatch'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AreaSchool'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /schools/{schoolId}/admins:
+    post:
+      operationId: appointSchoolAdmin
+      summary: Appoint a school admin at a school of the caller's area (CCR-021)
+      description: 'Exactly an inviteMember with role `school_admin` at that school — same
+        checks, same one-time invite token — made by the area admin rather than by the
+        school. This is how a new school gets its first admin.
+
+        '
+      tags:
+      - areas
+      parameters:
+      - $ref: '#/components/parameters/SchoolIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchoolAdminAppointment'
+      responses:
+        '201':
+          description: Invited — `invite_token` is returned exactly once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberInviteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
   /members/{membershipId}/end:
@@ -2466,6 +2598,20 @@ components:
 
         '
   parameters:
+    AreaId:
+      name: areaId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SchoolIdPath:
+      name: schoolId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     CsrfToken:
       name: X-CSRF-Token
       in: header
@@ -3024,6 +3170,72 @@ components:
           $ref: '#/components/schemas/Role'
         personnel:
           $ref: '#/components/schemas/MemberInvitePersonnel'
+    AreaSchool:
+      type: object
+      required:
+      - id
+      - code
+      - name
+      - area_id
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        area_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - active
+          - inactive
+    AreaSchoolCreate:
+      type: object
+      required:
+      - code
+      - name
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: Usually the ministry school code. Unique across the system.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+    AreaSchoolPatch:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        status:
+          type: string
+          enum:
+          - active
+          - inactive
+    SchoolAdminAppointment:
+      type: object
+      required:
+      - email
+      - display_name
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 200
     MemberImport:
       type: object
       required:

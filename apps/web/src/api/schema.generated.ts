@@ -263,6 +263,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/areas/{areaId}/schools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The schools of one of the caller's areas (CCR-021, FR-090) */
+        get: operations["listAreaSchools"];
+        put?: never;
+        /**
+         * Add a school to one of the caller's areas (CCR-021)
+         * @description Replaces the operator CLI for the common case (scripts/ops/provision-school.mjs stays for bootstrapping). The school starts `active`. Its code is unique system-wide; a taken code is RES-002.
+         */
+        post: operations["createSchool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schools/{schoolId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename a school, or open / close it (CCR-021)
+         * @description Closing a school (`status: inactive`) ends access through every membership at it: its staff can no longer act for it, though their own portfolios stay theirs (ADR-0015). Area admins keep read access. Only an area admin of the school's area may call this; for anyone else the school does not exist (RES-001).
+         */
+        patch: operations["updateSchool"];
+        trace?: never;
+    };
+    "/schools/{schoolId}/admins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Appoint a school admin at a school of the caller's area (CCR-021)
+         * @description Exactly an inviteMember with role `school_admin` at that school — same checks, same one-time invite token — made by the area admin rather than by the school. This is how a new school gets its first admin.
+         */
+        post: operations["appointSchoolAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/members/{membershipId}/end": {
         parameters: {
             query?: never;
@@ -1438,6 +1499,31 @@ export interface components {
             display_name: string;
             role: components["schemas"]["Role"];
             personnel?: components["schemas"]["MemberInvitePersonnel"];
+        };
+        AreaSchool: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** Format: uuid */
+            area_id: string;
+            /** @enum {string} */
+            status: "active" | "inactive";
+        };
+        AreaSchoolCreate: {
+            /** @description Usually the ministry school code. Unique across the system. */
+            code: string;
+            name: string;
+        };
+        AreaSchoolPatch: {
+            name?: string;
+            /** @enum {string} */
+            status?: "active" | "inactive";
+        };
+        SchoolAdminAppointment: {
+            /** Format: email */
+            email: string;
+            display_name: string;
         };
         MemberImport: {
             rows: components["schemas"]["MemberInvite"][];
@@ -2694,6 +2780,8 @@ export interface components {
         };
     };
     parameters: {
+        AreaId: string;
+        SchoolIdPath: string;
         /** @description Double-submit token for a cookie session (CCR-018); the value of the `__Host-seip-csrf` cookie. */
         CsrfToken: string;
         FrameworkId: string;
@@ -3033,6 +3121,122 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listAreaSchools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                areaId: components["parameters"]["AreaId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Schools in the area, open and closed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaSchool"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createSchool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                areaId: components["parameters"]["AreaId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AreaSchoolCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaSchool"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateSchool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schoolId: components["parameters"]["SchoolIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AreaSchoolPatch"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaSchool"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    appointSchoolAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schoolId: components["parameters"]["SchoolIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchoolAdminAppointment"];
+            };
+        };
+        responses: {
+            /** @description Invited — `invite_token` is returned exactly once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberInviteResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };

@@ -32,6 +32,8 @@ const kcUsers = [];
 let enforced, relaxed, noKeycloak;
 let school, roundId, categoryId, indicatorIds = [];
 const people = {};
+const areaUserIds = [];
+let area;
 
 async function serverWith(env) {
   const saved = {};
@@ -64,8 +66,11 @@ async function person(role, { personnel = false } = {}) {
     });
   }
   await prisma.schoolMembership.create({
-    data: { userId: user.id, schoolId: school.id, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
+    data: role === 'area_admin'
+      ? { userId: user.id, areaId: area.id, role, membershipScope: 'area', effectiveFrom: new Date('2020-01-01'), status: 'active' }
+      : { userId: user.id, schoolId: school.id, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
   });
+  if (role === 'area_admin') areaUserIds.push(user.id);
   const kc = await createUser(user.id);
   kcUsers.push(kc);
   const own = (await enforced.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: user.email, password } })).json().access_token;
@@ -78,7 +83,8 @@ before(async () => {
   relaxed = await serverWith({ KEYCLOAK_ISSUER, ENFORCE_MIN_ACR: 'false' });
   noKeycloak = await serverWith({ KEYCLOAK_ISSUER: undefined, ENFORCE_MIN_ACR: 'true' });
 
-  school = created.add(await prisma.school.create({ data: { code: `stepup-${randomUUID()}`, name: 'Step-up School' } }));
+  area = await prisma.area.create({ data: { code: `stepup-area-${randomUUID()}`, name: 'Step-up Area' } });
+  school = created.add(await prisma.school.create({ data: { code: `stepup-${randomUUID()}`, name: 'Step-up School', areaId: area.id } }));
   await prisma.rankLevel.upsert({
     where: { code: 'stepup_kru' }, create: { code: 'stepup_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 }, update: {},
   });
@@ -107,12 +113,15 @@ before(async () => {
   people.teacher = await person('teacher', { personnel: true });
   people.director = await person('director');
   people.admin = await person('school_admin');
+  people.areaAdmin = await person('area_admin');
 });
 
 after(async () => {
   if (skip) return;
   for (const u of kcUsers) await deleteUser(u);
-  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
+  await prisma.schoolMembership.deleteMany({ where: { userId: { in: areaUserIds } } });
+  await cleanupSchools(prisma, created.ids(), [...created.userIds(), ...areaUserIds], created.frameworkIds());
+  await prisma.area.delete({ where: { id: area.id } }).catch(() => {});
   await Promise.all([enforced, relaxed, noKeycloak].map((a) => a?.close()));
   await prisma.$disconnect();
 });
@@ -175,9 +184,13 @@ const OPERATION_LEVEL = {
   inviteMember: (token) => ({ method: 'POST', url: '/api/v1/members', headers: bearer(token), payload: {} }),
   importMembers: (token) => ({ method: 'POST', url: '/api/v1/members/import', headers: bearer(token), payload: {} }),
   endMembership: (token) => ({ method: 'POST', url: `/api/v1/members/${randomUUID()}/end`, headers: bearer(token) }),
+  createSchool: (token) => ({ method: 'POST', url: `/api/v1/areas/${area.id}/schools`, headers: bearer(token), payload: {} }),
+  updateSchool: (token) => ({ method: 'PATCH', url: `/api/v1/schools/${school.id}`, headers: bearer(token), payload: {} }),
+  appointSchoolAdmin: (token) => ({ method: 'POST', url: `/api/v1/schools/${school.id}/admins`, headers: bearer(token), payload: {} }),
   createAssignment: (token) => ({ method: 'POST', url: `/api/v1/rounds/${roundId}/assignments`, headers: bearer(token), payload: {} }),
 };
-const WHO = { inviteMember: 'admin', importMembers: 'admin', endMembership: 'admin', createAssignment: 'director' };
+const WHO = { inviteMember: 'admin', importMembers: 'admin', endMembership: 'admin', createAssignment: 'director',
+  createSchool: 'areaAdmin', updateSchool: 'areaAdmin', appointSchoolAdmin: 'areaAdmin' };
 
 test('every operation-level min_acr operation is gated', { skip }, async () => {
   for (const [op, request] of Object.entries(OPERATION_LEVEL)) {

@@ -12,6 +12,7 @@ import { cycleRoutes } from './routes/cycles.js';
 import { scoringRoutes } from './routes/scoring.js';
 import { reportRoutes } from './routes/reports.js';
 import { memberRoutes } from './routes/members.js';
+import { areaRoutes } from './routes/areas.js';
 import { agreementRoutes } from './routes/agreements.js';
 import { phaseGatedRoutes } from './routes/phase-gated.js';
 import { webAuthRoutes } from './routes/web-auth.js';
@@ -59,6 +60,7 @@ export async function buildServer() {
     if (env.FEATURE_SCORING) await v1.register(reportRoutes);
     await v1.register(phaseGatedRoutes);
     await v1.register(memberRoutes);
+    await v1.register(areaRoutes);
     await v1.register(agreementRoutes);
   }, { prefix: '/api/v1' });
 

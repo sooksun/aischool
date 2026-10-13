@@ -190,6 +190,12 @@ const OPERATIONS = () => ({
   // a previous role's successful invite in the same sweep.
   inviteMember: { method: 'POST', url: '/api/v1/members', payload: { email: `sweep-${randomUUID()}@x.io`, display_name: 'sweep', role: 'teacher' } },
   // CCR-019: a dry run, so a granted role gets 200 and nothing is written.
+  // CCR-021: the area admin's own area and school. Payloads that cannot change
+  // the shared fixture (a no-op rename; invalid bodies for the creates).
+  listAreaSchools: { method: 'GET', urlFor: async () => `/api/v1/areas/${area.id}/schools` },
+  createSchool: { method: 'POST', urlFor: async () => `/api/v1/areas/${area.id}/schools`, payload: {} },
+  updateSchool: { method: 'PATCH', urlFor: async () => `/api/v1/schools/${school.id}`, payload: { name: 'School' } },
+  appointSchoolAdmin: { method: 'POST', urlFor: async () => `/api/v1/schools/${school.id}/admins`, payload: {} },
   importMembers: { method: 'POST', url: '/api/v1/members/import', payload: { dry_run: true, rows: [{ email: `sweep-import-${randomUUID()}@x.io`, display_name: 'sweep', role: 'teacher' }] } },
   // Random membership id → RES-001 for granted roles (never PERM-001), same
   // philosophy as getReport below.

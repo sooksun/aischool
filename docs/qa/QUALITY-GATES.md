@@ -162,6 +162,14 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-010, area admin manages schools, contract 4.4.0 / permissions 2.3.0)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `gate:contracts` · `gate:ownership` | pass. oasdiff 4.3.0 → 4.4.0: no breaking changes (the policy change is in CCR-021, awaiting owner approval). Web unit 45 |
+| api · security · `test:backend` | 117 (+4 area-schools) · 12 (sweep covers the 4 new ops) · 27 |
+| Dart client analyse/test · mobile analyse/test | pass against 4.4.0 |
+
 ## Verified runs (2026-10-13, local — SEIP-P1-009, school context, contract 4.3.0)
 
 | Command | Result |

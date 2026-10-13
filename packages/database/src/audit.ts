@@ -44,6 +44,8 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   // FR-095 access_denied. The route template, not the URL: ids in a path are
   // not PII, but query strings could carry anything.
   Request: ['operationId', 'code', 'method', 'route'],
+  // CCR-021. A school's record is not personal data; all of it may be audited.
+  School: ['id', 'code', 'name', 'areaId', 'status'],
 };
 
 function allowlist(entityType: string, obj: Record<string, unknown> | undefined): Snapshot | undefined {

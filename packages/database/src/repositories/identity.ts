@@ -26,12 +26,13 @@ export async function getUserById(userId: string) {
 }
 
 export async function getMembershipsForUser(userId: string): Promise<(MembershipRow & { schoolName: string | null })[]> {
-  const rows = await prisma.schoolMembership.findMany({ where: { userId }, include: { school: { select: { name: true } } } });
+  const rows = await prisma.schoolMembership.findMany({ where: { userId }, include: { school: { select: { name: true, status: true } } } });
   return rows.map((r) => ({
     role: r.role,
     membershipScope: r.membershipScope,
     schoolId: r.schoolId,
     schoolName: r.school?.name ?? null,
+    schoolActive: r.school ? r.school.status === 'active' : undefined,
     areaId: r.areaId,
     status: r.status,
     effectiveFrom: r.effectiveFrom,

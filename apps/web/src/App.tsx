@@ -17,6 +17,7 @@ import { EvaluatorCyclePage } from './pages/evaluator/EvaluatorCyclePage';
 import { EvaluatorRoundPage } from './pages/evaluator/EvaluatorRoundPage';
 import { AssignmentScorePage } from './pages/evaluator/AssignmentScorePage';
 import { MembersPage } from './pages/admin/MembersPage';
+import { AreaSchoolsPage } from './pages/area/AreaSchoolsPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AgreementPage } from './pages/agreements/AgreementPage';
 
@@ -70,8 +71,8 @@ function AppNav() {
   const location = useLocation();
   if (!user || location.pathname === '/login') return null;
 
-  const { manageCycles, scoreAsCommittee, viewReports, submitEvidence, manageMembers } = capabilities;
-  if (!manageCycles && !scoreAsCommittee && !viewReports && !submitEvidence && !manageMembers) return null;
+  const { manageCycles, scoreAsCommittee, viewReports, submitEvidence, manageMembers, manageAreaSchools } = capabilities;
+  if (!manageCycles && !scoreAsCommittee && !viewReports && !submitEvidence && !manageMembers && !manageAreaSchools) return null;
 
   return (
     <nav className="app-nav" aria-label="เมนูหลัก">
@@ -96,6 +97,11 @@ function AppNav() {
       {manageMembers && (
         <Link to="/admin/members" className={location.pathname.startsWith('/admin') ? 'active' : ''}>
           บุคลากร
+        </Link>
+      )}
+      {manageAreaSchools && (
+        <Link to="/area/schools" className={location.pathname.startsWith('/area') ? 'active' : ''}>
+          โรงเรียนในเขต
         </Link>
       )}
       {scoreAsCommittee && (
@@ -178,6 +184,10 @@ export function App() {
 
         <Route path="/admin/members" element={
           <RequireCapability capability="manageMembers"><MembersPage /></RequireCapability>
+        } />
+
+        <Route path="/area/schools" element={
+          <RequireCapability capability="manageAreaSchools"><AreaSchoolsPage /></RequireCapability>
         } />
 
         <Route path="/reports" element={

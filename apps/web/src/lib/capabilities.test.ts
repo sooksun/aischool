@@ -89,6 +89,13 @@ describe('capabilitiesFromMemberships', () => {
     expect(capabilitiesFromMemberships([]).manageMembers).toBe(false);
   });
 
+  it('manageAreaSchools: area_admin only (CCR-021)', () => {
+    expect(capabilitiesFromMemberships([m('area_admin')]).manageAreaSchools).toBe(true);
+    for (const role of ['teacher', 'deputy', 'director', 'evaluator', 'school_admin'] as Role[]) {
+      expect(capabilitiesFromMemberships([m(role)]).manageAreaSchools).toBe(false);
+    }
+  });
+
   // ADR-0017: with FEATURE_SCORING off the API does not register the v2 routes,
   // so their screens must disappear rather than fail on every call.
   it('FEATURE_SCORING off: hides the v2 scoring and report affordances only', () => {

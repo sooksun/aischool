@@ -33,7 +33,10 @@
 #   New top-level `min_acr`: operations (or actions) that need step-up auth.
 # version: 2.1.0 — CCR-018 (additive): webLogin / webCallback / webLogout, unauthenticated.
 # version: 2.2.0 — CCR-019 (additive): importMembers, same grant and step-up as inviteMember.
-version: 2.2.0
+# version: 2.3.0 — CCR-021 (POLICY CHANGE, owner approval pending): area_admin may manage the
+#   schools of its own area — listAreaSchools, createSchool, updateSchool, appointSchoolAdmin.
+#   writes_by_area_admin stays forbidden for every other operation (area_admin_writes below).
+version: 2.3.0
 status: locked
 locked_at: 2026-07-17
 
@@ -43,7 +46,7 @@ roles:
   deputy:       { scope: school, description: รองผู้อำนวยการ — evaluatee ในสาย ว10 และผู้ช่วยงานบริหาร }
   evaluator:    { scope: school, description: กรรมการประเมินภายนอก/ภายในที่ถูกแต่งตั้งใน assignment }
   school_admin: { scope: school, description: ผู้ดูแลระบบระดับโรงเรียน — จัดการ cycle, รอบ, บุคลากร }
-  area_admin:   { scope: area,   description: เขตพื้นที่ — read-only ข้ามโรงเรียนในเขต (M-1 จาก data model) }
+  area_admin:   { scope: area,   description: เขตพื้นที่ — read-only ข้ามโรงเรียนในเขต (M-1 จาก data model); จัดการโรงเรียนในเขตของตน (CCR-021) }
 
 tenancy:
   rule: >
@@ -53,7 +56,11 @@ tenancy:
     within their area. Cross-tenant denial returns RES-001 (not-found shape) so
     existence is never leaked (PERM-002 is reserved for same-school role denials
     where existence is already known).
-  writes_by_area_admin: forbidden   # PERM-004
+  writes_by_area_admin: forbidden   # PERM-004 — except area_admin_writes below
+  # CCR-021 (FR-090): the only writes an area-scoped role makes. They act on the
+  # school record itself, never on a school's data, and only inside the caller's
+  # own area (another area's school is RES-001). Each needs step-up (min_acr).
+  area_admin_writes: [createSchool, updateSchool, appointSchoolAdmin]
   ownership:
     evidence: Owner (personnel) or school_admin may mutate; others per matrix below.
     scores: Only the evaluator who owns the per-evaluator record may write it.
@@ -132,6 +139,12 @@ matrix:
   listMembers:             { school_admin: school }
   inviteMember:            { school_admin: school }
   importMembers:           { school_admin: school }   # CCR-019: inviteMember, many rows at once
+  # CCR-021 (FR-090) — area: the caller holds area_admin over the path's area (or
+  # the school's area). Nobody else: a school-scoped role gets PERM-001.
+  listAreaSchools:         { area_admin: area }
+  createSchool:            { area_admin: area }
+  updateSchool:            { area_admin: area }
+  appointSchoolAdmin:      { area_admin: area }
   endMembership:           { school_admin: school }
 
   # taxonomy (reference data — readable by any authenticated member)
@@ -242,6 +255,9 @@ min_acr:
   createAssignment: 2
   inviteMember: 2
   importMembers: 2
+  createSchool: 2
+  updateSchool: 2
+  appointSchoolAdmin: 2
   endMembership: 2
   createExport: { other_person: 2 }
 

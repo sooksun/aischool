@@ -25,7 +25,9 @@ export type UiCapability =
   /** createEvidence / createUpload / completeUpload */
   | 'submitEvidence'
   /** listMembers / inviteMember / endMembership (CCR-014) */
-  | 'manageMembers';
+  | 'manageMembers'
+  /** listAreaSchools / createSchool / updateSchool / appointSchoolAdmin (CCR-021) */
+  | 'manageAreaSchools';
 
 export type Capabilities = Record<UiCapability, boolean>;
 
@@ -54,6 +56,9 @@ export const CAPABILITY_ROLES: Record<UiCapability, readonly Role[]> = {
   // evidence, which CCR-014 kept to the one role whose contract description is
   // "ผู้ดูแลระบบระดับโรงเรียน ... จัดการ ... บุคลากร".
   manageMembers: ['school_admin'],
+  // listAreaSchools, createSchool, updateSchool, appointSchoolAdmin — the only
+  // writes an area-scoped role holds (permissions.yaml area_admin_writes).
+  manageAreaSchools: ['area_admin'],
 };
 
 const FALSE_CAPS: Capabilities = {
@@ -64,6 +69,7 @@ const FALSE_CAPS: Capabilities = {
   governMappings: false,
   submitEvidence: false,
   manageMembers: false,
+  manageAreaSchools: false,
 };
 
 /**

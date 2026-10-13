@@ -30,7 +30,7 @@ function serializePersonnel(p: {
   };
 }
 
-function serializeMember(m: {
+export function serializeMember(m: {
   id: string; userId: string; role: string; effectiveFrom: Date; effectiveTo: Date | null;
   user: { email: string; displayName: string; status: string };
   personnel?: {
@@ -51,7 +51,7 @@ function serializeMember(m: {
   };
 }
 
-const InviteBody = z.object({
+export const InviteBody = z.object({
   email: z.string().email().max(320),
   display_name: z.string().min(1).max(200),
   role: z.enum(['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin']),
@@ -62,10 +62,10 @@ const InviteBody = z.object({
     rank_level_code: z.string().min(1),
   }).optional(),
 });
-type Invite = z.infer<typeof InviteBody>;
+export type Invite = z.infer<typeof InviteBody>;
 
 /** The checks an invite must pass before anything is written (inviteMember and importMembers). */
-async function checkInvite(body: Invite): Promise<void> {
+export async function checkInvite(body: Invite): Promise<void> {
   // area_admin is an AREA-scoped role (membership_scope=area); granting it a
   // school-scoped membership would produce a row that violates the
   // membership_scope_ids CHECK and surface as a 500.
@@ -85,7 +85,7 @@ async function checkInvite(body: Invite): Promise<void> {
  * issuing one there would turn this into an admin-triggered password reset for
  * any email in the system — see the repository note and openapi's description.
  */
-async function performInvite(schoolId: string, actorUserId: string, body: Invite, requestId: string) {
+export async function performInvite(schoolId: string, actorUserId: string, body: Invite, requestId: string) {
   const rawToken = generateInviteToken();
   const expiresAt = inviteTokenExpiryDate();
   const result = await inviteMember({
