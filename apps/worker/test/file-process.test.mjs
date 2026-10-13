@@ -526,3 +526,13 @@ test('FR-021: a clip longer than its category allows is blocked on the measured 
   assert.equal(row.scanStatus, 'blocked');
   assert.equal(row.mediaState, 'failed');
 });
+
+test('a file whose item moved school before processing is still processed', async () => {
+  const { file, evidence } = await fixture('moved.pdf');
+  const other = await prisma.school.create({ data: { code: `w-moved-${randomUUID().slice(0, 8)}`, name: 'Moved to' } });
+  created.add(other.id);
+  await prisma.evidence.update({ where: { id: evidence.id }, data: { originSchoolId: other.id } });
+  await runOnce(env, s3, { scheduleGc: false });
+  const row = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
+  assert.ok(row.sha256VerifiedAt, 'verified despite the job naming the old school');
+});

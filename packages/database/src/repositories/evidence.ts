@@ -332,9 +332,11 @@ export async function countFilesForEvidence(evidenceId: string): Promise<number>
 /** schoolId first and folded into the query, matching this file's own
  * tenancy-by-construction convention (module header) — a cross-school file id
  * returns null here rather than a row the caller must remember to reject. */
-export async function getEvidenceFileById(schoolId: string, fileId: string) {
+/** By id alone: the item may have moved school (CCR-024) since the job was
+ * queued, so the job's school_id is not a filter. The caller checks evidenceId. */
+export async function getEvidenceFileById(fileId: string) {
   return prisma.evidenceFile.findFirst({
-    where: { id: fileId, evidence: { originSchoolId: schoolId } },
+    where: { id: fileId },
     include: { evidence: { select: { id: true, originSchoolId: true, deletedAt: true, category: { select: { maxDurationSeconds: true } } } } },
   });
 }
