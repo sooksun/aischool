@@ -162,6 +162,13 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-011, transfer within one สพท., no contract change)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `gate:contracts` · `gate:ownership` | pass |
+| api · security · database · `test:backend` | 120 (+3 transfer) · 12 · 23 · 27 |
+
 ## Verified runs (2026-10-13, local — SEIP-P1-010, area admin manages schools, contract 4.4.0 / permissions 2.3.0)
 
 | Command | Result |

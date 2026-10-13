@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Transfer within one สพท. (SEIP-P1-011, in review, no contract change):** after a teacher moves school, the portfolio stays with them and the old school cannot see new evidence. A mapping now belongs to the school where the owner confirmed it, so the new school's director opens the evidence and validates it. Still open: the old school's retention rule (OQ-12) and a move to another สพท.
+>
 > **Area admin manages schools (SEIP-P1-010, in review, contract 4.4.0 / permissions 2.3.0 / CCR-021 — approved by owner 2026-10-13):** a สพท. admin opens, renames, closes and reopens the schools of their area in the web, and appoints each school's school_admin by invite. These are area_admin's first writes, need step-up, and another area is RES-001. Closing a school ends its members' access but keeps the data.
 >
 > **School context (SEIP-P1-009, in review, contract 4.3.0 / CCR-020 additive):** a person at several schools picks one in the web, and the pick is remembered. `/auth/me` now lists only memberships in effect, with school names. After a transfer, the web no longer offers the old school's screens.

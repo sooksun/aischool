@@ -11,16 +11,20 @@
 //      area_admin `area-r` via the school's ESA). An `own` grant at that school
 //      does NOT let a non-owner in.
 //   3. a `committee` grant, if the caller sits on a committee for the owner.
+//   4. reads only: a `school` / `area-r` grant at a school holding a live mapping
+//      of the item — after a transfer, the new school validates the teacher's
+//      older evidence and must be able to open it (FR-051).
 //
 // A caller with no route at all gets RES-001 — the same answer as a missing id,
 // so the item's existence never leaks (permissions.yaml tenancy rule). PERM-001 is
 // reserved for "you can see this school, but your role may not do this".
 import { grantFor, ApiError, forbiddenRole } from '@seip/backend-shared';
-import { getSchoolAreaId, listEvaluateePersonIdsForCommitteeMember } from '@seip/database';
+import { getSchoolAreaId, listEvaluateePersonIdsForCommitteeMember, listLiveMappingSchoolIds } from '@seip/database';
 import type { AuthedRequest } from '../plugins/auth.js';
 import { resolveGrant, type Grant } from './permission-guard.js';
 
 export interface EvidenceRef {
+  id?: string;
   ownerPersonId: string;
   originSchoolId: string;
 }
@@ -60,6 +64,8 @@ export async function authorizeEvidence(operationId: string, auth: AuthedRequest
     // "not found", the committee route may still apply — a committee member is
     // often from another school.
     if (await onCommitteeFor(operationId, auth, ev)) return 'committee';
+    const viaMapping = await mappingSchoolGrant(operationId, auth, ev);
+    if (viaMapping) return viaMapping;
     if (e instanceof ApiError && e.code === 'PERM-001' && !(await hasAnyFootholdAt(auth, ev.originSchoolId))) {
       throw new ApiError('RES-001', 'Evidence not found');
     }
@@ -76,6 +82,18 @@ export async function authorizeEvidence(operationId: string, auth: AuthedRequest
     throw forbiddenRole();
   }
   return grant;
+}
+
+const READ_VIA_MAPPING = new Set(['getEvidence', 'listEvidenceMappings', 'getEvidenceFileDownloadUrl']);
+
+async function mappingSchoolGrant(operationId: string, auth: AuthedRequest, ev: EvidenceRef): Promise<Grant | null> {
+  if (!ev.id || !READ_VIA_MAPPING.has(operationId)) return null;
+  for (const schoolId of await listLiveMappingSchoolIds(ev.id)) {
+    if (schoolId === ev.originSchoolId) continue;
+    const g = await resolveGrant(operationId, auth, schoolId).catch(() => null);
+    if (g === 'school' || g === 'area-r') return g;
+  }
+  return null;
 }
 
 async function onCommitteeFor(operationId: string, auth: AuthedRequest, ev: EvidenceRef): Promise<boolean> {

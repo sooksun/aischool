@@ -141,7 +141,7 @@ test('two-tier mapping: owner_confirmed -> validated / returned; one live mappin
   });
   const [i1, i2] = [await mkIndicator(), await mkIndicator()];
   const create = (indicatorId) => createOwnerMapping({
-    evidenceId: ev.id, originSchoolId: schoolA, indicatorId, frameworkVersionId: fw.id, ownerUserId: userId, source: 'manual',
+    evidenceId: ev.id, schoolId: schoolA, indicatorId, frameworkVersionId: fw.id, ownerUserId: userId, source: 'manual',
   });
 
   const m1 = await create(i1.id);

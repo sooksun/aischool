@@ -31,7 +31,9 @@ export async function listMappingsForEvidence(evidenceId: string) {
  */
 export async function createOwnerMapping(input: {
   evidenceId: string;
-  originSchoolId: string;
+  /** The owner's current school (FR-051): its director validates this mapping.
+   * After a transfer that is the new school, not the evidence's origin. */
+  schoolId: string;
   indicatorId: string;
   frameworkVersionId: string;
   ownerUserId: string;
@@ -44,7 +46,7 @@ export async function createOwnerMapping(input: {
   const run = async (tx: Prisma.TransactionClient) => {
     const row = await tx.evidenceIndicatorMapping.create({
       data: {
-        schoolId: input.originSchoolId,
+        schoolId: input.schoolId,
         evidenceId: input.evidenceId,
         indicatorId: input.indicatorId,
         frameworkVersionId: input.frameworkVersionId,
@@ -58,7 +60,7 @@ export async function createOwnerMapping(input: {
     });
     await enqueueOutboxEvent({
       eventType: 'mapping.owner_confirmed',
-      schoolId: input.originSchoolId,
+      schoolId: input.schoolId,
       actorUserId: input.ownerUserId,
       requestId: input.requestId ?? null,
       payload: { mapping_id: row.id, evidence_id: input.evidenceId, indicator_id: input.indicatorId, mapping_source: input.source },
@@ -176,4 +178,13 @@ export function revokeMapping(mappingId: string, expectedVersion: number, actorU
       eventType: 'mapping.revoked', schoolId: row.schoolId, actorUserId, requestId: requestId ?? null,
       payload: { mapping_id: row.id, evidence_id: row.evidenceId, indicator_id: row.indicatorId },
     }));
+}
+
+/** Schools of the live (not revoked) mappings on an evidence item. A school whose
+ * director must validate a mapping may read the evidence behind it (FR-051). */
+export async function listLiveMappingSchoolIds(evidenceId: string): Promise<string[]> {
+  const rows = await prisma.evidenceIndicatorMapping.findMany({
+    where: { evidenceId, status: { not: 'revoked' } }, select: { schoolId: true }, distinct: ['schoolId'],
+  });
+  return rows.map((r) => r.schoolId);
 }

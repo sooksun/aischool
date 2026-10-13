@@ -45,6 +45,9 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
     // The matrix grants createMapping as `own` only — authorizeEvidence lets
     // nobody but the owner through.
     await authorizeEvidence('createMapping', auth, evidence);
+    // FR-051: the mapping belongs to the school the owner works at now — after a
+    // transfer, the new school's director validates it, not the old school's.
+    const schoolId = requireCurrentSchool(auth);
 
     const indicator = await getIndicatorById(body.indicator_id);
     if (!indicator) throw new ApiError('VAL-002', 'Unknown indicator_id');
@@ -55,12 +58,12 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
     await idempotent(request, reply, 'createMapping', async () => {
       try {
         const mapping = await createOwnerMapping({
-          evidenceId, originSchoolId: evidence.originSchoolId, indicatorId: indicator.id,
+          evidenceId, schoolId, indicatorId: indicator.id,
           frameworkVersionId: indicator.frameworkVersionId, ownerUserId: auth.userId,
           source: 'manual', note: body.note ?? null, requestId: request.id,
         });
         await writeAuditEvent({
-          schoolId: evidence.originSchoolId, actorUserId: auth.userId, action: 'owner_confirmed',
+          schoolId, actorUserId: auth.userId, action: 'owner_confirmed',
           entityType: 'EvidenceIndicatorMapping', entityId: mapping.id, after: mapping, requestId: request.id,
         });
         return { status: 201, body: serializeMapping(mapping), headers: { ETag: etag(mapping.version) } };

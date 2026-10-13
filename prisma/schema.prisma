@@ -813,7 +813,7 @@ model WorkerJob {
 /// (Sprint 2) will land here as mappingSource=ai_suggested, still requiring confirmation.
 model EvidenceIndicatorMapping {
   id                     String         @id @default(uuid()) @db.Uuid
-  schoolId               String         @map("school_id") @db.Uuid // = evidence.origin_school_id; tenancy index for validator queues
+  schoolId               String         @map("school_id") @db.Uuid // the owner's school when confirmed (FR-051; = origin unless they moved); validator queue
   evidenceId             String         @map("evidence_id") @db.Uuid
   indicatorId            String         @map("indicator_id") @db.Uuid
   frameworkVersionId     String         @map("framework_version_id") @db.Uuid
