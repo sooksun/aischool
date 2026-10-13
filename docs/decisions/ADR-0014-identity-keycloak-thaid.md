@@ -35,7 +35,7 @@
 - **บัญชี SEIP ใน token** คือ claim `seip_uid` ไม่ใช่ `sub`. `seip_uid` เป็น user attribute ที่ admin เท่านั้นที่แก้ได้ (`unmanagedAttributePolicy: ADMIN_EDIT`)
 - **ระดับ step-up**: `acr` "pwd" นับเป็นระดับ 1 และ "mfa" นับเป็นระดับ 2. **ระดับ 2 นับได้ 15 นาทีนับจาก `auth_time`** (`STEP_UP_MAX_AGE_S`). เหตุผลคือ Keycloak ส่ง `acr` เดิมต่อไปทุกครั้งที่ refresh. ถ้าไม่จำกัดอายุ offline session ของมือถือที่ใส่ OTP ครั้งเดียวจะถือระดับ 2 ไป 30 วัน และ web session จะถือไป 8 ชั่วโมง
 - **Direct grant** ได้ acr "pwd" เสมอ แม้ส่งรหัส TOTP มาด้วย จึงใช้แทน step-up ไม่ได้. ทุก client ใน realm ปิด direct grant
-- **การเพิกถอนอุปกรณ์**: คำสั่ง admin "sign out" (`/users/{id}/logout`) ไม่ปิด offline session. มือถือยัง refresh ได้ต่อ. `revokeDeviceSession` (P2) ต้องลบ offline session ของอุปกรณ์นั้นโดยตรง จึงจะมีผลภายใน ≤ 60 วินาที (อายุ access token)
+- **การเพิกถอนอุปกรณ์**: คำสั่ง admin "sign out" (`/users/{id}/logout`) ปิด offline session ได้ไม่แน่นอน. ทดสอบเมื่อ 2026-10-13: token ที่ต่ออายุแล้วยังใช้ได้หลังสั่ง 4 ครั้งจาก 4 ครั้งในเครื่อง แต่ใน CI ถูกปฏิเสธ. `revokeDeviceSession` (P2) จึงต้องลบ offline session ของอุปกรณ์นั้นโดยตรง ซึ่งให้ผลแน่นอน และมีผลภายใน ≤ 60 วินาที (อายุ access token). ห้ามพึ่งคำสั่ง sign out
 - **การสร้างบัญชีใน Keycloak** ทำผ่าน service account `seip-provisioner` เฉพาะตอนรับคำเชิญและตอน login ด้วยรหัสผ่าน ซึ่งเป็นสองจังหวะที่ API ถือรหัสผ่านอยู่ จึงไม่ต้องเก็บรหัสผ่าน. ทำแบบ best effort: ถ้า Keycloak ล่มจะไม่ขวางการเข้าสู่ระบบ. บทบาทตามข้อ 6 ได้ required action `CONFIGURE_TOTP`
 
 ## Approved By

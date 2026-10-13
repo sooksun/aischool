@@ -199,8 +199,8 @@ export async function mobileRefresh(refreshToken) {
 /**
  * Revokes the user's offline (device) sessions for seip-mobile — what the P2
  * revokeDeviceSession must do. Measured 2026-10-13: logoutEverywhere() (the
- * admin "sign out" endpoint) leaves offline sessions alive; a phone keeps
- * refreshing after it.
+ * admin "sign out" endpoint) does not reliably end them — a renewed offline
+ * token survived it 4/4 times locally and was refused in CI.
  */
 export async function revokeOfflineSessions(user) {
   const adm = await adminToken();

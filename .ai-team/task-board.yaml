@@ -1320,9 +1320,11 @@ tasks:
       offline_access client scope; auth_time claim. API: a second factor counts
       for 15 min from auth_time (bearer) or from session sign-in (web) —
       measured that Keycloak keeps acr "mfa" through every refresh. Also
-      measured: Keycloak's admin sign-out does not end offline sessions, so P2
+      measured: Keycloak's admin sign-out does not reliably end offline sessions
+      (a renewed token survived it 4/4 locally, was refused in CI), so P2
       revokeDeviceSession must delete the device's offline session (ADR-0014
-      implementation notes). Test helper now waits out Keycloak's TOTP replay
+      implementation notes). First stated as "does not end" — corrected after the
+      CI run on 888a640 disagreed. Test helper now waits out Keycloak's TOTP replay
       window instead of flaking.
     acceptance_criteria:
       - "flutter analyze --fatal-infos; flutter test (SEIP ID sign-in, renewal, shared renewal, revoked device, restore, step-up, sign-out)"   # DONE (9 tests)

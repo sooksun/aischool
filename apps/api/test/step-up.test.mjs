@@ -21,7 +21,7 @@ import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.
 import { bearer, postEvidence, postMapping, actOnMapping } from '../../../tests/helpers/api-evidence.mjs';
 import {
   KEYCLOAK_ISSUER, createUser, deleteUser, passwordToken, mfaToken, claimsOf,
-  mobileSignIn, mobileRefresh, logoutEverywhere, revokeOfflineSessions,
+  mobileSignIn, mobileRefresh, revokeOfflineSessions,
 } from '../../../tests/helpers/keycloak.mjs';
 
 const skip = !KEYCLOAK_ISSUER && !process.env.CI ? 'KEYCLOAK_ISSUER not set (docker compose up -d keycloak)' : false;
@@ -230,15 +230,13 @@ test('mobile (ADR-0014 §5): a PKCE offline session works with the API, and revo
   assert.ok(renewed, 'the app renews its 60 s access token');
   assert.equal((await me(renewed.access_token)).statusCode, 200);
 
-  // Measured: Keycloak's "sign out everywhere" does NOT end an offline session —
-  // the phone keeps renewing. Device revocation (P2 revokeDeviceSession) must
-  // delete the offline session itself; then the next renewal (at most 60 s
-  // away, the access token's lifetime) is refused.
-  await logoutEverywhere(people.teacher.kc);
-  const stillAlive = await mobileRefresh(renewed.refresh_token);
-  assert.ok(stillAlive, 'logout-everywhere leaves the offline session alive');
+  // Device revocation (P2 revokeDeviceSession) deletes the device's offline
+  // session; the next renewal (at most 60 s away, the access token's lifetime)
+  // is refused. Keycloak's admin "sign out everywhere" is NOT a substitute:
+  // measured 2026-10-13, a renewed offline token sometimes survives it and
+  // sometimes does not (it survived locally 4/4, was refused in CI).
   assert.ok(await revokeOfflineSessions(people.teacher.kc) >= 1);
-  assert.equal(await mobileRefresh(stillAlive.refresh_token), null);
+  assert.equal(await mobileRefresh(renewed.refresh_token), null);
 });
 
 test('a second factor stops counting STEP_UP_MAX_AGE_S after sign-in, even though refresh keeps acr "mfa"', { skip }, async () => {
