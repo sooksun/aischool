@@ -1724,3 +1724,28 @@ tasks:
       - "measured length replaces the declared one"     # DONE — file-process.test
       - "over-cap clip blocked on the measured length"  # DONE — file-process.test
 
+  - id: SEIP-P2-006
+    title: "P2 — FR-021 720p browser copy of each video, metadata stripped; the original is untouched"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-005]
+    decisions: [ADR-0018]
+    primary_paths:
+      - apps/worker/src/media-probe.ts
+      - apps/worker/src/jobs/file-process.ts
+      - packages/database/src/repositories/evidence.ts
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+    notes: >
+      No contract change: FileRole review_720p and parent_file_id were already in
+      contract 4.0.0. For a video original that is not blocked, the worker transcodes
+      an H.264/AAC MP4 at most 720 lines high, with faststart and -map_metadata -1 so
+      GPS is removed. It stores the copy next to the original and adds a child row
+      that inherits the scan verdict. This is idempotent per parent and best effort:
+      a failed transcode leaves the original as it is. MEDIA_RENDITIONS=on|off. The
+      web lists originals only and offers "ดูแบบ 720p". Not done: posters and
+      thumbnails, photo EXIF stripping, audio proxy, and client-side compression
+      before upload (FR-007/FR-008).
+    acceptance_criteria:
+      - "720p child file, original untouched, GPS metadata absent"  # DONE — file-process.test
+      - "re-processing does not make a second copy"                # DONE
+

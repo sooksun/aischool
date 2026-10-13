@@ -167,9 +167,12 @@ export function EvidenceDetailPage() {
       {ownerErr && <div className="field-error" role="alert">{ownerErr}</div>}
 
       <h2>ไฟล์</h2>
-      {evidence.files.length === 0 && <p className="field-hint">ยังไม่มีไฟล์</p>}
+      {!evidence.files.some((f) => f.role === 'original') && <p className="field-hint">ยังไม่มีไฟล์</p>}
       <ul style={{ listStyle: 'none', padding: 0 }}>
-        {evidence.files.map((f) => (
+        {/* Renditions (720p copy, FR-021) belong to their original, not the list. */}
+        {evidence.files.filter((f) => f.role === 'original').map((f) => {
+          const review = evidence.files.find((r) => r.parent_file_id === f.id && r.role === 'review_720p');
+          return (
           <li key={f.id} className="evidence-card">
             <div className="title">{f.original_filename}</div>
             {f.duplicate_of_evidence_id && (
@@ -202,10 +205,22 @@ export function EvidenceDetailPage() {
                 >
                   {downloadBusyId === f.id ? 'กำลังเตรียมลิงก์…' : 'ดาวน์โหลด'}
                 </button>
+                {review && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ marginLeft: 8 }}
+                    disabled={downloadBusyId === review.id}
+                    onClick={() => void downloadFile(review.id, review.original_filename ?? 'review.mp4')}
+                  >
+                    {downloadBusyId === review.id ? 'กำลังเตรียมลิงก์…' : 'ดูแบบ 720p (ไฟล์เล็ก)'}
+                  </button>
+                )}
               </p>
             )}
           </li>
-        ))}
+          );
+        })}
       </ul>
       {downloadErr && (
         <div className="alert alert-error" role="alert">{downloadErr}</div>

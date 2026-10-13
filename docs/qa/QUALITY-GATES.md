@@ -162,6 +162,13 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P2-006, 720p rendition)
+
+| Command | Result |
+|---|---|
+| worker integration | 28 (+1: 1280×960 clip → 960×720 review copy, original object untouched, no GPS in the copy, re-run idempotent; +1 moved-school lookup) |
+| `typecheck` · web lint | pass |
+
 ## Verified runs (2026-10-13, local — SEIP-P2-005, server-measured media)
 
 | Command | Result |

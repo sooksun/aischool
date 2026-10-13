@@ -36,22 +36,53 @@ export function parseFfprobe(json: string): MediaProbe {
   };
 }
 
-/** Null when the probe could not run (no ffprobe) or could not read the file. */
-export async function probeMedia(ffprobePath: string, body: Readable, timeoutMs = 60_000): Promise<MediaProbe | null> {
-  const dir = await mkdtemp(join(tmpdir(), 'seip-probe-'));
+const run = (bin: string, args: string[], timeoutMs: number) => new Promise<string>((resolve, reject) => {
+  execFile(bin, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, out) => (err ? reject(err) : resolve(out)));
+});
+
+/** A private temp copy of a stored object, removed by `cleanup`. */
+export async function localCopy(body: Readable): Promise<{ path: string; dir: string; cleanup: () => Promise<void> }> {
+  const dir = await mkdtemp(join(tmpdir(), 'seip-media-'));
   const path = join(dir, 'media');
+  await pipeline(body, createWriteStream(path));
+  return { path, dir, cleanup: () => rm(dir, { recursive: true, force: true }) };
+}
+
+/** Null when the probe could not run (no ffprobe) or could not read the file. */
+export async function probeFile(ffprobePath: string, path: string, timeoutMs = 60_000): Promise<MediaProbe | null> {
   try {
-    await pipeline(body, createWriteStream(path));
-    const stdout = await new Promise<string>((resolve, reject) => {
-      execFile(ffprobePath, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path],
-        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
-        (err, out) => (err ? reject(err) : resolve(out)));
-    });
-    return parseFfprobe(stdout);
+    return parseFfprobe(await run(ffprobePath, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path], timeoutMs));
   } catch (e) {
     console.warn(`[media-probe] not measured: ${(e as Error).message}`);
     return null;
+  }
+}
+
+export async function probeMedia(ffprobePath: string, body: Readable, timeoutMs = 60_000): Promise<MediaProbe | null> {
+  const copy = await localCopy(body);
+  try {
+    return await probeFile(ffprobePath, copy.path, timeoutMs);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await copy.cleanup();
+  }
+}
+
+/**
+ * FR-021: the copy a browser plays — H.264/AAC MP4, at most 720 lines, moov
+ * atom first so playback starts before the download ends. `-map_metadata -1`
+ * drops container metadata, GPS location included; the original keeps
+ * everything and is stored apart. False when ffmpeg is missing or fails.
+ */
+export async function transcodeReview720p(ffmpegPath: string, inPath: string, outPath: string, timeoutMs = 15 * 60_000): Promise<boolean> {
+  try {
+    await run(ffmpegPath, [
+      '-v', 'error', '-y', '-i', inPath,
+      '-vf', "scale=-2:'min(720,ih)'", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', '-map_metadata', '-1', outPath,
+    ], timeoutMs);
+    return true;
+  } catch (e) {
+    console.warn(`[media-probe] no 720p rendition: ${(e as Error).message}`);
+    return false;
   }
 }

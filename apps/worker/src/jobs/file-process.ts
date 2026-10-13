@@ -15,14 +15,18 @@ import {
   markFileSha256Verified,
   markDuplicateIfAny,
   recordMediaProbe,
+  createRenditionFile,
+  hasRendition,
   setFileMediaState,
   enqueueOutboxEvent,
   markOutboxPublished,
   prisma,
 } from '@seip/database';
-import { headObject, getObjectStream } from '../s3.js';
+import { headObject, getObjectStream, putObjectFromFile } from '../s3.js';
 import { scanStream } from '../clamav.js';
-import { isProbeable, probeMedia } from '../media-probe.js';
+import { isProbeable, probeMedia, localCopy, probeFile, transcodeReview720p } from '../media-probe.js';
+import { createReadStream } from 'node:fs';
+import { join } from 'node:path';
 import type { Env } from '../env.js';
 
 export interface FileProcessPayload {
@@ -120,6 +124,36 @@ async function scanIfEnabled(
  */
 const DURATION_SLACK_MS = 1000;
 
+/**
+ * FR-021: the 720p copy a browser plays, stored next to the original (which is
+ * never touched) and listed as a child file with role review_720p. Best effort:
+ * a failed transcode leaves the original, which is still served, as it was.
+ */
+async function makeReviewRendition(
+  env: Env, s3: S3Client,
+  file: { id: string; evidenceId: string; storageUri: string; originalFilename: string },
+  scanStatus: 'clean' | 'unscanned',
+) {
+  const copy = await localCopy((await getObjectStream(s3, env.S3_BUCKET, file.storageUri)) as Readable);
+  try {
+    const out = join(copy.dir, 'review_720p.mp4');
+    if (!(await transcodeReview720p(env.FFMPEG_PATH, copy.path, out))) return;
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(out)) hash.update(chunk as Buffer);
+    const key = `${file.storageUri}.review_720p.mp4`;
+    const size = await putObjectFromFile(s3, env.S3_BUCKET, key, out, 'video/mp4');
+    const probe = await probeFile(env.FFPROBE_PATH, out);
+    await createRenditionFile({
+      parentFileId: file.id, evidenceId: file.evidenceId, role: 'review_720p', storageUri: key, contentType: 'video/mp4',
+      byteSize: BigInt(size), checksumSha256: hash.digest('hex'), scanStatus,
+      durationMs: probe?.durationMs ?? null, width: probe?.width ?? null, height: probe?.height ?? null,
+      originalFilename: file.originalFilename.replace(/\.[^.]+$/, '') + '.720p.mp4',
+    });
+  } finally {
+    await copy.cleanup();
+  }
+}
+
 /** SHA-256 (hex) of the stored object, streamed — never buffered whole. */
 async function sha256OfStoredObject(env: Env, s3: S3Client, key: string): Promise<string> {
   const body = (await getObjectStream(s3, env.S3_BUCKET, key)) as Readable;
@@ -214,6 +248,10 @@ export async function processFileJob(
     ? { status: 'blocked', scanned: false }
     : await scanIfEnabled(env, s3, { id: file.id, storageUri: file.storageUri, byteSize: file.byteSize });
   await setFileScanStatus(file.id, outcome.status, { scanned: outcome.scanned });
+  if (outcome.status !== 'blocked' && file.role === 'original' && file.contentType.startsWith('video/')
+    && env.MEDIA_RENDITIONS === 'on' && !(await hasRendition(file.id, 'review_720p'))) {
+    await makeReviewRendition(env, s3, file, outcome.status);
+  }
   // Renditions (720p review copy, audio proxy, OCR) arrive in P2/P3; until then
   // a verified original is the whole of the item.
   await setFileMediaState(file.id, sizeMismatch || hashMismatch || tooLong ? 'failed' : 'ready');

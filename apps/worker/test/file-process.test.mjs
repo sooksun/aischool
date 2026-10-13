@@ -42,6 +42,8 @@ const env = {
   CLAMAV_MAX_BYTES: 25 * 1024 * 1024,
   // FR-021: the probe runs for video/audio. CI installs ffmpeg for this suite.
   MEDIA_PROBE: 'ffprobe',
+  MEDIA_RENDITIONS: 'on',
+  FFMPEG_PATH: process.env.FFMPEG_PATH ?? 'ffmpeg',
   FFPROBE_PATH: process.env.FFPROBE_PATH ?? 'ffprobe',
 };
 
@@ -482,10 +484,11 @@ test('FR-012: the same verified bytes twice in one portfolio mark the later file
 
 
 /** A real 3-second 320x240 MP4, made by ffmpeg. */
-function clip(seconds = 3) {
+function clip(seconds = 3, size = '320x240') {
   const dir = mkdtempSync(join(tmpdir(), 'seip-clip-'));
   const out = join(dir, 'clip.mp4');
-  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `testsrc=size=320x240:rate=10:duration=${seconds}`, '-pix_fmt', 'yuv420p', out]);
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `testsrc=size=${size}:rate=10:duration=${seconds}`, '-pix_fmt', 'yuv420p',
+    '-metadata', 'location=+13.7563+100.5018/', out]);
   return readFileSync(out);
 }
 
@@ -535,4 +538,26 @@ test('a file whose item moved school before processing is still processed', asyn
   await runOnce(env, s3, { scheduleGc: false });
   const row = await prisma.evidenceFile.findUniqueOrThrow({ where: { id: file.id } });
   assert.ok(row.sha256VerifiedAt, 'verified despite the job naming the old school');
+});
+
+test('FR-021: a video gets a 720p browser copy, stored apart from the untouched original, without location metadata', async () => {
+  const file = await videoFixture(600, clip(2, '1280x960'));
+  await runOnce(env, s3, { scheduleGc: false });
+  const rendition = await prisma.evidenceFile.findFirst({ where: { parentFileId: file.id, role: 'review_720p' } });
+  assert.ok(rendition, 'a review_720p child row exists');
+  assert.deepEqual([rendition.width, rendition.height], [960, 720]);
+  assert.equal(rendition.contentType, 'video/mp4');
+  assert.ok(rendition.sha256VerifiedAt);
+  assert.notEqual(rendition.storageUri, file.storageUri, 'the original object is not overwritten');
+  const head = await s3.send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: rendition.storageUri }));
+  assert.equal(Number(head.ContentLength), Number(rendition.byteSize));
+
+  const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+  const body = Buffer.from(await (await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: rendition.storageUri }))).Body.transformToByteArray());
+  assert.ok(!body.includes(Buffer.from('+13.7563')), 'no GPS location in the rendition');
+
+  // Re-processing reuses the rendition rather than making another.
+  await prisma.workerJob.create({ data: { jobType: 'file.process', payload: { file_id: file.id, evidence_id: rendition.evidenceId, school_id: 'x' } } }).catch(() => {});
+  await runOnce(env, s3, { scheduleGc: false });
+  assert.equal(await prisma.evidenceFile.count({ where: { parentFileId: file.id, role: 'review_720p' } }), 1);
 });

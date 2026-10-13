@@ -24,6 +24,9 @@ const EnvSchema = z.object({
   /** FR-021: measure video/audio with ffprobe. `none` leaves the length unmeasured (null). */
   MEDIA_PROBE: z.enum(['ffprobe', 'none']).default('ffprobe'),
   FFPROBE_PATH: z.string().min(1).default('ffprobe'),
+  /** FR-021: make a 720p browser-playable copy of each video (needs ffmpeg). */
+  MEDIA_RENDITIONS: z.enum(['on', 'off']).default('on'),
+  FFMPEG_PATH: z.string().min(1).default('ffmpeg'),
   CLAMAV_HOST: z.string().default('127.0.0.1'),
   CLAMAV_PORT: z.coerce.number().int().positive().default(3310),
   CLAMAV_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),

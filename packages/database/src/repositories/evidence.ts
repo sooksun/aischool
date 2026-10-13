@@ -550,3 +550,30 @@ export async function markDuplicateIfAny(fileId: string) {
   await prisma.evidenceFile.update({ where: { id: fileId }, data: { duplicateOfFileId: earlier.id } });
   return earlier;
 }
+
+/**
+ * FR-021: a worker-made rendition of an original (role review_720p, …). Its
+ * bytes were hashed by the worker as it wrote them, and it inherits the
+ * original's scan verdict. Idempotent per (parent, role): a re-run reuses it.
+ */
+export async function createRenditionFile(input: {
+  parentFileId: string; evidenceId: string; role: 'review_720p'; storageUri: string; contentType: string;
+  byteSize: bigint; checksumSha256: string; scanStatus: 'clean' | 'unscanned' | 'sanitised';
+  durationMs: number | null; width: number | null; height: number | null; originalFilename: string;
+}) {
+  const existing = await prisma.evidenceFile.findFirst({ where: { parentFileId: input.parentFileId, role: input.role } });
+  if (existing) return existing;
+  return prisma.evidenceFile.create({
+    data: {
+      evidenceId: input.evidenceId, parentFileId: input.parentFileId, role: input.role, storageProvider: 's3_compatible',
+      storageUri: input.storageUri, contentType: input.contentType, byteSize: input.byteSize, checksumSha256: input.checksumSha256,
+      sha256VerifiedAt: new Date(), scanStatus: input.scanStatus, mediaState: 'ready', durationMs: input.durationMs,
+      durationSeconds: input.durationMs === null ? null : Math.ceil(input.durationMs / 1000), width: input.width, height: input.height,
+      originalFilename: input.originalFilename,
+    },
+  });
+}
+
+export async function hasRendition(parentFileId: string, role: 'review_720p') {
+  return (await prisma.evidenceFile.count({ where: { parentFileId, role } })) > 0;
+}
