@@ -1261,7 +1261,7 @@ tasks:
 
   - id: SEIP-P1-005
     title: "P1 — identity slice 3: provision SEIP accounts into Keycloak (ADR-0014)"
-    status: review              # 2026-10-13 — local gates green; CI pending
+    status: review              # 2026-10-13 — CI green (run 38336094640)
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P1-003]
     decisions: [ADR-0014]
@@ -1289,7 +1289,7 @@ tasks:
       - "existing accounts provisioned at next password login, exactly once"                       # DONE
       - "Keycloak refusing/unreachable never blocks login; retried later"                          # DONE
       - "email conflict leaves the other realm user untouched"                                     # DONE
-      - "CI green on the pushed commit"                                                            # OPEN
+      - "CI green on the pushed commit"                                                            # DONE — run 38336094640 on f1c4cbf
       - "staging compose runs Keycloak with a real (non-dev) realm and secrets"                    # OPEN — with staging in Bangkok
       - "accounts that never log in again get a reset-link path (needs email delivery)"            # OPEN
 
