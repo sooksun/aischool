@@ -17,7 +17,7 @@ class _FakeServer implements HttpClientAdapter {
   final sessionsByKey = <String, Map<String, Object?>>{};
   final sessions = <String, Map<String, Object?>>{};
   final parts = <String, Set<int>>{};
-  final files = <String, Map<String, Object?>>{}; // evidenceId -> file
+  final files = <String, List<Map<String, Object?>>>{}; // evidenceId -> files
   int evidenceCreated = 0;
   int sessionsCreated = 0;
   var scan = 'clean';
@@ -25,11 +25,15 @@ class _FakeServer implements HttpClientAdapter {
   int _n = 0;
   String _id(String p) => '00000000-0000-4000-8000-${(++_n).toString().padLeft(12, '0')}-$p'.substring(0, 36);
 
-  ResponseBody _json(int status, Object body) => ResponseBody.fromString(jsonEncode(body), status,
-      headers: {Headers.contentTypeHeader: ['application/json']});
+  ResponseBody _json(int status, Object body) => ResponseBody.fromString(
+    jsonEncode(body),
+    status,
+    headers: {
+      Headers.contentTypeHeader: ['application/json'],
+    },
+  );
 
-  Map<String, Object?> _session(Map<String, Object?> s) =>
-      {...s, 'parts_received': (parts[s['id']] ?? {}).toList()..sort()};
+  Map<String, Object?> _session(Map<String, Object?> s) => {...s, 'parts_received': (parts[s['id']] ?? {}).toList()..sort()};
 
   @override
   Future<ResponseBody> fetch(RequestOptions o, Stream<Uint8List>? body, Future<void>? cancel) async {
@@ -44,8 +48,16 @@ class _FakeServer implements HttpClientAdapter {
         return _id('e');
       });
       return _json(201, {
-        'id': id, 'category_id': data['category_id'], 'title': data['title'], 'status': 'draft', 'created_at': now,
-        'updated_at': now, 'owner_person_id': 'p', 'origin_school_id': 's', 'kind': 'file', 'version': 1,
+        'id': id,
+        'category_id': data['category_id'],
+        'title': data['title'],
+        'status': 'draft',
+        'created_at': now,
+        'updated_at': now,
+        'owner_person_id': 'p',
+        'origin_school_id': 's',
+        'kind': 'file',
+        'version': 1,
       });
     }
     if (o.method == 'POST' && p == '/uploads') {
@@ -53,9 +65,15 @@ class _FakeServer implements HttpClientAdapter {
         sessionsCreated++;
         final byteSize = data['byte_size']! as int;
         final s = <String, Object?>{
-          'id': _id('u'), 'evidence_id': data['evidence_id'], 'file_id': _id('f'), 'protocol': 's3_multipart',
-          'byte_size': byteSize, 'part_size': partSize, 'part_count': (byteSize + partSize - 1) ~/ partSize,
-          'status': 'open', 'expires_at': now,
+          'id': _id('u'),
+          'evidence_id': data['evidence_id'],
+          'file_id': _id('f'),
+          'protocol': 's3_multipart',
+          'byte_size': byteSize,
+          'part_size': partSize,
+          'part_count': (byteSize + partSize - 1) ~/ partSize,
+          'status': 'open',
+          'expires_at': now,
         };
         sessions[s['id']! as String] = s;
         return s;
@@ -70,27 +88,47 @@ class _FakeServer implements HttpClientAdapter {
         return _json(200, {
           'parts': [
             for (final n in data['part_numbers']! as List)
-              {'part_number': n, 'request': {'url': 'https://s3.test/${s['id']}/$n', 'method': 'PUT', 'expires_at': now}},
+              {
+                'part_number': n,
+                'request': {'url': 'https://s3.test/${s['id']}/$n', 'method': 'PUT', 'expires_at': now},
+              },
           ],
         });
       }
       final have = parts[s['id']] ?? {};
       if (have.length != s['part_count']) return _json(422, {'code': 'UPL-003', 'message': 'parts missing'});
       s['status'] = 'completed';
-      files[s['evidence_id']! as String] = {
-        'id': s['file_id'], 'evidence_id': s['evidence_id'], 'content_type': 'video/mp4', 'byte_size': s['byte_size'],
-        'scan_status': 'pending', 'uploaded_at': now, 'role': 'original', 'media_state': 'processing',
+      final file = <String, Object?>{
+        'id': s['file_id'],
+        'evidence_id': s['evidence_id'],
+        'content_type': 'video/mp4',
+        'byte_size': s['byte_size'],
+        'scan_status': 'pending',
+        'uploaded_at': now,
+        'role': 'original',
+        'media_state': 'processing',
       };
-      return _json(200, files[s['evidence_id']]!);
+      final list = files.putIfAbsent(s['evidence_id']! as String, () => []);
+      if (!list.any((f) => f['id'] == file['id'])) list.add(file);
+      return _json(200, file);
     }
     final e = RegExp(r'^/evidence/([^/]+)$').firstMatch(p);
     if (o.method == 'GET' && e != null) {
-      final f = files[e[1]];
       return _json(200, {
-        'id': e[1], 'category_id': 'c', 'title': 't', 'status': 'active', 'created_at': now, 'updated_at': now,
-        'owner_person_id': 'p', 'origin_school_id': 's', 'kind': 'file', 'version': 1, 'mappings': [],
+        'id': e[1],
+        'category_id': 'c',
+        'title': 't',
+        'status': 'active',
+        'created_at': now,
+        'updated_at': now,
+        'owner_person_id': 'p',
+        'origin_school_id': 's',
+        'kind': 'file',
+        'version': 1,
+        'mappings': [],
         'files': [
-          if (f != null) {...f, 'scan_status': scan, 'sha256_verified_at': verified ? now : null},
+          for (final f in files[e[1]] ?? const <Map<String, Object?>>[])
+            {...f, 'scan_status': scan, 'sha256_verified_at': verified ? now : null},
         ],
       });
     }
@@ -110,7 +148,10 @@ class _FakeObjects implements ObjectStore {
   @override
   Future<void> put(PresignedRequest request, List<int> bytes) async {
     if (failAfter != null && sent.length >= failAfter!) {
-      throw DioException(requestOptions: RequestOptions(path: request.url), type: DioExceptionType.connectionError);
+      throw DioException(
+        requestOptions: RequestOptions(path: request.url),
+        type: DioExceptionType.connectionError,
+      );
     }
     final seg = Uri.parse(request.url).pathSegments;
     sent.add('${seg[1]}:${bytes.length}');
@@ -126,8 +167,11 @@ class _FakeBytes implements LocalBytes {
   Future<void> delete(String path) async => data.remove(path);
 }
 
-({Outbox outbox, _FakeServer server, _FakeObjects objects, _FakeBytes bytes, MemoryOutboxStore store}) _make(
-    {MemoryOutboxStore? store, _FakeServer? server, _FakeBytes? bytes}) {
+({Outbox outbox, _FakeServer server, _FakeObjects objects, _FakeBytes bytes, MemoryOutboxStore store}) _make({
+  MemoryOutboxStore? store,
+  _FakeServer? server,
+  _FakeBytes? bytes,
+}) {
   final s = server ?? _FakeServer();
   final api = SeipApi(Dio()..httpClientAdapter = s, baseUrl: 'https://api.test/api/v1');
   final st = store ?? MemoryOutboxStore();
@@ -137,8 +181,15 @@ class _FakeBytes implements LocalBytes {
 }
 
 OutboxItem _item(String path, int size) => OutboxItem(
-      clientUuid: newClientUuid(), categoryId: 'c', title: 'สอนอ่าน', filename: 'lesson.mp4', contentType: 'video/mp4',
-      byteSize: size, sha256: 'a' * 64, path: path);
+  clientUuid: newClientUuid(),
+  categoryId: 'c',
+  title: 'สอนอ่าน',
+  filename: 'lesson.mp4',
+  contentType: 'video/mp4',
+  byteSize: size,
+  sha256: 'a' * 64,
+  path: path,
+);
 
 void main() {
   test('offline capture waits, then goes up when the network is back; the local copy goes only after verify + scan', () async {
@@ -216,5 +267,40 @@ void main() {
     await m.outbox.drain();
     expect((await m.outbox.items()).single.state, OutboxState.failed);
     expect(m.bytes.data.containsKey('/private/b'), isTrue);
+  });
+
+  test('FR-001: three photos in one group make one evidence item with three files', () async {
+    final m = _make();
+    final group = newClientUuid();
+    for (final n in [1, 2, 3]) {
+      m.bytes.data['/private/p$n'] = List.generate(5, (i) => i);
+      await m.outbox.add(
+        OutboxItem(
+          clientUuid: newClientUuid(),
+          groupUuid: group,
+          categoryId: 'c',
+          title: 'กิจกรรมวันภาษาไทย',
+          filename: 'p$n.jpg',
+          contentType: 'image/jpeg',
+          byteSize: 5,
+          sha256: 'a' * 64,
+          path: '/private/p$n',
+        ),
+      );
+    }
+    m.server.scan = 'pending';
+    await m.outbox.drain();
+    expect(m.server.evidenceCreated, 1, reason: 'one item for the whole group');
+    expect(m.server.sessionsCreated, 3);
+    final items = await m.outbox.items();
+    expect(items.map((i) => i.evidenceId).toSet().length, 1);
+    expect(groupOutbox(items).single.length, 3);
+    expect(groupState(items), OutboxState.verifying);
+    expect(m.server.files.values.single.length, 3);
+
+    m.server.scan = 'clean';
+    await m.outbox.drain();
+    expect(await m.outbox.items(), isEmpty);
+    expect(m.bytes.data, isEmpty);
   });
 }

@@ -1773,3 +1773,27 @@ tasks:
       - "photo poster has no EXIF segment; original still has it"  # DONE — file-process.test
       - "video poster from first frame, no location tag"            # DONE
 
+  - id: SEIP-P2-008
+    title: "P2 — FR-001 several photos in a row make one evidence item in the app"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-004]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/outbox.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/outbox_test.dart
+      - apps/mobile/test/capture_flow_test.dart
+    notes: >
+      No contract change, because an evidence item already holds many files. After a
+      photo, the app asks "ถ่ายเพิ่ม / เสร็จ". The photos share one category and title,
+      and each becomes an outbox entry with a shared group_uuid. That group_uuid is
+      the item's client_uuid and Idempotency-Key seed, so the server makes the item
+      once. Siblings reuse its id, and each file still has its own upload session.
+      The list shows one row per item ("3 รูป · <slowest state>"). The touched Dart
+      files were run through dart format. Not done: removing one photo from a group
+      before it is sent, and picking several from the gallery at once.
+    acceptance_criteria:
+      - "3 grouped photos -> 1 evidence create, 3 upload sessions, 3 files"  # DONE — outbox_test
+      - "widget: shoot 3, save once, one row '3 รูป · รอส่ง'"                 # DONE — capture_flow_test
+

@@ -32,9 +32,11 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _open(CurrentUser me) {
-    Navigator.of(context).pushReplacement(MaterialPageRoute(
-      builder: (_) => HomeScreen(session: widget.session, me: me, services: widget.services),
-    ));
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => HomeScreen(session: widget.session, me: me, services: widget.services),
+      ),
+    );
   }
 
   Future<void> _run(Future<CurrentUser?> Function() attempt, {bool quietWhenNone = false}) async {
@@ -66,11 +68,13 @@ class _LoginScreenState extends State<LoginScreen> {
       // The API answers AUTH-001 for unknown user and wrong password alike
       // (SEC-AUTH-5) — the app must not try to tell them apart either.
       final code = (e.response?.data is Map) ? (e.response!.data as Map)['code'] : null;
-      setState(() => _error = switch (code) {
-            'AUTH-004' => 'ลองเข้าสู่ระบบหลายครั้งเกินไป กรุณารอสักครู่',
-            'AUTH-001' || 'AUTH-003' => 'อีเมลหรือรหัสผ่านไม่ถูกต้อง',
-            _ => 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้',
-          });
+      setState(
+        () => _error = switch (code) {
+          'AUTH-004' => 'ลองเข้าสู่ระบบหลายครั้งเกินไป กรุณารอสักครู่',
+          'AUTH-001' || 'AUTH-003' => 'อีเมลหรือรหัสผ่านไม่ถูกต้อง',
+          _ => 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้',
+        },
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -108,7 +112,11 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             const SizedBox(height: 16),
             if (_error != null)
-              Text(_error!, key: const Key('error'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(
+                _error!,
+                key: const Key('error'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             FilledButton(
               key: const Key('submit'),
               onPressed: _busy ? null : _submit,
@@ -126,10 +134,10 @@ class AppServices {
   AppServices({required this.outboxFor, required this.capture, required this.hash});
 
   factory AppServices.device() => AppServices(
-        outboxFor: (api) => Outbox(api: api, store: SecureOutboxStore(), bytes: LocalFileBytes(), objects: DioObjectStore()),
-        capture: DeviceCaptureSource(),
-        hash: sha256OfFile,
-      );
+    outboxFor: (api) => Outbox(api: api, store: SecureOutboxStore(), bytes: LocalFileBytes(), objects: DioObjectStore()),
+    capture: DeviceCaptureSource(),
+    hash: sha256OfFile,
+  );
 
   final Outbox Function(SeipApi api) outboxFor;
   final CaptureSource capture;
@@ -138,11 +146,11 @@ class AppServices {
 
 /// FR-017: the item's state in words a teacher reads at a glance.
 String outboxLabel(OutboxState s) => switch (s) {
-      OutboxState.queued => 'รอส่ง',
-      OutboxState.uploading => 'กำลังส่ง',
-      OutboxState.verifying => 'กำลังตรวจ',
-      OutboxState.failed => 'ส่งไม่ผ่าน — ไฟล์ถูกระงับ',
-    };
+  OutboxState.queued => 'รอส่ง',
+  OutboxState.uploading => 'กำลังส่ง',
+  OutboxState.verifying => 'กำลังตรวจ',
+  OutboxState.failed => 'ส่งไม่ผ่าน — ไฟล์ถูกระงับ',
+};
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.session, required this.me, this.services});
@@ -196,31 +204,66 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _capture(CaptureKind kind) async {
-    final file = await _services.capture.capture(kind);
-    if (file == null || !mounted) return;
+    final first = await _services.capture.capture(kind);
+    if (first == null || !mounted) return;
+    // FR-001: photos of one activity become one item — keep shooting until done.
+    final files = [first];
+    if (kind == CaptureKind.photo) {
+      while (true) {
+        if (!mounted) return;
+        final more = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            title: Text('ถ่ายแล้ว ${files.length} รูป'),
+            content: const Text('รูปทั้งหมดจะรวมเป็นหลักฐานชิ้นเดียว'),
+            actions: [
+              TextButton(key: const Key('morePhoto'), onPressed: () => Navigator.pop(context, true), child: const Text('ถ่ายเพิ่ม')),
+              FilledButton(key: const Key('donePhotos'), onPressed: () => Navigator.pop(context, false), child: const Text('เสร็จ')),
+            ],
+          ),
+        );
+        if (more != true) break;
+        final next = await _services.capture.capture(kind);
+        if (next != null) files.add(next);
+      }
+    }
     List<EvidenceCategory> categories;
     try {
       categories = (await widget.session.api.taxonomy.listEvidenceCategories())
-          .where((c) => c.allowedMimeTypes.contains(file.contentType))
+          .where((c) => files.every((f) => c.allowedMimeTypes.contains(f.contentType)))
           .toList();
     } catch (_) {
       categories = const [];
     }
     if (!mounted) return;
     if (categories.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('ยังไม่มีประเภทหลักฐานที่รับไฟล์ชนิดนี้ หรือยังไม่ได้เชื่อมต่อ')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('ยังไม่มีประเภทหลักฐานที่รับไฟล์ชนิดนี้ หรือยังไม่ได้เชื่อมต่อ')));
       return;
     }
     final picked = await showDialog<(EvidenceCategory, String)>(
       context: context,
-      builder: (_) => _DetailsDialog(categories: categories, suggestedTitle: file.filename.replaceAll(RegExp(r'\.[^.]+$'), '')),
+      builder: (_) => _DetailsDialog(categories: categories, suggestedTitle: first.filename.replaceAll(RegExp(r'\.[^.]+$'), '')),
     );
     if (picked == null) return;
-    await _outbox.add(OutboxItem(
-      clientUuid: newClientUuid(), categoryId: picked.$1.id, title: picked.$2, filename: file.filename,
-      contentType: file.contentType, byteSize: file.byteSize, sha256: await _services.hash(file.path), path: file.path,
-      durationMs: file.durationMs,
-    ));
+    final group = files.length > 1 ? newClientUuid() : null;
+    for (final f in files) {
+      await _outbox.add(
+        OutboxItem(
+          clientUuid: newClientUuid(),
+          groupUuid: group,
+          categoryId: picked.$1.id,
+          title: picked.$2,
+          filename: f.filename,
+          contentType: f.contentType,
+          byteSize: f.byteSize,
+          sha256: await _services.hash(f.path),
+          path: f.path,
+          durationMs: f.durationMs,
+        ),
+      );
+    }
     await _sync();
   }
 
@@ -228,18 +271,25 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final me = widget.me;
     return Scaffold(
-      appBar: AppBar(title: const Text('หลักฐานของฉัน'), actions: [
-        IconButton(
-          key: const Key('signOut'),
-          tooltip: 'ออกจากระบบ',
-          icon: const Icon(Icons.logout),
-          onPressed: () async {
-            await widget.session.signOut();
-            if (!context.mounted) return;
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => LoginScreen(session: widget.session, services: widget.services)));
-          },
-        ),
-      ]),
+      appBar: AppBar(
+        title: const Text('หลักฐานของฉัน'),
+        actions: [
+          IconButton(
+            key: const Key('signOut'),
+            tooltip: 'ออกจากระบบ',
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await widget.session.signOut();
+              if (!context.mounted) return;
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => LoginScreen(session: widget.session, services: widget.services),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _sync,
         child: ListView(
@@ -248,30 +298,44 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(me.displayName, key: const Key('displayName'), style: Theme.of(context).textTheme.titleLarge),
             Text(me.email),
             const Divider(),
-            Wrap(spacing: 8, runSpacing: 8, children: [
-              FilledButton.icon(
-                key: const Key('capturePhoto'), onPressed: () => _capture(CaptureKind.photo),
-                icon: const Icon(Icons.photo_camera_outlined), label: const Text('ถ่ายรูป'),
-              ),
-              FilledButton.icon(
-                key: const Key('captureVideo'), onPressed: () => _capture(CaptureKind.video),
-                icon: const Icon(Icons.videocam_outlined), label: const Text('อัดวิดีโอ'),
-              ),
-              OutlinedButton.icon(
-                key: const Key('captureGallery'), onPressed: () => _capture(CaptureKind.gallery),
-                icon: const Icon(Icons.photo_library_outlined), label: const Text('เลือกจากคลัง'),
-              ),
-            ]),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  key: const Key('capturePhoto'),
+                  onPressed: () => _capture(CaptureKind.photo),
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  label: const Text('ถ่ายรูป'),
+                ),
+                FilledButton.icon(
+                  key: const Key('captureVideo'),
+                  onPressed: () => _capture(CaptureKind.video),
+                  icon: const Icon(Icons.videocam_outlined),
+                  label: const Text('อัดวิดีโอ'),
+                ),
+                OutlinedButton.icon(
+                  key: const Key('captureGallery'),
+                  onPressed: () => _capture(CaptureKind.gallery),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('เลือกจากคลัง'),
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
             if (_items.isEmpty)
               const Text('ไม่มีรายการรอส่ง', key: Key('outboxEmpty'))
             else
-              for (final item in _items)
+              // One row per evidence item; a group of photos shows its count
+              // and the furthest-behind state among them.
+              for (final group in groupOutbox(_items))
                 ListTile(
-                  key: Key('outbox-${item.clientUuid}'),
-                  leading: Icon(item.state == OutboxState.failed ? Icons.error_outline : Icons.cloud_upload_outlined),
-                  title: Text(item.title),
-                  subtitle: Text(outboxLabel(item.state)),
+                  key: Key('outbox-${group.first.evidenceClientUuid}'),
+                  leading: Icon(group.any((i) => i.state == OutboxState.failed) ? Icons.error_outline : Icons.cloud_upload_outlined),
+                  title: Text(group.first.title),
+                  subtitle: Text(
+                    group.length > 1 ? '${group.length} รูป · ${outboxLabel(groupState(group))}' : outboxLabel(group.first.state),
+                  ),
                 ),
           ],
         ),
@@ -297,16 +361,23 @@ class _DetailsDialogState extends State<_DetailsDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('บันทึกหลักฐาน'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        DropdownButtonFormField<EvidenceCategory>(
-          key: const Key('category'),
-          initialValue: _category,
-          decoration: const InputDecoration(labelText: 'ประเภท'),
-          items: [for (final c in widget.categories) DropdownMenuItem(value: c, child: Text(c.labelTh))],
-          onChanged: (c) => setState(() => _category = c ?? _category),
-        ),
-        TextField(key: const Key('title'), controller: _title, decoration: const InputDecoration(labelText: 'ชื่อหลักฐาน')),
-      ]),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DropdownButtonFormField<EvidenceCategory>(
+            key: const Key('category'),
+            initialValue: _category,
+            decoration: const InputDecoration(labelText: 'ประเภท'),
+            items: [for (final c in widget.categories) DropdownMenuItem(value: c, child: Text(c.labelTh))],
+            onChanged: (c) => setState(() => _category = c ?? _category),
+          ),
+          TextField(
+            key: const Key('title'),
+            controller: _title,
+            decoration: const InputDecoration(labelText: 'ชื่อหลักฐาน'),
+          ),
+        ],
+      ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('ยกเลิก')),
         FilledButton(

@@ -30,6 +30,7 @@ class OutboxItem {
     required this.sha256,
     required this.path,
     this.durationMs,
+    this.groupUuid,
     this.evidenceId,
     this.uploadId,
     this.fileId,
@@ -51,6 +52,13 @@ class OutboxItem {
 
   /// Video/audio length as the capture screen measured it; video categories need it.
   final int? durationMs;
+
+  /// FR-001: several captures (photos of one activity) that make one evidence
+  /// item share this; the item's client_uuid is it. Null = one file, one item.
+  final String? groupUuid;
+
+  /// The evidence item's client_uuid — its dedupe key on the server.
+  String get evidenceClientUuid => groupUuid ?? clientUuid;
   String? evidenceId;
   String? uploadId;
   String? fileId;
@@ -61,20 +69,42 @@ class OutboxItem {
   String? lastError;
 
   Map<String, Object?> toJson() => {
-        'client_uuid': clientUuid, 'category_id': categoryId, 'title': title, 'filename': filename,
-        'content_type': contentType, 'byte_size': byteSize, 'sha256': sha256, 'path': path, 'duration_ms': durationMs,
-        'evidence_id': evidenceId, 'upload_id': uploadId, 'file_id': fileId,
-        'session_generation': sessionGeneration, 'state': state.name, 'last_error': lastError,
-      };
+    'client_uuid': clientUuid,
+    'category_id': categoryId,
+    'title': title,
+    'filename': filename,
+    'content_type': contentType,
+    'byte_size': byteSize,
+    'sha256': sha256,
+    'path': path,
+    'duration_ms': durationMs,
+    'group_uuid': groupUuid,
+    'evidence_id': evidenceId,
+    'upload_id': uploadId,
+    'file_id': fileId,
+    'session_generation': sessionGeneration,
+    'state': state.name,
+    'last_error': lastError,
+  };
 
   factory OutboxItem.fromJson(Map<String, Object?> j) => OutboxItem(
-        clientUuid: j['client_uuid']! as String, categoryId: j['category_id']! as String, title: j['title']! as String,
-        filename: j['filename']! as String, contentType: j['content_type']! as String, byteSize: j['byte_size']! as int,
-        sha256: j['sha256']! as String, path: j['path']! as String, durationMs: j['duration_ms'] as int?, evidenceId: j['evidence_id'] as String?,
-        uploadId: j['upload_id'] as String?, fileId: j['file_id'] as String?,
-        sessionGeneration: (j['session_generation'] as int?) ?? 0,
-        state: OutboxState.values.byName(j['state']! as String), lastError: j['last_error'] as String?,
-      );
+    clientUuid: j['client_uuid']! as String,
+    categoryId: j['category_id']! as String,
+    title: j['title']! as String,
+    filename: j['filename']! as String,
+    contentType: j['content_type']! as String,
+    byteSize: j['byte_size']! as int,
+    sha256: j['sha256']! as String,
+    path: j['path']! as String,
+    durationMs: j['duration_ms'] as int?,
+    groupUuid: j['group_uuid'] as String?,
+    evidenceId: j['evidence_id'] as String?,
+    uploadId: j['upload_id'] as String?,
+    fileId: j['file_id'] as String?,
+    sessionGeneration: (j['session_generation'] as int?) ?? 0,
+    state: OutboxState.values.byName(j['state']! as String),
+    lastError: j['last_error'] as String?,
+  );
 }
 
 enum OutboxState {
@@ -165,9 +195,11 @@ class DioObjectStore implements ObjectStore {
   final Dio _dio;
   @override
   Future<void> put(PresignedRequest request, List<int> bytes) async {
-    await _dio.put<void>(request.url,
-        data: Stream.value(bytes),
-        options: Options(headers: {...?request.headers, Headers.contentLengthHeader: bytes.length}));
+    await _dio.put<void>(
+      request.url,
+      data: Stream.value(bytes),
+      options: Options(headers: {...?request.headers, Headers.contentLengthHeader: bytes.length}),
+    );
   }
 }
 
@@ -239,15 +271,27 @@ class Outbox {
 
   /// True when the item is finished and its local copy deleted.
   Future<bool> _advance(OutboxItem item, List<OutboxItem> items) async {
+    // A sibling in the same group may already have made the item.
+    item.evidenceId ??= items
+        .where((i) => i.groupUuid != null && i.groupUuid == item.groupUuid && i.evidenceId != null)
+        .map((i) => i.evidenceId)
+        .firstOrNull;
     if (item.evidenceId == null) {
+      // Keyed on the group, so a replay — or a sibling racing after a crash —
+      // gets the same row (the server also dedupes on client_uuid).
       final ev = await api.evidence.createEvidence(
-        idempotencyKey: derivedUuid('evidence:${item.clientUuid}'),
+        idempotencyKey: derivedUuid('evidence:${item.evidenceClientUuid}'),
         body: EvidenceCreate(
-          categoryId: item.categoryId, title: item.title, kind: EvidenceKind.file, clientUuid: item.clientUuid,
+          categoryId: item.categoryId,
+          title: item.title,
+          kind: EvidenceKind.file,
+          clientUuid: item.evidenceClientUuid,
           containsLearners: EvidenceCreateContainsLearners.unknown,
         ),
       );
-      item.evidenceId = ev.id;
+      for (final i in items) {
+        if (i == item || (i.groupUuid != null && i.groupUuid == item.groupUuid)) i.evidenceId = ev.id;
+      }
       await _save(items);
     }
 
@@ -260,8 +304,12 @@ class Outbox {
       session ??= await api.uploads.createUpload(
         idempotencyKey: derivedUuid('upload:${item.clientUuid}:${item.sessionGeneration}'),
         body: UploadCreate(
-          evidenceId: item.evidenceId!, filename: item.filename, contentType: item.contentType,
-          byteSize: item.byteSize, checksumSha256: item.sha256, durationMs: item.durationMs,
+          evidenceId: item.evidenceId!,
+          filename: item.filename,
+          contentType: item.contentType,
+          byteSize: item.byteSize,
+          checksumSha256: item.sha256,
+          durationMs: item.durationMs,
         ),
       );
       item
@@ -272,7 +320,10 @@ class Outbox {
 
       if (session.status != UploadSessionStatus.completed) {
         await _sendMissingParts(item, session);
-        await api.uploads.completeUpload(uploadId: session.id, body: UploadComplete(partCount: session.partCount));
+        await api.uploads.completeUpload(
+          uploadId: session.id,
+          body: UploadComplete(partCount: session.partCount),
+        );
       }
       item.state = OutboxState.verifying;
       await _save(items);
@@ -299,10 +350,16 @@ class Outbox {
       return;
     }
     final have = session.partsReceived.toSet();
-    final missing = [for (var n = 1; n <= session.partCount; n++) if (!have.contains(n)) n];
+    final missing = [
+      for (var n = 1; n <= session.partCount; n++)
+        if (!have.contains(n)) n,
+    ];
     for (var i = 0; i < missing.length; i += 100) {
       final batch = missing.sublist(i, min(i + 100, missing.length));
-      final urls = await api.uploads.signUploadParts(uploadId: session.id, body: UploadPartUrlsRequest(partNumbers: batch));
+      final urls = await api.uploads.signUploadParts(
+        uploadId: session.id,
+        body: UploadPartUrlsRequest(partNumbers: batch),
+      );
       for (final part in urls.parts) {
         final offset = (part.partNumber - 1) * session.partSize;
         final length = min(session.partSize, item.byteSize - offset);
@@ -310,4 +367,19 @@ class Outbox {
       }
     }
   }
+}
+
+/// Outbox entries per evidence item, in queue order (FR-001 groups).
+List<List<OutboxItem>> groupOutbox(List<OutboxItem> items) {
+  final groups = <String, List<OutboxItem>>{};
+  for (final i in items) {
+    (groups[i.evidenceClientUuid] ??= []).add(i);
+  }
+  return groups.values.toList();
+}
+
+/// A group is as far along as its slowest file; any refused file shows it.
+OutboxState groupState(List<OutboxItem> group) {
+  if (group.any((i) => i.state == OutboxState.failed)) return OutboxState.failed;
+  return group.map((i) => i.state).reduce((a, b) => a.index <= b.index ? a : b);
 }
