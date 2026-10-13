@@ -1,6 +1,6 @@
 # CCR-021: area admin manages the schools of their area (policy change)
 
-Status: **AWAITING OWNER APPROVAL BEFORE MERGE.** The openapi diff is additive (4.3.0 → 4.4.0, oasdiff: no breaking changes), but it changes a locked policy. Until now `permissions.yaml` said `writes_by_area_admin: forbidden`, and this CCR gives area_admin its first writes.
+Status: **APPROVED by the owner 2026-10-13, APPLIED.** The openapi diff is additive (4.3.0 → 4.4.0, oasdiff: no breaking changes), but it changes a locked policy. Until now `permissions.yaml` said `writes_by_area_admin: forbidden`, and this CCR gives area_admin its first writes.
 Task: `SEIP-P1-010` · Requirement: FR-090 (PRD §7), US-14 · Shipped: openapi **4.4.0**, permissions **2.3.0**
 
 ## Why

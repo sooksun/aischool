@@ -1424,7 +1424,7 @@ tasks:
 
   - id: SEIP-P1-010
     title: "P1 — FR-090 area admin manages the schools of their area (CCR-021, contract 4.4.0, permissions 2.3.0)"
-    status: review              # 2026-10-13 — awaiting owner approval of CCR-021 before merge
+    status: review              # 2026-10-13 — CCR-021 approved by owner
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P1-001, SEIP-P1-008]
     decisions: [CCR-021]
@@ -1445,4 +1445,4 @@ tasks:
       - "appoint school_admin via invite"                                    # DONE — area-schools.test
       - "closed school ends member access"                                   # DONE — area-schools.test
       - "matrix sweep + step-up cover the 4 ops"                              # DONE
-      - "owner approves CCR-021"                                              # PENDING
+      - "owner approves CCR-021"                                              # DONE — 2026-10-13

@@ -166,7 +166,7 @@ above remains the recommendation for release verification.
 
 | Command | Result |
 |---|---|
-| `typecheck` · `lint` · `format:check` · `gate:contracts` · `gate:ownership` | pass. oasdiff 4.3.0 → 4.4.0: no breaking changes (the policy change is in CCR-021, awaiting owner approval). Web unit 45 |
+| `typecheck` · `lint` · `format:check` · `gate:contracts` · `gate:ownership` | pass. oasdiff 4.3.0 → 4.4.0: no breaking changes (the policy change is CCR-021, approved by the owner). Web unit 45 |
 | api · security · `test:backend` | 117 (+4 area-schools) · 12 (sweep covers the 4 new ops) · 27 |
 | Dart client analyse/test · mobile analyse/test | pass against 4.4.0 |
 
