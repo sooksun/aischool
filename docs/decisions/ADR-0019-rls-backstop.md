@@ -1,7 +1,7 @@
 # ADR-0019: RLS backstop ตาม สพท. — role อ่านอย่างเดียว `seip_scoped` และ `withAreaScope`
 
 ## Status
-**Proposed** (2026-10-12) — ลงรายละเอียดข้อ 3 ของ ADR-0012 ("RLS backstop แยกตาม สพท.") ใน SEIP-P1-002. รอ owner รับรอง
+**Accepted** (2026-10-13, owner อนุมัติ; เสนอ 2026-10-12) — ลงรายละเอียดข้อ 3 ของ ADR-0012 ("RLS backstop แยกตาม สพท.") ใน SEIP-P1-002
 
 ## Context
 - ADR-0012 กำหนดให้ RLS เป็นกำแพงชั้นที่สองหลัง authorization ใน apps/api. Exit criterion ของ P1 คือ "RLS ปฏิเสธการอ่านข้าม สพท. ใน raw SQL"
@@ -35,7 +35,7 @@
 - Test: `tests/backend/rls-backstop.test.mjs` (raw SQL) และ `packages/database/test/area-scope.integration.test.mjs` (ผ่าน Prisma)
 
 ## Approved By
-— (รอ owner)
+owner (sooksun) — 2026-10-13
 
 ## Date
 2026-10-12
