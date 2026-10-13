@@ -18,7 +18,7 @@ type EvidenceDetail = components['schemas']['Evidence'] & {
 type Mapping = components['schemas']['Mapping'];
 
 export function EvidenceDetailPage() {
-  const { user, capabilities } = useAuth();
+  const { user, capabilities, schools } = useAuth();
   const canValidateMappings = capabilities.governMappings;
   const { evidenceId } = useParams<{ evidenceId: string }>();
   const [evidence, setEvidence] = useState<EvidenceDetail | null>(null);
@@ -28,6 +28,7 @@ export function EvidenceDetailPage() {
   const [actingId, setActingId] = useState<string | null>(null);
   const [downloadBusyId, setDownloadBusyId] = useState<string | null>(null);
   const [downloadErr, setDownloadErr] = useState<string | null>(null);
+  const [ownerErr, setOwnerErr] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     if (!evidenceId) return Promise.resolve();
@@ -51,6 +52,32 @@ export function EvidenceDetailPage() {
     const t = setInterval(() => { void reload(); }, 3000);
     return () => clearInterval(t);
   }, [evidence, reload]);
+
+  // CCR-024: the owner accepts an item uploaded on their behalf, or moves an item
+  // to another of their schools (same สพท. only — the API says so otherwise).
+  async function acceptItem() {
+    if (!evidence) return;
+    setOwnerErr(null);
+    try {
+      unwrap(await api.POST('/evidence/{evidenceId}/accept', { params: { path: { evidenceId: evidence.id } } }));
+      await reload();
+    } catch (e) {
+      setOwnerErr(e instanceof ApiError ? thaiMessageFor(e) : 'บันทึกไม่สำเร็จ');
+    }
+  }
+  async function moveTo(schoolId: string) {
+    if (!evidence || schoolId === evidence.origin_school_id) return;
+    setOwnerErr(null);
+    try {
+      unwrap(await api.PATCH('/evidence/{evidenceId}', {
+        params: { path: { evidenceId: evidence.id }, header: { 'If-Match': `"${evidence.version}"` } },
+        body: { origin_school_id: schoolId, contains_learners: evidence.contains_learners },
+      }));
+      await reload();
+    } catch (e) {
+      setOwnerErr(e instanceof ApiError ? thaiMessageFor(e) : 'ย้ายไม่สำเร็จ');
+    }
+  }
 
   async function act(mapping: Mapping, action: 'validate' | 'return' | 'revoke') {
     setActingId(mapping.id);
@@ -114,11 +141,30 @@ export function EvidenceDetailPage() {
     return <main className="page" aria-busy="true" aria-live="polite"><p>กำลังโหลด…</p></main>;
   }
 
+  const isOwnItem = !!user?.person_id && evidence.owner_person_id === user.person_id;
+
   return (
     <main className="page">
       <Link to="/" className="field-hint">← กลับ</Link>
       <h1>{evidence.title}</h1>
       {evidence.description && <p>{evidence.description}</p>}
+
+      {isOwnItem && !evidence.owner_accepted_at && (
+        <div className="alert alert-info" role="region" aria-label="หลักฐานที่อัปโหลดแทน">
+          <span>ผู้ดูแลระบบโรงเรียนอัปโหลดหลักฐานนี้แทนคุณ ตรวจดูแล้วกดยอมรับก่อนจึงจะนำไปจับคู่ตัวชี้วัดได้ ถ้าไม่ใช่ของคุณ ให้ลบทิ้ง</span>
+          <button type="button" className="btn btn-primary" onClick={acceptItem}>ยอมรับเป็นหลักฐานของฉัน</button>
+        </div>
+      )}
+      {isOwnItem && schools.length > 1 && (
+        <div className="field">
+          <label htmlFor="evidence-school">บันทึกในนามโรงเรียน</label>
+          <select id="evidence-school" value={evidence.origin_school_id} onChange={(e) => void moveTo(e.target.value)}>
+            {!schools.some((sc) => sc.id === evidence.origin_school_id) && <option value={evidence.origin_school_id}>โรงเรียนเดิม</option>}
+            {schools.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+          </select>
+        </div>
+      )}
+      {ownerErr && <div className="field-error" role="alert">{ownerErr}</div>}
 
       <h2>ไฟล์</h2>
       {evidence.files.length === 0 && <p className="field-hint">ยังไม่มีไฟล์</p>}

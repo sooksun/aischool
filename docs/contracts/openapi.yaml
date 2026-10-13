@@ -1,4 +1,8 @@
 openapi: 3.1.0
+# version 4.7.0 — CCR-024 (additive): evidence a school admin uploads for someone
+#   else waits for the owner's acceptance (acceptEvidence) before it can be mapped;
+#   the owner moves an item to another of their schools (EvidencePatch.origin_school_id)
+#   (FR-019). CurrentUser gains person_id.
 # version 4.6.0 — CCR-023 (additive): a person confirms their personnel profile or
 #   asks for a correction; the school admin edits it (FR-099a). PersonnelSummary and
 #   CurrentUser.personnel gain rank_since, confirmed_at and correction_note.
@@ -24,7 +28,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.6.0
+  version: 4.7.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -1334,6 +1338,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /evidence/{evidenceId}/accept:
+    post:
+      operationId: acceptEvidence
+      summary: The owner accepts an item uploaded on their behalf (CCR-024, FR-019)
+      description: 'Only the owner. Idempotent — accepting an accepted item returns it
+        unchanged. To decline, the owner deletes it (deleteEvidence).
+
+        '
+      tags:
+      - evidence
+      parameters:
+      - name: evidenceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Evidence'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /evidence/{evidenceId}/mappings:
     get:
       operationId: listEvidenceMappings
@@ -3178,6 +3212,12 @@ components:
         id:
           type: string
           format: uuid
+        person_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: The person this account belongs to (ADR-0015) — the owner key of evidence (owner_person_id). Added in CCR-024 so a client can tell its own items.
         email:
           type: string
           format: email
@@ -3985,6 +4025,15 @@ components:
         created_at:
           type: string
           format: date-time
+        owner_accepted_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: 'When the owner accepted the item (CCR-024). Set at creation when the
+            owner uploads it; null for an item a school admin uploaded on their behalf
+            until the owner accepts it (acceptEvidence). A null item cannot be mapped,
+            so it does not count in the portfolio.'
         scan_status:
           description: 'Aggregate of attached files (CCR-009). null when there are no files.
 
@@ -4161,6 +4210,12 @@ components:
       type: object
       minProperties: 1
       properties:
+        origin_school_id:
+          type: string
+          format: uuid
+          description: 'Owner only (CCR-024): move the item to another school the owner is a
+            current member of, in the same สพท. (controller). Another สพท. is VAL-002
+            (ADR-0015 §5). Audited as moved. Mappings already made keep their school.'
         title:
           type: string
           minLength: 1

@@ -40,7 +40,8 @@
 #   completePasswordReset (unauthenticated, the token is the credential).
 # version: 2.5.0 — CCR-023 (additive): updatePersonnel (school_admin, min_acr 2);
 #   confirmMyPersonnel / requestPersonnelCorrection, self-scoped.
-version: 2.5.0
+# version: 2.6.0 — CCR-024 (additive): acceptEvidence, owner only.
+version: 2.6.0
 status: locked
 locked_at: 2026-07-17
 
@@ -192,6 +193,7 @@ matrix:
   # validates or returns. Nobody confirms a mapping on someone else's evidence.
   listEvidenceMappings:    { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
   createMapping:           { teacher: own, deputy: own, director: own }
+  acceptEvidence:          { teacher: own, deputy: own, director: own, school_admin: own }   # the owner only (CCR-024)
   listMappings:            { director: school, school_admin: school, evaluator: committee, area_admin: area-r }
   actOnMapping:            # revoke (owner) | validate / return (director, committee — min_acr 2)
     teacher: own-revoke

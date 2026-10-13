@@ -247,6 +247,7 @@ const OPERATIONS = () => ({
   // A random fileId yields RES-001 for granted roles, never PERM-001.
   getEvidenceFileDownloadUrl: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/files/${randomUUID()}/download-url` },
   listEvidenceMappings: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/mappings` },
+  acceptEvidence: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/accept` },
   createMapping: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, payload: { indicator_id: randomUUID() } }, // random indicator: VAL-002 for granted roles, never PERM-001
   listMappings: { method: 'GET', url: '/api/v1/mappings' },
   // Role-conditional action: an own-revoke grant permits only revoke, and a
@@ -333,7 +334,7 @@ const OWNER_ROLE = 'teacher';
 const EVIDENCE_OWN_OPS = new Set([
   'getEvidence', 'updateEvidence', 'deleteEvidence', 'getEvidenceFileDownloadUrl',
   'createUpload', 'getUpload', 'signUploadParts', 'completeUpload', 'abortUpload',
-  'listEvidenceMappings', 'createMapping', 'actOnMapping',
+  'listEvidenceMappings', 'createMapping', 'actOnMapping', 'acceptEvidence',
 ]);
 // School-owned resources keyed on personnel: a non-owner holding the `own` grant
 // type is denied PERM-001 — the ownership boundary working, not a matrix gap.

@@ -231,6 +231,7 @@ export const authRoutes: FastifyPluginAsync<{ env: Env; keycloak?: Keycloak | nu
     return {
       id: user.id,
       email: user.email,
+      person_id: user.personId ?? null,
       display_name: user.displayName,
       personnel: auth.personnel
         ? {

@@ -641,6 +641,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evidence/{evidenceId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The owner accepts an item uploaded on their behalf (CCR-024, FR-019)
+         * @description Only the owner. Idempotent — accepting an accepted item returns it unchanged. To decline, the owner deletes it (deleteEvidence).
+         */
+        post: operations["acceptEvidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evidence/{evidenceId}/mappings": {
         parameters: {
             query?: never;
@@ -1521,6 +1541,11 @@ export interface components {
         CurrentUser: {
             /** Format: uuid */
             id: string;
+            /**
+             * Format: uuid
+             * @description The person this account belongs to (ADR-0015) — the owner key of evidence (owner_person_id). Added in CCR-024 so a client can tell its own items.
+             */
+            person_id?: string | null;
             /** Format: email */
             email: string;
             display_name: string;
@@ -1876,6 +1901,11 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             /**
+             * Format: date-time
+             * @description When the owner accepted the item (CCR-024). Set at creation when the owner uploads it; null for an item a school admin uploaded on their behalf until the owner accepts it (acceptEvidence). A null item cannot be mapped, so it does not count in the portfolio.
+             */
+            owner_accepted_at?: string | null;
+            /**
              * @description Aggregate of attached files (CCR-009). null when there are no files.
              *     Worst-of order: pending > blocked > unscanned > clean. Present on list and detail so
              *     clients never need N+1 detail fetches for list badges.
@@ -1963,6 +1993,11 @@ export interface components {
             client_uuid: string;
         };
         EvidencePatch: {
+            /**
+             * Format: uuid
+             * @description Owner only (CCR-024): move the item to another school the owner is a current member of, in the same สพท. (controller). Another สพท. is VAL-002 (ADR-0015 §5). Audited as moved. Mappings already made keep their school.
+             */
+            origin_school_id?: string;
             title?: string;
             description?: string | null;
             status?: components["schemas"]["EvidenceStatus"];
@@ -3976,6 +4011,31 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    acceptEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evidenceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Evidence"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listEvidenceMappings: {

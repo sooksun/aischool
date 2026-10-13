@@ -1553,3 +1553,28 @@ tasks:
       - "admin edit clears the note; position/rank change unconfirms"        # DONE
       - "rank outside family VAL-003; school_admin only, min_acr 2"          # DONE
 
+  - id: SEIP-P1-015
+    title: "P1 — FR-019 rest: owner accepts items uploaded on their behalf; owner moves an item to the right school (CCR-024, contract 4.7.0)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-009, SEIP-P1-011]
+    decisions: [CCR-024]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-024-evidence-owner-acceptance-and-move.md
+      - prisma/migrations/20261013000800_evidence_owner_acceptance/migration.sql
+      - apps/api/src/routes/evidence.ts
+      - apps/api/src/routes/mappings.ts
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+      - apps/api/test/evidence-context.test.mjs
+    notes: >
+      An item uploaded by someone else has owner_accepted_at null and cannot be
+      mapped until the owner accepts it. The owner moves an item to another of their
+      current schools within one สพท.; it is audited as moved. Not done: moving an
+      item to another cycle (evidence is not tied to a cycle; mappings take the
+      framework version from the indicator).
+    acceptance_criteria:
+      - "on-behalf upload needs owner acceptance before mapping"   # DONE
+      - "owner moves item to another own school, same สพท. only"   # DONE
+      - "audit for accept and move"                                # DONE
+

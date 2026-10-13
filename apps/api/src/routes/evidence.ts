@@ -11,15 +11,15 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   listEvidence, withAreaScope, resolveAreaScope, createEvidence, getEvidenceDetail, updateEvidence, softDeleteEvidence,
-  getEvidenceCategoryById, writeAuditEvent, aggregateScanStatus, getSchoolAreaId,
+  getEvidenceCategoryById, writeAuditEvent, aggregateScanStatus, getSchoolAreaId, acceptEvidenceByOwner,
   listEvaluateePersonIdsForCommitteeMember, getPersonnelInSchoolByPerson,
   openUploadSession, getUploadSession, claimUploadForCompletion, releaseUploadClaim,
   finishUpload, abortUploadSession,
 } from '@seip/database';
-import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
+import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { requireCurrentSchool, type AuthedRequest } from '../plugins/auth.js';
 import { resolveGrant } from '../lib/permission-guard.js';
-import { authorizeEvidence } from '../lib/evidence-access.js';
+import { authorizeEvidence, isOwner } from '../lib/evidence-access.js';
 import { etag, idempotent, requireIfMatch, staleOrMissing } from '../lib/concurrency.js';
 import {
   createS3Client, evidenceObjectKey, presignUpload, presignDownload, createMultipartUpload,
@@ -37,6 +37,7 @@ export function serializeEvidence(e: {
   performedFrom: Date | null; performedTo: Date | null; performedDateSource: string | null;
   academicYearBe: number | null; semester: number | null; containsLearners: string;
   clientUuid: string | null; version: number; createdAt: Date; updatedAt: Date;
+  ownerAcceptedAt?: Date | null;
   files?: { scanStatus: string; mediaState?: string }[];
 }) {
   return {
@@ -63,6 +64,7 @@ export function serializeEvidence(e: {
     version: e.version,
     created_at: e.createdAt.toISOString(),
     updated_at: e.updatedAt.toISOString(),
+    owner_accepted_at: e.ownerAcceptedAt ? e.ownerAcceptedAt.toISOString() : null,
     scan_status: aggregateScanStatus(e.files ?? []),
   };
 }
@@ -236,6 +238,8 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
         controllerAreaId: await getSchoolAreaId(schoolId),
         originSchoolId: schoolId,
         uploadedByUserId: auth.userId,
+        // CCR-024: an item uploaded for someone else counts once its owner accepts it.
+        ownerAccepted: ownerPersonId === auth.personId,
         categoryId: body.category_id,
         kind: body.kind,
         title: body.title,
@@ -297,7 +301,21 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
       academic_year_be: evidenceFields.academic_year_be,
       semester: evidenceFields.semester,
       contains_learners: evidenceFields.contains_learners,
+      origin_school_id: z.string().uuid().optional(),
     }).refine((p) => Object.keys(p).length > 0, 'at least one field required').parse(request.body);
+
+    // CCR-024 / FR-019: the owner moves the item to another of their current
+    // schools, within the same controller (another สพท. is ADR-0015 §5).
+    const moving = patch.origin_school_id !== undefined && patch.origin_school_id !== existing.originSchoolId;
+    if (moving) {
+      if (!isOwner(auth, existing)) throw new ApiError('PERM-001', 'Only the owner moves an item to another school');
+      if (!auth.tenancy.schoolRoles.has(patch.origin_school_id!)) {
+        throw new ApiError('VAL-002', 'origin_school_id must be a school where you are a current member');
+      }
+      if ((await getSchoolAreaId(patch.origin_school_id!)) !== existing.controllerAreaId) {
+        throw new ApiError('VAL-002', 'Moving to a school in another สพท. needs a transfer between controllers');
+      }
+    }
 
     const res = await updateEvidence(evidenceId, expectedVersion, {
       title: patch.title,
@@ -312,15 +330,34 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
       academicYearBe: patch.academic_year_be,
       semester: patch.semester,
       containsLearners: patch.contains_learners,
+      originSchoolId: moving ? patch.origin_school_id : undefined,
     });
     if (!res.ok) throw staleOrMissing(res.reason, 'Evidence');
 
     await writeAuditEvent({
-      schoolId: existing.originSchoolId, actorUserId: auth.userId, action: 'updated', entityType: 'Evidence',
+      schoolId: existing.originSchoolId, actorUserId: auth.userId, action: moving ? 'moved' : 'updated', entityType: 'Evidence',
       entityId: evidenceId, before: existing, after: res.row, requestId: request.id,
     });
     reply.header('ETag', etag(res.row.version));
     return serializeEvidence(res.row);
+  });
+
+  // CCR-024: the owner accepts an item a school admin uploaded on their behalf.
+  app.post('/evidence/:evidenceId/accept', { config: { operationId: 'acceptEvidence' } }, async (request) => {
+    const auth = request.auth!;
+    const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);
+    const existing = await getEvidenceDetail(evidenceId);
+    if (!existing) throw new ApiError('RES-001', 'Evidence not found');
+    await authorizeEvidence('acceptEvidence', auth, existing);
+    if (!isOwner(auth, existing)) throw forbiddenRole();
+    const row = (await acceptEvidenceByOwner(evidenceId))!;
+    if (!existing.ownerAcceptedAt) {
+      await writeAuditEvent({
+        schoolId: existing.originSchoolId, actorUserId: auth.userId, action: 'owner_accepted', entityType: 'Evidence',
+        entityId: evidenceId, requestId: request.id,
+      });
+    }
+    return serializeEvidence(row);
   });
 
   app.delete('/evidence/:evidenceId', { config: { operationId: 'deleteEvidence' } }, async (request, reply) => {

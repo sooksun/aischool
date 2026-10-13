@@ -162,6 +162,15 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-015, evidence owner acceptance + move, contract 4.7.0)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `test:unit` · `gate:contracts` · `gate:ownership` | pass. Web unit 45 |
+| api · security · database · worker · `test:backend` | 132 (+3 evidence-context) · 12 · 23 · 23 · 27 |
+| `test:e2e` | 16/16 |
+| Dart client analyse/test · mobile analyse/test | pass against 4.7.0 |
+
 ## Verified runs (2026-10-13, local — SEIP-P1-014, personnel profile confirmation, contract 4.6.0)
 
 | Command | Result |

@@ -83,6 +83,8 @@ export interface CreateEvidenceInput {
   controllerAreaId: string | null;
   originSchoolId: string;
   uploadedByUserId: string;
+  /** CCR-024: false when a school admin uploads for someone else — the owner accepts later. Default true. */
+  ownerAccepted?: boolean;
   categoryId: string;
   kind: EvidenceKind;
   title: string;
@@ -130,6 +132,7 @@ export async function createEvidence(input: CreateEvidenceInput): Promise<{ row:
       containsLearners: input.containsLearners ?? 'unknown',
       clientUuid: input.clientUuid,
       status: input.kind === 'file' ? 'draft' : 'active',
+      ownerAcceptedAt: input.ownerAccepted === false ? null : new Date(),
     },
   });
   return { row, replayed: false };
@@ -164,6 +167,7 @@ export interface EvidencePatchInput {
   academicYearBe?: number | null;
   semester?: number | null;
   containsLearners?: ContainsLearners;
+  originSchoolId?: string;
 }
 
 /** Compare-and-swap on `version` (If-Match). A zero-row update is a missing row
@@ -460,4 +464,13 @@ export async function scanCoverageCensus(schoolId?: string): Promise<{
     })),
     softDeleted,
   };
+}
+
+/** CCR-024: the owner accepts an item uploaded on their behalf. Idempotent. */
+export async function acceptEvidenceByOwner(evidenceId: string, now = new Date()) {
+  await prisma.evidence.updateMany({
+    where: { id: evidenceId, deletedAt: null, ownerAcceptedAt: null },
+    data: { ownerAcceptedAt: now, version: { increment: 1 } },
+  });
+  return getEvidenceDetail(evidenceId);
 }

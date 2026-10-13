@@ -738,6 +738,8 @@ model Evidence {
   academicYearBe      Int?                 @map("academic_year_be")
   semester            Int?
   containsLearners    ContainsLearners     @default(unknown) @map("contains_learners")
+  /// CCR-024: null while an item uploaded on the owner's behalf awaits their acceptance.
+  ownerAcceptedAt     DateTime?            @map("owner_accepted_at")
   /// The offline client's id for this item; UNIQUE per owner so an outbox replay
   /// cannot create a duplicate (constraints migration).
   clientUuid          String?              @map("client_uuid") @db.Uuid

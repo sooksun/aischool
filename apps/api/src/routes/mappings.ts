@@ -45,6 +45,9 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
     // The matrix grants createMapping as `own` only — authorizeEvidence lets
     // nobody but the owner through.
     await authorizeEvidence('createMapping', auth, evidence);
+    if (!evidence.ownerAcceptedAt) {
+      throw new ApiError('VAL-002', 'Accept this item first: it was uploaded on your behalf (CCR-024)');
+    }
     // FR-051: the mapping belongs to the school the owner works at now — after a
     // transfer, the new school's director validates it, not the old school's.
     const schoolId = requireCurrentSchool(auth);
