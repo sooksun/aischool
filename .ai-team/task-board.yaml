@@ -1529,3 +1529,27 @@ tasks:
       - "all sessions end, app refused at once, SEIP ID password updated"      # DONE (real Keycloak)
       - "not own account / never-activated account; school_admin only, min_acr 2" # DONE
 
+  - id: SEIP-P1-014
+    title: "P1 — FR-099a the person confirms their personnel profile; the admin edits it (CCR-023, contract 4.6.0)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-008]
+    decisions: [CCR-023]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-023-personnel-profile-confirmation.md
+      - prisma/migrations/20261013000700_personnel_confirmation/migration.sql
+      - packages/database/src/repositories/personnel.ts
+      - apps/api/src/routes/members.ts
+      - apps/web/src/components/ProfileConfirmBanner.tsx
+      - apps/web/src/pages/admin/MembersPage.tsx
+      - apps/api/test/personnel-profile.test.mjs
+    notes: >
+      Confirm / request-correction by the person; edit by the school admin. A change
+      of position or rank requires the person to confirm again. Not done: classroom
+      type, subjects and grades, values per cycle, and phone in CSV.
+    acceptance_criteria:
+      - "person confirms or asks for a correction; admin sees the note"     # DONE
+      - "admin edit clears the note; position/rank change unconfirms"        # DONE
+      - "rank outside family VAL-003; school_admin only, min_acr 2"          # DONE
+

@@ -1,4 +1,7 @@
 openapi: 3.1.0
+# version 4.6.0 — CCR-023 (additive): a person confirms their personnel profile or
+#   asks for a correction; the school admin edits it (FR-099a). PersonnelSummary and
+#   CurrentUser.personnel gain rank_since, confirmed_at and correction_note.
 # version 4.5.0 — CCR-022 (additive): a school admin issues a one-time password
 #   reset for a member, who redeems it at completePasswordReset (FR-099). Every
 #   session of the account ends when the new password is set.
@@ -21,7 +24,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.5.0
+  version: 4.6.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -490,6 +493,96 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /me/personnel/confirm:
+    post:
+      operationId: confirmMyPersonnel
+      summary: Confirm my personnel profile at the current school (CCR-023, FR-099a)
+      description: 'The person says the position, rank and rank date on file are right.
+        Clears any correction request. RES-001 when the caller has no profile at the
+        current school.
+
+        '
+      tags:
+      - personnel
+      responses:
+        '200':
+          description: Confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonnelSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/personnel/correction:
+    post:
+      operationId: requestPersonnelCorrection
+      summary: Ask the school admin to correct my personnel profile (CCR-023, FR-099a)
+      tags:
+      - personnel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonnelCorrectionRequest'
+      responses:
+        '200':
+          description: Recorded; the profile is no longer confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonnelSummary'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /personnel/{personnelId}:
+    patch:
+      operationId: updatePersonnel
+      summary: Edit a personnel profile (school admin, CCR-023)
+      description: 'Changing position or rank clears the person''s confirmation, so they
+        confirm again; any edit clears a pending correction note. A rank that does
+        not belong to the position''s framework family is VAL-003. Audited. Takes
+        effect for new agreements and cycles; ones already made keep the framework
+        they were made with (FR-089).
+
+        '
+      tags:
+      - personnel
+      parameters:
+      - name: personnelId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonnelPatch'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonnelSummary'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /members:
     get:
       operationId: listMembers
@@ -3111,6 +3204,23 @@ components:
                 examples:
                 - teacher_kru
                 - teacher_chamnankan
+              full_name:
+                type: string
+              rank_since:
+                type:
+                - string
+                - 'null'
+                format: date
+              confirmed_at:
+                type:
+                - string
+                - 'null'
+                format: date-time
+                description: Null until the person confirms the profile (FR-099a); the web asks them to.
+              correction_note:
+                type:
+                - string
+                - 'null'
         memberships:
           type: array
           description: The memberships in effect now (CCR-020). An ended or future-dated membership is not listed, the same way the API ignores it for access.
@@ -3169,11 +3279,60 @@ components:
           examples:
           - teacher_kru
           - teacher_chamnankan
+        rank_since:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: When the current วิทยฐานะ was granted.
+        confirmed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: When the person confirmed this profile. Cleared when an admin changes position or rank.
+        correction_note:
+          type:
+          - string
+          - 'null'
+          description: What the person asked to have corrected; cleared when the admin edits the profile.
         status:
           type: string
           enum:
           - active
           - inactive
+    PersonnelCorrectionRequest:
+      type: object
+      required:
+      - note
+      properties:
+        note:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    PersonnelPatch:
+      type: object
+      minProperties: 1
+      properties:
+        full_name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        employee_code:
+          type:
+          - string
+          - 'null'
+          maxLength: 50
+        position_role:
+          $ref: '#/components/schemas/RoleFamily'
+        rank_level_code:
+          type: string
+          minLength: 1
+        rank_since:
+          type:
+          - string
+          - 'null'
+          format: date
     Member:
       type: object
       description: One person's membership in the caller's school, with their account state.

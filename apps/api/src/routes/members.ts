@@ -8,18 +8,21 @@
 // unauthenticated and belongs to the session lifecycle rather than to admin.
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import {
   listPersonnelForSchool, listMembersForSchool, inviteMember, endMembership, rankLevelMatchesFamily,
   getUserById, issuePasswordResetRow,
+  confirmOwnPersonnel, requestOwnPersonnelCorrection, updatePersonnelProfile, getPersonnelInSchool,
 } from '@seip/database';
 import { generateInviteToken, hashInviteToken, inviteTokenExpiryDate, passwordResetExpiryDate } from '@seip/auth';
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import { requireCurrentSchool } from '../plugins/auth.js';
 import { resolveGrant, requireAcr } from '../lib/permission-guard.js';
 
-function serializePersonnel(p: {
+export function serializePersonnel(p: {
   id: string; fullName: string; employeeCode: string | null;
   positionRole: string; rankLevelCode: string; status: string;
+  rankSince?: Date | null; confirmedAt?: Date | null; correctionNote?: string | null;
 }) {
   return {
     id: p.id,
@@ -28,6 +31,9 @@ function serializePersonnel(p: {
     position_role: p.positionRole,
     rank_level_code: p.rankLevelCode,
     status: p.status,
+    rank_since: p.rankSince ? p.rankSince.toISOString().slice(0, 10) : null,
+    confirmed_at: p.confirmedAt ? p.confirmedAt.toISOString() : null,
+    correction_note: p.correctionNote ?? null,
   };
 }
 
@@ -37,6 +43,7 @@ export function serializeMember(m: {
   personnel?: {
     id: string; fullName: string; employeeCode: string | null;
     positionRole: string; rankLevelCode: string; status: string;
+    rankSince?: Date | null; confirmedAt?: Date | null; correctionNote?: string | null;
   } | null;
 }) {
   return {
@@ -132,6 +139,60 @@ export const memberRoutes: FastifyPluginAsync = async (app) => {
       positionRole: q.position_role,
     });
     return rows.map(serializePersonnel);
+  });
+
+  // CCR-023 / FR-099a: the person's own profile at the current school.
+  app.post('/me/personnel/confirm', { config: { operationId: 'confirmMyPersonnel' } }, async (request) => {
+    const auth = request.auth!;
+    const row = await confirmOwnPersonnel(auth.userId, requireCurrentSchool(auth), request.id);
+    if (!row) throw new ApiError('RES-001', 'No personnel profile at this school');
+    return serializePersonnel(row);
+  });
+
+  app.post('/me/personnel/correction', { config: { operationId: 'requestPersonnelCorrection' } }, async (request) => {
+    const auth = request.auth!;
+    const { note } = z.object({ note: z.string().trim().min(1).max(1000) }).parse(request.body);
+    const row = await requestOwnPersonnelCorrection(auth.userId, requireCurrentSchool(auth), note, request.id);
+    if (!row) throw new ApiError('RES-001', 'No personnel profile at this school');
+    return serializePersonnel(row);
+  });
+
+  app.patch('/personnel/:personnelId', { config: { operationId: 'updatePersonnel' } }, async (request) => {
+    const auth = request.auth!;
+    const schoolId = requireCurrentSchool(auth);
+    const grant = await resolveGrant('updatePersonnel', auth, schoolId);
+    if (grant === 'area-r') throw forbiddenAreaWrite();
+    requireAcr(auth, 'updatePersonnel');
+    const { personnelId } = z.object({ personnelId: z.string().uuid() }).parse(request.params);
+    const body = z.object({
+      full_name: z.string().min(1).max(200).optional(),
+      employee_code: z.string().max(50).nullable().optional(),
+      position_role: z.enum(['teacher', 'administrator']).optional(),
+      rank_level_code: z.string().min(1).optional(),
+      rank_since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    }).refine((b) => Object.keys(b).length > 0, 'at least one field').parse(request.body);
+
+    const current = await getPersonnelInSchool(schoolId, personnelId);
+    if (!current) throw new ApiError('RES-001', 'Personnel not found');
+    const role = body.position_role ?? current.positionRole;
+    const rank = body.rank_level_code ?? current.rankLevelCode;
+    if (!(await rankLevelMatchesFamily(rank, role))) {
+      throw new ApiError('VAL-003', 'rank_level_code does not belong to the given position_role framework family');
+    }
+    try {
+      const row = await updatePersonnelProfile(schoolId, personnelId, {
+        fullName: body.full_name, employeeCode: body.employee_code, positionRole: body.position_role,
+        rankLevelCode: body.rank_level_code,
+        rankSince: body.rank_since === undefined ? undefined : body.rank_since === null ? null : new Date(`${body.rank_since}T00:00:00Z`),
+      }, auth.userId, request.id);
+      if (!row) throw new ApiError('RES-001', 'Personnel not found');
+      return serializePersonnel(row);
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new ApiError('RES-002', 'That employee code is already used at this school');
+      }
+      throw e;
+    }
   });
 
   app.get('/members', { config: { operationId: 'listMembers' } }, async (request) => {

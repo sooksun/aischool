@@ -46,7 +46,7 @@ export async function getMembershipsForUser(userId: string): Promise<(Membership
 export async function getPersonnelForUser(userId: string, schoolId: string) {
   return prisma.personnelProfile.findFirst({
     where: { userId, schoolId, status: 'active' },
-    select: { id: true, positionRole: true, rankLevelCode: true },
+    select: { id: true, positionRole: true, rankLevelCode: true, fullName: true, rankSince: true, confirmedAt: true, correctionNote: true },
   });
 }
 
@@ -105,6 +105,11 @@ export async function countCommitteeEligibleUserIds(schoolId: string, userIds: s
 // parameter and folds into the WHERE by construction (SEC-TEN-1), exactly like
 // the evidence and cycles repositories.
 
+export const PERSONNEL_SUMMARY_SELECT = {
+  id: true, fullName: true, employeeCode: true, positionRole: true, rankLevelCode: true, status: true,
+  rankSince: true, confirmedAt: true, correctionNote: true,
+} as const;
+
 export interface PersonnelSummaryRow {
   id: string;
   fullName: string;
@@ -112,6 +117,9 @@ export interface PersonnelSummaryRow {
   positionRole: RoleFamily;
   rankLevelCode: string;
   status: string;
+  rankSince: Date | null;
+  confirmedAt: Date | null;
+  correctionNote: string | null;
 }
 
 export async function listPersonnelForSchool(
@@ -125,7 +133,7 @@ export async function listPersonnelForSchool(
       ...(status === 'all' ? {} : { status }),
       ...(opts.positionRole ? { positionRole: opts.positionRole } : {}),
     },
-    select: { id: true, fullName: true, employeeCode: true, positionRole: true, rankLevelCode: true, status: true },
+    select: PERSONNEL_SUMMARY_SELECT,
     orderBy: [{ fullName: 'asc' }],
   });
 }
@@ -166,7 +174,7 @@ export async function listMembersForSchool(schoolId: string, opts: { status?: 'c
   // rather than N, and matched in memory.
   const personnel = await prisma.personnelProfile.findMany({
     where: { schoolId, userId: { in: rows.map((r) => r.userId) } },
-    select: { id: true, userId: true, fullName: true, employeeCode: true, positionRole: true, rankLevelCode: true, status: true },
+    select: { ...PERSONNEL_SUMMARY_SELECT, userId: true },
   });
   const byUser = new Map(personnel.map((p) => [p.userId, p]));
 

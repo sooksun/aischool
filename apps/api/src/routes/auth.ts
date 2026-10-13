@@ -233,7 +233,13 @@ export const authRoutes: FastifyPluginAsync<{ env: Env; keycloak?: Keycloak | nu
       email: user.email,
       display_name: user.displayName,
       personnel: auth.personnel
-        ? { id: auth.personnel.id, position_role: auth.personnel.positionRole, rank_level_code: auth.personnel.rankLevelCode }
+        ? {
+          id: auth.personnel.id, position_role: auth.personnel.positionRole, rank_level_code: auth.personnel.rankLevelCode,
+          full_name: auth.personnel.fullName,
+          rank_since: auth.personnel.rankSince ? auth.personnel.rankSince.toISOString().slice(0, 10) : null,
+          confirmed_at: auth.personnel.confirmedAt ? auth.personnel.confirmedAt.toISOString() : null,
+          correction_note: auth.personnel.correctionNote,
+        }
         : null,
       // Only what is in effect now (CCR-020): an ended membership grants nothing
       // in the API, so the client must not offer its screens either.

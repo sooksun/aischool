@@ -29,7 +29,10 @@ export interface AuthedRequest {
   tenancy: TenancyContext;
   /** Resolved per CCR-003 — null if ambiguous/absent and the route needs one. */
   currentSchoolId: string | null;
-  personnel: { id: string; positionRole: 'teacher' | 'administrator'; rankLevelCode: string } | null;
+  personnel: {
+    id: string; positionRole: 'teacher' | 'administrator'; rankLevelCode: string;
+    fullName: string; rankSince: Date | null; confirmedAt: Date | null; correctionNote: string | null;
+  } | null;
   /** The person this account belongs to (ADR-0015) — the owner key of a
    * portfolio. Null only for an account that has no person yet. */
   personId: string | null;

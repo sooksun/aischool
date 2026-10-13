@@ -150,7 +150,7 @@ export function MembersPage() {
       {members && members.length > 0 && (
         <ul style={{ listStyle: 'none', padding: 0, margin: `16px 0 0` }}>
           {members.map((m) => (
-            <MemberRow key={m.membership_id} member={m} onChanged={reload} />
+            <MemberRow key={m.membership_id} member={m} ranks={ranks} onChanged={reload} />
           ))}
         </ul>
       )}
@@ -190,11 +190,12 @@ function IssuedTokenPanel({ issued, onDismiss }: {
   );
 }
 
-function MemberRow({ member, onChanged }: { member: Member; onChanged: () => void }) {
+function MemberRow({ member, ranks, onChanged }: { member: Member; ranks: RankOption[]; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [reset, setReset] = useState<{ token: string; expiresAt: string } | null>(null);
+  const [editing, setEditing] = useState(false);
 
   // CCR-022 / FR-099: a one-time code for a member who forgot their password.
   // Shown once; it lasts 30 minutes and ends every session the person has.
@@ -238,7 +239,13 @@ function MemberRow({ member, onChanged }: { member: Member; onChanged: () => voi
           {USER_STATUS_LABEL[member.user_status] ?? member.user_status}
         </span>
         {member.personnel && ` · ${member.personnel.rank_level_code}`}
+        {member.personnel && !member.personnel.confirmed_at && !member.personnel.correction_note && ' · ยังไม่ยืนยันข้อมูล'}
       </p>
+      {member.personnel?.correction_note && (
+        <p className="field-hint" role="note" style={{ margin: '4px 0 0' }}>
+          ขอแก้ไขข้อมูล: “{member.personnel.correction_note}”
+        </p>
+      )}
 
       {error && <div className="field-error" role="alert">{error}</div>}
 
@@ -253,6 +260,18 @@ function MemberRow({ member, onChanged }: { member: Member; onChanged: () => voi
         </div>
       )}
 
+      {editing && member.personnel && (
+        <PersonnelEditForm
+          personnel={member.personnel}
+          ranks={ranks}
+          onDone={(saved) => { setEditing(false); if (saved) onChanged(); }}
+        />
+      )}
+      {!confirming && !editing && member.personnel && (
+        <button type="button" className="btn btn-secondary" style={{ marginTop: 8, marginRight: 8 }} onClick={() => setEditing(true)}>
+          แก้ไขข้อมูลบุคลากร
+        </button>
+      )}
       {!confirming && member.user_status === 'active' && (
         <button type="button" className="btn btn-secondary" style={{ marginTop: 8, marginRight: 8 }} onClick={issueReset}>
           ตั้งรหัสผ่านใหม่
@@ -281,6 +300,59 @@ function MemberRow({ member, onChanged }: { member: Member; onChanged: () => voi
         </div>
       )}
     </li>
+  );
+}
+
+// CCR-023 / FR-099a: the admin's side of a correction request. A change of
+// position or rank asks the person to confirm again (the API clears it).
+function PersonnelEditForm({ personnel, ranks, onDone }: {
+  personnel: NonNullable<Member['personnel']>;
+  ranks: RankOption[];
+  onDone: (saved: boolean) => void;
+}) {
+  const [fullName, setFullName] = useState(personnel.full_name);
+  const [rank, setRank] = useState(personnel.rank_level_code);
+  const [since, setSince] = useState(personnel.rank_since ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const options = ranks.filter((r) => r.family === personnel.position_role);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      unwrap(await api.PATCH('/personnel/{personnelId}', {
+        params: { path: { personnelId: personnel.id } },
+        body: { full_name: fullName.trim(), rank_level_code: rank, rank_since: since || null },
+      }));
+      onDone(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? thaiMessageFor(err) : 'บันทึกไม่สำเร็จ');
+    }
+  }
+
+  return (
+    <form onSubmit={save} style={{ marginTop: 8 }}>
+      <div className="field">
+        <label htmlFor={`pf-name-${personnel.id}`}>ชื่อ-นามสกุล</label>
+        <input id={`pf-name-${personnel.id}`} value={fullName} onChange={(e) => setFullName(e.target.value)} maxLength={200} required />
+      </div>
+      <div className="field">
+        <label htmlFor={`pf-rank-${personnel.id}`}>วิทยฐานะ</label>
+        <select id={`pf-rank-${personnel.id}`} value={rank} onChange={(e) => setRank(e.target.value)}>
+          {!options.some((o) => o.code === rank) && <option value={rank}>{rank}</option>}
+          {options.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor={`pf-since-${personnel.id}`}>วันที่ได้รับวิทยฐานะ</label>
+        <input id={`pf-since-${personnel.id}`} type="date" value={since} onChange={(e) => setSince(e.target.value)} />
+      </div>
+      {error && <div className="field-error" role="alert">{error}</div>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button type="submit" className="btn btn-primary">บันทึก</button>
+        <button type="button" className="btn btn-secondary" onClick={() => onDone(false)}>ยกเลิก</button>
+      </div>
+    </form>
   );
 }
 

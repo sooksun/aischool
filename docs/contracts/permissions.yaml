@@ -38,7 +38,9 @@
 #   writes_by_area_admin stays forbidden for every other operation (area_admin_writes below).
 # version: 2.4.0 — CCR-022 (additive): issuePasswordReset (school_admin, min_acr 2) and
 #   completePasswordReset (unauthenticated, the token is the credential).
-version: 2.4.0
+# version: 2.5.0 — CCR-023 (additive): updatePersonnel (school_admin, min_acr 2);
+#   confirmMyPersonnel / requestPersonnelCorrection, self-scoped.
+version: 2.5.0
 status: locked
 locked_at: 2026-07-17
 
@@ -117,6 +119,8 @@ any_authenticated:
   getNotificationPreferences: The caller's own preferences.
   updateNotificationPreferences: The caller's own preferences.
   listDeviceSessions: The caller's own device sessions.
+  confirmMyPersonnel: CCR-023. The caller's own profile at the current school only — never a personnel id parameter.
+  requestPersonnelCorrection: CCR-023. The caller's own profile at the current school only.
   registerPushToken: Binds a token to the caller's current session only.
   removePushToken: The caller's current session only.
   revokeDeviceSession: The caller's own sessions only (RES-001 for anyone else's).
@@ -152,7 +156,8 @@ matrix:
   updateSchool:            { area_admin: area }
   appointSchoolAdmin:      { area_admin: area }
   endMembership:           { school_admin: school }
-  issuePasswordReset:      { school_admin: school }   # never the caller's own account (VAL-002)
+  issuePasswordReset:      { school_admin: school }
+  updatePersonnel:         { school_admin: school }   # never the caller's own account (VAL-002)
 
   # taxonomy (reference data — readable by any authenticated member)
   listFrameworks:          { teacher: school, director: school, deputy: school, evaluator: school, school_admin: school, area_admin: area-r }
@@ -267,6 +272,7 @@ min_acr:
   appointSchoolAdmin: 2
   endMembership: 2
   issuePasswordReset: 2
+  updatePersonnel: 2
   createExport: { other_person: 2 }
 
 notes:

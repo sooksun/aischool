@@ -18,4 +18,5 @@ export * from './lib/local-heuristic-mapping.js';
 export * from './repositories/web-sessions.js';
 export * from './repositories/device-sessions.js';
 export * from './repositories/password-resets.js';
+export * from './repositories/personnel.js';
 export * from './repositories/schools.js';

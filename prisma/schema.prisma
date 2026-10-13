@@ -459,6 +459,10 @@ model PersonnelProfile {
   positionRole  RoleFamily @map("position_role") // selects ว9 vs ว10 framework
   rankLevelCode String     @map("rank_level_code")
   status        String     @default("active")
+  /// FR-099a / CCR-023
+  rankSince      DateTime? @map("rank_since") @db.Date
+  confirmedAt    DateTime? @map("confirmed_at")
+  correctionNote String?   @map("correction_note")
 
   school    School      @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   user      UserAccount @relation(fields: [userId], references: [id], onDelete: Restrict)

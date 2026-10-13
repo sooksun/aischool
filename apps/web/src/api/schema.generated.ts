@@ -224,6 +224,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/personnel/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm my personnel profile at the current school (CCR-023, FR-099a)
+         * @description The person says the position, rank and rank date on file are right. Clears any correction request. RES-001 when the caller has no profile at the current school.
+         */
+        post: operations["confirmMyPersonnel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/personnel/correction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the school admin to correct my personnel profile (CCR-023, FR-099a) */
+        post: operations["requestPersonnelCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/personnel/{personnelId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a personnel profile (school admin, CCR-023)
+         * @description Changing position or rank clears the person's confirmation, so they confirm again; any edit clears a pending correction note. A rank that does not belong to the position's framework family is VAL-003. Audited. Takes effect for new agreements and cycles; ones already made keep the framework they were made with (FR-089).
+         */
+        patch: operations["updatePersonnel"];
+        trace?: never;
+    };
     "/members": {
         parameters: {
             query?: never;
@@ -1478,6 +1535,15 @@ export interface components {
                  * @example teacher_chamnankan
                  */
                 rank_level_code: string;
+                full_name?: string;
+                /** Format: date */
+                rank_since?: string | null;
+                /**
+                 * Format: date-time
+                 * @description Null until the person confirms the profile (FR-099a); the web asks them to.
+                 */
+                confirmed_at?: string | null;
+                correction_note?: string | null;
             };
             /** @description The memberships in effect now (CCR-020). An ended or future-dated membership is not listed, the same way the API ignores it for access. */
             memberships: {
@@ -1505,8 +1571,31 @@ export interface components {
              * @example teacher_chamnankan
              */
             rank_level_code: string;
+            /**
+             * Format: date
+             * @description When the current วิทยฐานะ was granted.
+             */
+            rank_since?: string | null;
+            /**
+             * Format: date-time
+             * @description When the person confirmed this profile. Cleared when an admin changes position or rank.
+             */
+            confirmed_at?: string | null;
+            /** @description What the person asked to have corrected; cleared when the admin edits the profile. */
+            correction_note?: string | null;
             /** @enum {string} */
             status: "active" | "inactive";
+        };
+        PersonnelCorrectionRequest: {
+            note: string;
+        };
+        PersonnelPatch: {
+            full_name?: string;
+            employee_code?: string | null;
+            position_role?: components["schemas"]["RoleFamily"];
+            rank_level_code?: string;
+            /** Format: date */
+            rank_since?: string | null;
         };
         /** @description One person's membership in the caller's school, with their account state. */
         Member: {
@@ -3130,6 +3219,86 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    confirmMyPersonnel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Confirmed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonnelSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    requestPersonnelCorrection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonnelCorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Recorded; the profile is no longer confirmed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonnelSummary"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updatePersonnel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                personnelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonnelPatch"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonnelSummary"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     listMembers: {

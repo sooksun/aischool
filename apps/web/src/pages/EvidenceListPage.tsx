@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, unwrap } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
+import { ProfileConfirmBanner } from '../components/ProfileConfirmBanner';
 import type { components } from '../api/schema.generated';
 
 type Evidence = components['schemas']['Evidence'];
@@ -45,6 +46,7 @@ export function EvidenceListPage() {
         <button type="button" className="btn btn-secondary" onClick={logout}>ออกจากระบบ</button>
       </div>
       {user?.display_name && <p className="field-hint">{user.display_name}</p>}
+      {user?.personnel && <ProfileConfirmBanner key={user.personnel.id} personnel={user.personnel} />}
 
       {error && (
         <div className="alert alert-error" role="alert">
