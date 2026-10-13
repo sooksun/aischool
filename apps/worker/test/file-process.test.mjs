@@ -561,3 +561,57 @@ test('FR-021: a video gets a 720p browser copy, stored apart from the untouched 
   await runOnce(env, s3, { scheduleGc: false });
   assert.equal(await prisma.evidenceFile.count({ where: { parentFileId: file.id, role: 'review_720p' } }), 1);
 });
+
+/** A real JPEG with an EXIF segment (APP1) carrying a marker in place of GPS tags. */
+function photoWithExif(marker) {
+  const dir = mkdtempSync(join(tmpdir(), 'seip-photo-'));
+  const out = join(dir, 'photo.jpg');
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=1600x1200:rate=1:duration=1', '-frames:v', '1', out]);
+  const jpeg = readFileSync(out);
+  const payload = Buffer.concat([Buffer.from('Exif\0\0'), Buffer.from(marker)]);
+  const app1 = Buffer.concat([Buffer.from([0xff, 0xe1]), Buffer.from([(payload.length + 2) >> 8, (payload.length + 2) & 0xff]), payload]);
+  return Buffer.concat([jpeg.subarray(0, 2), app1, jpeg.subarray(2)]);
+}
+
+async function imageFixture(bytes) {
+  const base = await fixture('photo.pdf');
+  const fileId = randomUUID();
+  const key = `evidence/${base.school.id}/${base.evidence.id}/${fileId}/photo.jpg`;
+  await putObject(key, bytes, 'image/jpeg');
+  return registerEvidenceFileWithWorkerJobs({
+    id: fileId, evidenceId: base.evidence.id, storageUri: key, contentType: 'image/jpeg', byteSize: BigInt(bytes.length),
+    checksumSha256: createHash('sha256').update(bytes).digest('hex'),
+    originalFilename: 'photo.jpg', schoolId: base.school.id, actorUserId: base.user.id,
+  });
+}
+
+async function objectBytes(key) {
+  const { GetObjectCommand } = await import('@aws-sdk/client-s3');
+  return Buffer.from(await (await s3.send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))).Body.transformToByteArray());
+}
+
+test('FR-021: a photo gets a small preview without its EXIF; the original keeps it', async () => {
+  const marker = 'GPS-13.7563-100.5018';
+  const bytes = photoWithExif(marker);
+  const file = await imageFixture(bytes);
+  await runOnce(env, s3, { scheduleGc: false });
+  const poster = await prisma.evidenceFile.findFirst({ where: { parentFileId: file.id, role: 'poster' } });
+  assert.ok(poster, 'a poster child row exists');
+  assert.equal(poster.contentType, 'image/jpeg');
+  assert.deepEqual([poster.width, poster.height], [480, 360]);
+  assert.equal(poster.durationMs, null);
+  const preview = await objectBytes(poster.storageUri);
+  assert.ok(!preview.includes(Buffer.from(marker)), 'no EXIF in the preview');
+  assert.ok(!preview.includes(Buffer.from('Exif\0\0')), 'no EXIF segment at all');
+  assert.ok((await objectBytes(file.storageUri)).includes(Buffer.from(marker)), 'the original is untouched');
+  assert.equal(await prisma.evidenceFile.count({ where: { parentFileId: file.id, role: 'review_720p' } }), 0, 'a photo has no video copy');
+});
+
+test('FR-021: a video gets a poster from its opening frame', async () => {
+  const file = await videoFixture(600, clip(2, '640x480'));
+  await runOnce(env, s3, { scheduleGc: false });
+  const poster = await prisma.evidenceFile.findFirst({ where: { parentFileId: file.id, role: 'poster' } });
+  assert.ok(poster);
+  assert.deepEqual([poster.width, poster.height], [480, 360]);
+  assert.ok(!(await objectBytes(poster.storageUri)).includes(Buffer.from('+13.7563')));
+});

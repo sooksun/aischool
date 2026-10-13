@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Preview picture (SEIP-P2-007, in review):** every photo and video now gets a small preview picture (at most 480 px wide) with all EXIF and location data removed. The original is kept untouched, and the evidence page shows the preview.
+>
 > **720p copy (SEIP-P2-006, in review):** every video now gets a small 720p copy that plays in a browser, with location metadata removed. The original is kept untouched, and the evidence page offers "ดูแบบ 720p".
 >
 > **Server-measured media (SEIP-P2-005, in review):** the worker now measures each video and audio file with ffprobe. The real length and resolution replace what the client declared, and a clip longer than its category allows is blocked. Thumbnails and the 720p copy come later.

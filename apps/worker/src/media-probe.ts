@@ -86,3 +86,22 @@ export async function transcodeReview720p(ffmpegPath: string, inPath: string, ou
     return false;
   }
 }
+
+/**
+ * FR-021: a small JPEG preview (at most 480 px wide) of a photo or of a
+ * video's opening frame. ffmpeg writes only pixels — EXIF, GPS location and
+ * every other tag are gone (`-map_metadata -1`, and the JPEG muxer carries no
+ * EXIF). False when ffmpeg is missing or cannot decode the file.
+ */
+export async function makePosterJpeg(ffmpegPath: string, inPath: string, outPath: string, timeoutMs = 60_000): Promise<boolean> {
+  try {
+    await run(ffmpegPath, [
+      '-v', 'error', '-y', '-i', inPath, '-frames:v', '1',
+      '-vf', "scale='min(480,iw)':-2", '-q:v', '5', '-map_metadata', '-1', '-f', 'image2', '-c:v', 'mjpeg', outPath,
+    ], timeoutMs);
+    return true;
+  } catch (e) {
+    console.warn(`[media-probe] no poster: ${(e as Error).message}`);
+    return false;
+  }
+}

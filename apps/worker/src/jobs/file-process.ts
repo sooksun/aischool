@@ -24,7 +24,7 @@ import {
 } from '@seip/database';
 import { headObject, getObjectStream, putObjectFromFile } from '../s3.js';
 import { scanStream } from '../clamav.js';
-import { isProbeable, probeMedia, localCopy, probeFile, transcodeReview720p } from '../media-probe.js';
+import { isProbeable, probeMedia, localCopy, probeFile, transcodeReview720p, makePosterJpeg } from '../media-probe.js';
 import { createReadStream } from 'node:fs';
 import { join } from 'node:path';
 import type { Env } from '../env.js';
@@ -125,29 +125,35 @@ async function scanIfEnabled(
 const DURATION_SLACK_MS = 1000;
 
 /**
- * FR-021: the 720p copy a browser plays, stored next to the original (which is
- * never touched) and listed as a child file with role review_720p. Best effort:
- * a failed transcode leaves the original, which is still served, as it was.
+ * FR-021: server-made copies of an original, stored next to it (the original
+ * is never touched) and listed as child files — the 720p copy a browser plays
+ * (review_720p) and a small preview picture (poster). Both carry no location
+ * or other metadata. Best effort: a failed render leaves the original, which
+ * is still served, as it was.
  */
-async function makeReviewRendition(
+async function makeRendition(
   env: Env, s3: S3Client,
   file: { id: string; evidenceId: string; storageUri: string; originalFilename: string },
   scanStatus: 'clean' | 'unscanned',
+  role: 'review_720p' | 'poster',
 ) {
+  const spec = role === 'review_720p'
+    ? { ext: '720p.mp4', type: 'video/mp4', render: transcodeReview720p }
+    : { ext: 'poster.jpg', type: 'image/jpeg', render: makePosterJpeg };
   const copy = await localCopy((await getObjectStream(s3, env.S3_BUCKET, file.storageUri)) as Readable);
   try {
-    const out = join(copy.dir, 'review_720p.mp4');
-    if (!(await transcodeReview720p(env.FFMPEG_PATH, copy.path, out))) return;
+    const out = join(copy.dir, `out.${spec.ext}`);
+    if (!(await spec.render(env.FFMPEG_PATH, copy.path, out))) return;
     const hash = createHash('sha256');
     for await (const chunk of createReadStream(out)) hash.update(chunk as Buffer);
-    const key = `${file.storageUri}.review_720p.mp4`;
-    const size = await putObjectFromFile(s3, env.S3_BUCKET, key, out, 'video/mp4');
+    const key = `${file.storageUri}.${role}.${spec.ext.split('.').pop()}`;
+    const size = await putObjectFromFile(s3, env.S3_BUCKET, key, out, spec.type);
     const probe = await probeFile(env.FFPROBE_PATH, out);
     await createRenditionFile({
-      parentFileId: file.id, evidenceId: file.evidenceId, role: 'review_720p', storageUri: key, contentType: 'video/mp4',
+      parentFileId: file.id, evidenceId: file.evidenceId, role, storageUri: key, contentType: spec.type,
       byteSize: BigInt(size), checksumSha256: hash.digest('hex'), scanStatus,
-      durationMs: probe?.durationMs ?? null, width: probe?.width ?? null, height: probe?.height ?? null,
-      originalFilename: file.originalFilename.replace(/\.[^.]+$/, '') + '.720p.mp4',
+      durationMs: role === 'poster' ? null : probe?.durationMs ?? null, width: probe?.width ?? null, height: probe?.height ?? null,
+      originalFilename: file.originalFilename.replace(/\.[^.]+$/, '') + '.' + spec.ext,
     });
   } finally {
     await copy.cleanup();
@@ -248,9 +254,14 @@ export async function processFileJob(
     ? { status: 'blocked', scanned: false }
     : await scanIfEnabled(env, s3, { id: file.id, storageUri: file.storageUri, byteSize: file.byteSize });
   await setFileScanStatus(file.id, outcome.status, { scanned: outcome.scanned });
-  if (outcome.status !== 'blocked' && file.role === 'original' && file.contentType.startsWith('video/')
-    && env.MEDIA_RENDITIONS === 'on' && !(await hasRendition(file.id, 'review_720p'))) {
-    await makeReviewRendition(env, s3, file, outcome.status);
+  // A sanitised original (CDR) is rendered from nothing — only a clean or
+  // unscanned one has renditions.
+  if ((outcome.status === 'clean' || outcome.status === 'unscanned') && file.role === 'original' && env.MEDIA_RENDITIONS === 'on') {
+    const isVideo = file.contentType.startsWith('video/');
+    if (isVideo && !(await hasRendition(file.id, 'review_720p'))) await makeRendition(env, s3, file, outcome.status, 'review_720p');
+    if ((isVideo || file.contentType.startsWith('image/')) && !(await hasRendition(file.id, 'poster'))) {
+      await makeRendition(env, s3, file, outcome.status, 'poster');
+    }
   }
   // Renditions (720p review copy, audio proxy, OCR) arrive in P2/P3; until then
   // a verified original is the whole of the item.

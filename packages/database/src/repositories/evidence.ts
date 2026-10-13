@@ -552,12 +552,12 @@ export async function markDuplicateIfAny(fileId: string) {
 }
 
 /**
- * FR-021: a worker-made rendition of an original (role review_720p, …). Its
+ * FR-021: a worker-made rendition of an original (role review_720p, poster, …). Its
  * bytes were hashed by the worker as it wrote them, and it inherits the
  * original's scan verdict. Idempotent per (parent, role): a re-run reuses it.
  */
 export async function createRenditionFile(input: {
-  parentFileId: string; evidenceId: string; role: 'review_720p'; storageUri: string; contentType: string;
+  parentFileId: string; evidenceId: string; role: 'review_720p' | 'poster'; storageUri: string; contentType: string;
   byteSize: bigint; checksumSha256: string; scanStatus: 'clean' | 'unscanned' | 'sanitised';
   durationMs: number | null; width: number | null; height: number | null; originalFilename: string;
 }) {
@@ -574,6 +574,6 @@ export async function createRenditionFile(input: {
   });
 }
 
-export async function hasRendition(parentFileId: string, role: 'review_720p') {
+export async function hasRendition(parentFileId: string, role: 'review_720p' | 'poster') {
   return (await prisma.evidenceFile.count({ where: { parentFileId, role } })) > 0;
 }

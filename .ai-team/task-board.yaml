@@ -1749,3 +1749,27 @@ tasks:
       - "720p child file, original untouched, GPS metadata absent"  # DONE — file-process.test
       - "re-processing does not make a second copy"                # DONE
 
+  - id: SEIP-P2-007
+    title: "P2 — FR-021 preview picture (poster) for each photo and video, EXIF and GPS removed; the original is untouched"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-006]
+    decisions: [ADR-0018]
+    primary_paths:
+      - apps/worker/src/media-probe.ts
+      - apps/worker/src/jobs/file-process.ts
+      - packages/database/src/repositories/evidence.ts
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+    notes: >
+      No contract change: FileRole poster was already in contract 4.0.0. For a clean
+      or unscanned image or video original, ffmpeg writes a JPEG at most 480 px wide
+      from the photo or the video's first frame. The output carries pixels only, with
+      no EXIF and no GPS. It is a child row with role poster, idempotent per parent,
+      and best effort. The web shows it above the original's download button. Not
+      done: extracting the capture date before stripping (this belongs to FR-030 /
+      FR-084), an EXIF-free full-size photo for export, and HEIC decoding where
+      ffmpeg lacks it.
+    acceptance_criteria:
+      - "photo poster has no EXIF segment; original still has it"  # DONE — file-process.test
+      - "video poster from first frame, no location tag"            # DONE
+

@@ -169,11 +169,13 @@ export function EvidenceDetailPage() {
       <h2>ไฟล์</h2>
       {!evidence.files.some((f) => f.role === 'original') && <p className="field-hint">ยังไม่มีไฟล์</p>}
       <ul style={{ listStyle: 'none', padding: 0 }}>
-        {/* Renditions (720p copy, FR-021) belong to their original, not the list. */}
+        {/* Renditions (720p copy, preview picture, FR-021) belong to their original, not the list. */}
         {evidence.files.filter((f) => f.role === 'original').map((f) => {
           const review = evidence.files.find((r) => r.parent_file_id === f.id && r.role === 'review_720p');
+          const poster = evidence.files.find((r) => r.parent_file_id === f.id && r.role === 'poster');
           return (
           <li key={f.id} className="evidence-card">
+            {poster && evidenceId && <PosterImage evidenceId={evidenceId} fileId={poster.id} />}
             <div className="title">{f.original_filename}</div>
             {f.duplicate_of_evidence_id && (
               <p className="field-hint" role="note">
@@ -308,4 +310,22 @@ function mappingStatusLabel(status: string): string {
     case 'revoked': return 'ยกเลิกแล้ว';
     default: return status;
   }
+}
+
+/**
+ * FR-021: the server-made preview of a photo or a video's first frame — a
+ * small JPEG with no location metadata. A preview that cannot be fetched is
+ * simply not shown; the original's download stays below it.
+ */
+function PosterImage({ evidenceId, fileId }: { evidenceId: string; fileId: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void api.GET('/evidence/{evidenceId}/files/{fileId}/download-url', { params: { path: { evidenceId, fileId } } })
+      .then((res) => { if (live && res.data) setSrc(res.data.download_url); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [evidenceId, fileId]);
+  if (!src) return null;
+  return <img src={src} alt="ภาพตัวอย่าง" loading="lazy" style={{ display: 'block', maxWidth: '100%', width: 240, borderRadius: 6, marginBottom: 8 }} />;
 }
