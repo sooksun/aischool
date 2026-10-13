@@ -141,6 +141,10 @@ test('validate: a password-only token gets AUTH-006; the second-factor token val
     const res = await actOnMapping(enforced, token, m.id, m.version, 'validate');
     assert.equal(res.statusCode, 403, res.body);
     assert.equal(res.json().code, 'AUTH-006');
+    // FR-095: a refused step-up is an access denial with a known actor.
+    const audit = await prisma.auditEvent.findFirst({ where: { requestId: res.json().request_id, action: 'access_denied' } });
+    assert.equal(audit?.actorUserId, people.director.user.id);
+    assert.equal(audit?.afterState.code, 'AUTH-006');
   }
   const ok = await actOnMapping(enforced, people.director.mfa, m.id, m.version, 'validate');
   assert.equal(ok.statusCode, 200, ok.body);

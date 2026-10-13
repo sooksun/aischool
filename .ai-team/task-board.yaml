@@ -1332,3 +1332,36 @@ tasks:
       - "a second factor older than 15 min counts as acr 1 (bearer + web session)"                                                          # DONE — oidc.test + web-session.test
       - "CI green on the pushed commit"                                                                                                       # DONE — run 38338182959 on 1f5d4d5
       - "run on an Android emulator / iOS simulator against the dev realm"                                                                   # OPEN — no emulator in this environment
+
+  - id: SEIP-P1-007
+    title: "P1 — FR-095 tenant isolation gaps: access_denied audit, taxonomy grants, last unchecked FK"
+    status: review              # 2026-10-13 — local gates green; CI pending
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0012, ADR-0019]
+    primary_paths:
+      - apps/api/src/plugins/error-handler.ts
+      - apps/api/src/lib/permission-guard.ts
+      - apps/api/src/routes/taxonomy.ts
+      - apps/api/src/routes/cycles.ts
+      - tests/security/permission-matrix.test.mjs
+    notes: >
+      permissions.yaml has promised "every deny path emits an AuditEvent with
+      action=access_denied when the request carried a valid identity" since
+      Sprint 0, and nothing wrote one. The error handler now does, best effort,
+      for PERM-*, AUTH-006 and RES-001 (the cross-tenant answer). The audit row
+      carries operationId, code, method and route template, never the query
+      string. Requests with no valid identity are not attributed. The three
+      taxonomy routes checked authentication only, and now need a role
+      (requireAnyGrant). Of the "4 unchecked FK fields" from the 2026-07 audit,
+      three were already fixed (agreements, assignments, reports); the last,
+      createCycle framework_version_id, answered 500 and now answers VAL-002.
+      Not covered: AUTH-007 (a CSRF failure is thrown before the identity is
+      attached).
+    acceptance_criteria:
+      - "every denial the permission sweep provokes has an access_denied row with the right actor, operation and code"   # DONE
+      - "no identity → no row"                                                                                          # DONE
+      - "AUTH-006 denials are audited"                                                                                  # DONE — step-up.test
+      - "taxonomy refuses an account with no live membership (PERM-001)"                                                # DONE
+      - "createCycle unknown framework → VAL-002"                                                                       # DONE
+      - "CI green on the pushed commit"                                                                                 # OPEN

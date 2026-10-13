@@ -43,6 +43,19 @@ export async function resolveGrant(
 }
 
 /**
+ * For reference data that is not tied to one school (taxonomy): the caller must
+ * hold, somewhere, a role that permissions.yaml grants this operation. Being
+ * authenticated is not enough — an account with no live membership at all (an
+ * ended transfer, a never-placed invitee) gets PERM-001 (FR-095).
+ */
+export function requireAnyGrant(operationId: string, auth: AuthedRequest): void {
+  for (const roles of [...auth.tenancy.schoolRoles.values(), ...auth.tenancy.areaRoles.values()]) {
+    for (const role of roles) if (grantFor(operationId, role)) return;
+  }
+  throw forbiddenRole();
+}
+
+/**
  * Step-up (ADR-0014, permissions.yaml `min_acr`). Call AFTER the role check, so a
  * caller who could never do this gets PERM-001 rather than being sent to
  * re-authenticate for nothing. Pass `action` for an action-keyed entry

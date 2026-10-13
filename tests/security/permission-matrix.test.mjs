@@ -341,6 +341,9 @@ test('every implemented operation x every role matches its permissions.yaml disp
   const ops = OPERATIONS();
   const failures = [];
   let assertions = 0;
+  // FR-095: request ids of every denial this sweep provokes; each must leave an
+  // access_denied audit row naming the caller (checked after the loop).
+  const denials = new Map();
 
   for (const [operationId, req] of Object.entries(ops)) {
     if (isExempt(operationId)) continue; // login/getCurrentUser not in this sweep — no per-role grant to check
@@ -359,6 +362,9 @@ test('every implemented operation x every role matches its permissions.yaml disp
       // no body — light-my-request's .json() throws on empty input rather than
       // returning undefined, so guard on status the same way a real client would.
       const body = res.statusCode === 204 ? undefined : res.json();
+      if (/^(PERM-\d{3}|RES-001|AUTH-006)$/.test(body?.code ?? '')) {
+        denials.set(body.request_id, { operationId, role, code: body.code });
+      }
 
       if (!grant) {
         // No grant at all: this role must never get past the permission check.
@@ -399,6 +405,24 @@ test('every implemented operation x every role matches its permissions.yaml disp
   assert.deepEqual(unswept, [], `matrix rows with no sweep entry: ${unswept.join(', ')}`);
   assert.equal(assertions, Object.keys(ops).length * ROLES.length);
   assert.deepEqual(failures, [], `${failures.length} mismatch(es) between permissions.yaml and enforcement:\n${failures.join('\n')}`);
+
+  // permissions.yaml notes: "Every deny path emits an AuditEvent with
+  // action=access_denied when the request carried a valid identity."
+  assert.ok(denials.size > 50, `the sweep should provoke plenty of denials (got ${denials.size})`);
+  const rows = await prisma.auditEvent.findMany({
+    where: { action: 'access_denied', requestId: { in: [...denials.keys()] } },
+    select: { requestId: true, actorUserId: true, entityId: true, afterState: true },
+  });
+  const byRequest = new Map(rows.map((r) => [r.requestId, r]));
+  const missing = [];
+  for (const [requestId, d] of denials) {
+    const row = byRequest.get(requestId);
+    if (!row) { missing.push(`${d.operationId} x ${d.role} (${d.code})`); continue; }
+    assert.equal(row.actorUserId, userIdFor[d.role], `${d.operationId} x ${d.role}: audited actor`);
+    assert.equal(row.entityId, d.operationId);
+    assert.equal(row.afterState.code, d.code);
+  }
+  assert.deepEqual(missing, [], `denials with no access_denied audit row:\n${missing.join('\n')}`);
 });
 
 test('area_admin is read-only: every write operation denies it even where director/school_admin are granted', async () => {
@@ -477,4 +501,34 @@ test('every phase-gated operation answers 501 SYS-003 to an authenticated caller
     assert.equal(res.statusCode, 501, `${operationId}: ${res.statusCode} ${res.body}`);
     assert.equal(res.json().code, 'SYS-003');
   }
+});
+
+test('a request with no valid identity leaves no access_denied row (nothing to attribute)', async () => {
+  const res = await app.inject({ method: 'GET', url: '/api/v1/evidence', headers: { authorization: 'Bearer not-a-token', 'x-school-id': school.id } });
+  assert.equal(res.statusCode, 401);
+  const rows = await prisma.auditEvent.count({ where: { requestId: res.json().request_id } });
+  assert.equal(rows, 0);
+});
+
+test('taxonomy needs a role, not just a login: an account with no live membership gets PERM-001', async () => {
+  const password = `nomember-${randomUUID()}`;
+  const user = created.addUser(await prisma.userAccount.create({
+    data: { person: { create: { displayName: 'no member' } }, email: `nomember-${randomUUID()}@x.io`, displayName: 'No member', status: 'active', passwordHash: await argonHash(password) },
+  }));
+  const token = (await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: user.email, password } })).json().access_token;
+  for (const url of ['/api/v1/frameworks', `/api/v1/frameworks/${frameworkId}`, '/api/v1/evidence-categories']) {
+    const res = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } });
+    assert.equal(res.statusCode, 403, `${url}: ${res.body}`);
+    assert.equal(res.json().code, 'PERM-001');
+  }
+});
+
+test('createCycle with an unknown framework is VAL-002, not a 500 from the foreign key', async () => {
+  const res = await app.inject({
+    method: 'POST', url: '/api/v1/cycles',
+    headers: { authorization: `Bearer ${tokenFor.director}`, 'x-school-id': school.id },
+    payload: { framework_version_id: randomUUID(), fiscal_year: 9997, evaluation_kind: 'pa', title: 'x', starts_on: '2026-01-01', ends_on: '2026-12-31' },
+  });
+  assert.equal(res.statusCode, 422, res.body);
+  assert.equal(res.json().code, 'VAL-002');
 });

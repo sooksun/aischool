@@ -41,6 +41,9 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   // CCR-018. Hashes and the sealed Keycloak token are excluded: they are
   // credentials, and an audit reader needs only who signed in at which level.
   WebSession: ['id', 'userId', 'acr'],
+  // FR-095 access_denied. The route template, not the URL: ids in a path are
+  // not PII, but query strings could carry anything.
+  Request: ['operationId', 'code', 'method', 'route'],
 };
 
 function allowlist(entityType: string, obj: Record<string, unknown> | undefined): Snapshot | undefined {
