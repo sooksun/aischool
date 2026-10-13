@@ -11,9 +11,11 @@ import { useEffect, useState } from 'react';
 import { api, unwrap } from '../../api/client';
 import { ApiError, thaiMessageFor } from '../../api/errors';
 import type { components } from '../../api/schema.generated';
+import { MEMBER_CSV_COLUMNS, MEMBER_CSV_TEMPLATE, membersFromCsv } from '../../lib/memberCsv';
 
 type Member = components['schemas']['Member'];
 type Role = components['schemas']['Role'];
+type MemberInvite = components['schemas']['MemberInvite'];
 
 // area_admin is absent on purpose: it is an area-scoped role and the API rejects
 // it here with VAL-002 (a school membership row would violate the
@@ -46,6 +48,7 @@ export function MembersPage() {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [issued, setIssued] = useState<{ email: string; token: string; expiresAt: string } | null>(null);
   const [ranks, setRanks] = useState<RankOption[]>([]);
 
@@ -110,6 +113,13 @@ export function MembersPage() {
       <button type="button" className="btn btn-primary" onClick={() => setShowInvite((v) => !v)}>
         {showInvite ? 'ยกเลิก' : '+ เชิญบุคลากร'}
       </button>
+
+      {' '}
+      <button type="button" className="btn btn-secondary" onClick={() => setShowImport((v) => !v)}>
+        {showImport ? 'ปิดการนำเข้า' : 'นำเข้าจากไฟล์ CSV'}
+      </button>
+
+      {showImport && <ImportPanel onImported={reload} />}
 
       {showInvite && (
         <InviteForm
@@ -355,5 +365,90 @@ function InviteForm({ ranks, onDone }: {
         {busy ? 'กำลังเชิญ…' : 'เชิญเข้าใช้ระบบ'}
       </button>
     </div>
+  );
+}
+
+type ImportRow = components['schemas']['MemberImportRowResult'];
+
+/**
+ * CCR-019 / FR-091: a staff list as CSV. Checked first with a dry run, so the
+ * admin fixes the file before anyone is invited; then imported, with every
+ * invite code shown once, as with a single invite.
+ */
+function ImportPanel({ onImported }: { onImported: () => void }) {
+  const [rows, setRows] = useState<MemberInvite[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [results, setResults] = useState<{ dryRun: boolean; rows: ImportRow[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function pick(file: File | undefined) {
+    setResults(null);
+    setError(null);
+    if (!file) return;
+    const parsed = membersFromCsv(await file.text());
+    setFileError(parsed.fileErrors[0] ?? (parsed.rows.length === 0 ? 'ไม่มีรายชื่อในไฟล์' : null));
+    setRows(parsed.rows);
+  }
+
+  async function send(dryRun: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = unwrap(await api.POST('/members/import', { body: { rows, dry_run: dryRun } }));
+      setResults({ dryRun, rows: r.results });
+      if (!dryRun) onImported();
+    } catch (e) {
+      setError(e instanceof ApiError ? thaiMessageFor(e) : 'นำเข้าไม่สำเร็จ');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ok = results?.rows.filter((r) => r.status !== 'rejected').length ?? 0;
+  const template = `data:text/csv;charset=utf-8,${encodeURIComponent('\uFEFF' + MEMBER_CSV_TEMPLATE)}`;
+
+  return (
+    <section aria-label="นำเข้ารายชื่อจาก CSV" style={{ marginTop: 16 }}>
+      <p className="field-hint">
+        คอลัมน์: {MEMBER_CSV_COLUMNS.join(', ')} — <a href={template} download="seip-members.csv">ดาวน์โหลดไฟล์ตัวอย่าง</a>
+      </p>
+      <input type="file" accept=".csv,text/csv" aria-label="ไฟล์ CSV" onChange={(e) => void pick(e.target.files?.[0])} />
+      {fileError && <div className="alert alert-error" role="alert"><span>{fileError}</span></div>}
+      {error && <div className="alert alert-error" role="alert"><span>{error}</span></div>}
+
+      {rows.length > 0 && !fileError && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void send(true)}>
+            ตรวจ {rows.length} รายการ (ยังไม่บันทึก)
+          </button>
+          {results?.dryRun && ok > 0 && (
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void send(false)}>
+              นำเข้า {ok} รายการที่ถูกต้อง
+            </button>
+          )}
+        </div>
+      )}
+
+      {results && (
+        <table style={{ width: '100%', marginTop: 12 }}>
+          <thead><tr><th>แถว</th><th>อีเมล</th><th>ผล</th><th>รหัสเชิญ (แสดงครั้งเดียว)</th></tr></thead>
+          <tbody>
+            {results.rows.map((r) => (
+              <tr key={r.row}>
+                <td>{r.row}</td>
+                <td>{rows[r.row - 1]?.email}</td>
+                <td>
+                  {r.status === 'invited' && 'เชิญแล้ว'}
+                  {r.status === 'would_invite' && 'พร้อมนำเข้า'}
+                  {r.status === 'rejected' && r.error && thaiMessageFor(new ApiError(r.error.code, r.error.message, r.error.details))}
+                </td>
+                <td><code style={{ wordBreak: 'break-all' }}>{r.invite_token ?? ''}</code></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
   );
 }

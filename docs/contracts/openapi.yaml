@@ -1,4 +1,6 @@
 openapi: 3.1.0
+# version 4.2.0 — CCR-019 (additive): importMembers — bulk onboarding from a staff
+#   list (FR-091), with a dry run and a result per row.
 # version 4.1.0 — CCR-018 (additive): web sign-in through Keycloak behind a BFF
 #   (ADR-0014 §4): webLogin / webCallback / webLogout, the `webSession` cookie
 #   security scheme (+ X-CSRF-Token on unsafe methods), AUTH-007.
@@ -11,7 +13,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.1.0
+  version: 4.2.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -529,6 +531,43 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /members/import:
+    post:
+      operationId: importMembers
+      summary: Invite many staff at once from a list, with a result per row (CCR-019, FR-091)
+      description: 'The web reads the school''s CSV and sends its rows; each row is exactly
+        a `MemberInvite` and goes through the same checks and the same transaction as
+        `inviteMember`. Rows succeed or fail one by one: a bad row is reported with its
+        error and the rest still go in. `dry_run: true` runs every check and writes
+        nothing, so the admin can fix the file before anyone is invited. A row whose
+        email repeats an earlier row in the same request is rejected (VAL-002).
+
+
+        Like `inviteMember`, the school is the caller''s own, and invite tokens are
+        returned once, here, and never again.
+
+        '
+      tags:
+      - members
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemberImport'
+      responses:
+        '200':
+          description: One result per row, in request order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberImportResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
   /members/{membershipId}/end:
@@ -2977,6 +3016,63 @@ components:
           $ref: '#/components/schemas/Role'
         personnel:
           $ref: '#/components/schemas/MemberInvitePersonnel'
+    MemberImport:
+      type: object
+      required:
+      - rows
+      properties:
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/MemberInvite'
+        dry_run:
+          type: boolean
+          default: false
+    MemberImportRowResult:
+      type: object
+      required:
+      - row
+      - status
+      properties:
+        row:
+          type: integer
+          description: 1-based index into `rows`.
+        status:
+          type: string
+          enum:
+          - invited
+          - would_invite
+          - rejected
+          description: '`invited` — written; `would_invite` — a dry run found nothing wrong;
+            `rejected` — see `error`, nothing written for this row.'
+        member:
+          $ref: '#/components/schemas/Member'
+        invite_token:
+          type:
+          - string
+          - 'null'
+          description: As in MemberInviteResult — once, here only. Null when the account already had a password.
+        invite_expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        error:
+          $ref: '#/components/schemas/Error'
+    MemberImportResult:
+      type: object
+      required:
+      - dry_run
+      - results
+      properties:
+        dry_run:
+          type: boolean
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemberImportRowResult'
     MemberInviteResult:
       type: object
       description: The invite token appears here and nowhere else, ever.

@@ -130,3 +130,27 @@ test.describe('onboarding: invite → accept → login', () => {
     await expect(page.getByRole('heading', { name: 'หลักฐานของฉัน' })).toBeVisible({ timeout: 20_000 });
   });
 });
+
+test.describe('onboarding: a staff list from CSV (CCR-019, FR-091)', () => {
+  test('the admin checks the file, sees the bad row, imports the good ones', async ({ page }) => {
+    test.setTimeout(120_000);
+    test.skip(!creds.admin, 'global-setup did not seed the school_admin fixture');
+    const good = uniqueEmail('e2e-csv');
+    const csv = 'email,display_name,role,full_name,position_role,rank_level_code\n'
+      + `${good},ครูซีเอสวี,teacher,ครูซีเอสวี ทดสอบ,teacher,apply_adapt\n`
+      + 'not-an-email,ผิด,teacher,,,\n';
+
+    await login(page, creds.admin.email, creds.admin.password);
+    await page.getByRole('link', { name: 'บุคลากร' }).click();
+    await page.getByRole('button', { name: 'นำเข้าจากไฟล์ CSV' }).click();
+    await page.getByLabel('ไฟล์ CSV').setInputFiles({ name: 'staff.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
+
+    await page.getByRole('button', { name: 'ตรวจ 2 รายการ (ยังไม่บันทึก)' }).click();
+    await expect(page.getByRole('cell', { name: 'พร้อมนำเข้า' })).toBeVisible({ timeout: 20_000 });
+
+    await page.getByRole('button', { name: 'นำเข้า 1 รายการที่ถูกต้อง' }).click();
+    await expect(page.getByRole('cell', { name: 'เชิญแล้ว' })).toBeVisible({ timeout: 20_000 });
+    // The member list behind the panel now has the new teacher.
+    await expect(page.getByText(good).first()).toBeVisible();
+  });
+});

@@ -173,10 +173,11 @@ test('the role check comes first: a teacher is told PERM-001, not to step up', {
 // and fails on validation or lookup instead — anything but AUTH-006.
 const OPERATION_LEVEL = {
   inviteMember: (token) => ({ method: 'POST', url: '/api/v1/members', headers: bearer(token), payload: {} }),
+  importMembers: (token) => ({ method: 'POST', url: '/api/v1/members/import', headers: bearer(token), payload: {} }),
   endMembership: (token) => ({ method: 'POST', url: `/api/v1/members/${randomUUID()}/end`, headers: bearer(token) }),
   createAssignment: (token) => ({ method: 'POST', url: `/api/v1/rounds/${roundId}/assignments`, headers: bearer(token), payload: {} }),
 };
-const WHO = { inviteMember: 'admin', endMembership: 'admin', createAssignment: 'director' };
+const WHO = { inviteMember: 'admin', importMembers: 'admin', endMembership: 'admin', createAssignment: 'director' };
 
 test('every operation-level min_acr operation is gated', { skip }, async () => {
   for (const [op, request] of Object.entries(OPERATION_LEVEL)) {

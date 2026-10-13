@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Bulk onboarding (SEIP-P1-008, in review, contract 4.2.0 / CCR-019 additive):** a school admin uploads the staff list as CSV, checks it with a dry run that reports each bad row, then imports the valid rows, with every invite code shown once.
+>
 > **FR-095 gaps closed (SEIP-P1-007, in review):** every denial of a caller whose identity is known (PERM-*, AUTH-006, RES-001) now writes an `access_denied` audit row. The whole permission sweep asserts this. Taxonomy routes require a role, and the last client-supplied FK that could 500 (`createCycle.framework_version_id`) now answers VAL-002.
 >
 > **Identity slice 4 (SEIP-P1-006, in review):** the Flutter app signs in with SEIP ID through the system browser (PKCE), with an offline session per device. The refresh token is kept in the keystore, renewal is shared and transparent, a restart restores the session, a revoked device signs out, and step-up uses `acr=mfa`. A second factor now counts for 15 minutes only, because Keycloak keeps `acr` "mfa" through every refresh. Measured: Keycloak's admin sign-out does not *reliably* end phone (offline) sessions, so P2 device revocation must delete them directly. CI green (run 38338182959). Not yet run on an emulator.

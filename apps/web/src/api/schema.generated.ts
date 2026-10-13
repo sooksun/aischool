@@ -241,6 +241,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/members/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite many staff at once from a list, with a result per row (CCR-019, FR-091)
+         * @description The web reads the school's CSV and sends its rows; each row is exactly a `MemberInvite` and goes through the same checks and the same transaction as `inviteMember`. Rows succeed or fail one by one: a bad row is reported with its error and the rest still go in. `dry_run: true` runs every check and writes nothing, so the admin can fix the file before anyone is invited. A row whose email repeats an earlier row in the same request is rejected (VAL-002).
+         *
+         *     Like `inviteMember`, the school is the caller's own, and invite tokens are returned once, here, and never again.
+         */
+        post: operations["importMembers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/members/{membershipId}/end": {
         parameters: {
             query?: never;
@@ -1413,6 +1435,30 @@ export interface components {
             display_name: string;
             role: components["schemas"]["Role"];
             personnel?: components["schemas"]["MemberInvitePersonnel"];
+        };
+        MemberImport: {
+            rows: components["schemas"]["MemberInvite"][];
+            /** @default false */
+            dry_run: boolean;
+        };
+        MemberImportRowResult: {
+            /** @description 1-based index into `rows`. */
+            row: number;
+            /**
+             * @description `invited` — written; `would_invite` — a dry run found nothing wrong; `rejected` — see `error`, nothing written for this row.
+             * @enum {string}
+             */
+            status: "invited" | "would_invite" | "rejected";
+            member?: components["schemas"]["Member"];
+            /** @description As in MemberInviteResult — once, here only. Null when the account already had a password. */
+            invite_token?: string | null;
+            /** Format: date-time */
+            invite_expires_at?: string | null;
+            error?: components["schemas"]["Error"];
+        };
+        MemberImportResult: {
+            dry_run: boolean;
+            results: components["schemas"]["MemberImportRowResult"][];
         };
         /** @description The invite token appears here and nowhere else, ever. */
         MemberInviteResult: {
@@ -2957,6 +3003,33 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    importMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberImport"];
+            };
+        };
+        responses: {
+            /** @description One result per row, in request order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberImportResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };

@@ -32,7 +32,8 @@
 #   added; actOnMapping becomes owner revoke + director/committee validate/return.
 #   New top-level `min_acr`: operations (or actions) that need step-up auth.
 # version: 2.1.0 — CCR-018 (additive): webLogin / webCallback / webLogout, unauthenticated.
-version: 2.1.0
+# version: 2.2.0 — CCR-019 (additive): importMembers, same grant and step-up as inviteMember.
+version: 2.2.0
 status: locked
 locked_at: 2026-07-17
 
@@ -130,6 +131,7 @@ matrix:
   listPersonnel:           { director: school, evaluator: school, school_admin: school, area_admin: area-r }
   listMembers:             { school_admin: school }
   inviteMember:            { school_admin: school }
+  importMembers:           { school_admin: school }   # CCR-019: inviteMember, many rows at once
   endMembership:           { school_admin: school }
 
   # taxonomy (reference data — readable by any authenticated member)
@@ -239,6 +241,7 @@ min_acr:
   actOnMapping: { validate: 2, return: 2 }
   createAssignment: 2
   inviteMember: 2
+  importMembers: 2
   endMembership: 2
   createExport: { other_person: 2 }
 

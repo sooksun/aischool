@@ -1365,3 +1365,32 @@ tasks:
       - "taxonomy refuses an account with no live membership (PERM-001)"                                                # DONE
       - "createCycle unknown framework → VAL-002"                                                                       # DONE
       - "CI green on the pushed commit"                                                                                 # DONE — run 38340443999 on 529b7aa
+
+  - id: SEIP-P1-008
+    title: "P1 — FR-091 bulk onboarding: import a staff list (CSV) with a dry run and per-row results (CCR-019)"
+    status: review              # 2026-10-13 — local gates green; CI pending
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0014]
+    primary_paths:
+      - docs/contracts/
+      - docs/reviews/CCR-019-member-import.md
+      - apps/api/src/routes/members.ts
+      - apps/api/test/member-import.test.mjs
+      - apps/web/src/lib/memberCsv.ts
+      - apps/web/src/pages/admin/MembersPage.tsx
+      - tests/e2e/onboarding.spec.ts
+    notes: >
+      Contract 4.2.0 (additive; oasdiff clean): importMembers, up to 500 rows, each
+      exactly an inviteMember (shared checkInvite / performInvite), per-row
+      invited / would_invite / rejected with the API error; dry_run writes
+      nothing; same grant and min_acr 2 as inviteMember. Web: CSV parsed in the
+      browser (quotes, BOM, CRLF; headers in any order), "check" (dry run) then
+      "import the N valid rows", invite codes shown once; a template download.
+      Not done: email delivery of invites (no SMTP decision yet) and QR codes.
+    acceptance_criteria:
+      - "dry run reports VAL-001 / VAL-002 (dup in file, area_admin) / RES-003 / VAL-003 per row and writes nothing"   # DONE
+      - "import invites the good rows, skips the bad, tokens work with accept-invite"                                   # DONE
+      - "PERM-001 for non-admins; 500-row limit; step-up (min_acr 2) and the permission sweep cover it"                 # DONE
+      - "e2e: admin uploads a CSV, checks, imports, sees the new member"                                                # DONE
+      - "CI green on the pushed commit"                                                                                  # OPEN

@@ -162,6 +162,15 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-008, bulk member import, contract 4.2.0)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `test:unit` · `gate:contracts` · `gate:ownership` · `gate:dep-audit` | pass. oasdiff 4.1.0 → 4.2.0: no breaking changes. Web unit +3 (CSV parser) |
+| api · security · `test:backend` | 111 · 12 · 27. All pass (+3 member-import; sweep and step-up cover importMembers) |
+| `test:e2e` | 15/15 (new: admin uploads a CSV, checks it, imports it) |
+| Dart client · `apps/mobile` | pass against 4.2.0 |
+
 ## Verified runs (2026-10-13, local — SEIP-P1-006, Flutter SEIP ID + step-up expiry)
 
 Flutter 3.47.7 reinstalled in the container.

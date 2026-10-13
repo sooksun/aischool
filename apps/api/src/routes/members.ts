@@ -51,6 +51,67 @@ function serializeMember(m: {
   };
 }
 
+const InviteBody = z.object({
+  email: z.string().email().max(320),
+  display_name: z.string().min(1).max(200),
+  role: z.enum(['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin']),
+  personnel: z.object({
+    full_name: z.string().min(1).max(200),
+    employee_code: z.string().max(50).nullish(),
+    position_role: z.enum(['teacher', 'administrator']),
+    rank_level_code: z.string().min(1),
+  }).optional(),
+});
+type Invite = z.infer<typeof InviteBody>;
+
+/** The checks an invite must pass before anything is written (inviteMember and importMembers). */
+async function checkInvite(body: Invite): Promise<void> {
+  // area_admin is an AREA-scoped role (membership_scope=area); granting it a
+  // school-scoped membership would produce a row that violates the
+  // membership_scope_ids CHECK and surface as a 500.
+  if (body.role === 'area_admin') {
+    throw new ApiError('VAL-002', 'area_admin is an area-scoped role and cannot be granted as a school membership');
+  }
+  // A teacher rank on an administrator profile silently selects the wrong
+  // framework's rubric rows — VAL-003 (incompatible framework), not a 500.
+  if (body.personnel && !(await rankLevelMatchesFamily(body.personnel.rank_level_code, body.personnel.position_role))) {
+    throw new ApiError('VAL-003', 'rank_level_code does not belong to the given position_role framework family');
+  }
+}
+
+/**
+ * Writes one invite. The raw token is returned exactly once and never persisted,
+ * so it cannot be recovered later. Null when the account already had a password:
+ * issuing one there would turn this into an admin-triggered password reset for
+ * any email in the system — see the repository note and openapi's description.
+ */
+async function performInvite(schoolId: string, actorUserId: string, body: Invite, requestId: string) {
+  const rawToken = generateInviteToken();
+  const expiresAt = inviteTokenExpiryDate();
+  const result = await inviteMember({
+    schoolId,
+    actorUserId,
+    email: body.email,
+    displayName: body.display_name,
+    role: body.role,
+    personnel: body.personnel && {
+      fullName: body.personnel.full_name,
+      employeeCode: body.personnel.employee_code ?? null,
+      positionRole: body.personnel.position_role,
+      rankLevelCode: body.personnel.rank_level_code,
+    },
+    inviteTokenHash: hashInviteToken(rawToken),
+    inviteExpiresAt: expiresAt,
+    requestId,
+  });
+  if (!result.ok) throw new ApiError('RES-003', 'That email already holds a current membership in this school');
+  return {
+    membershipId: result.membershipId,
+    inviteToken: result.issuedInvite ? rawToken : null,
+    inviteExpiresAt: result.issuedInvite ? expiresAt.toISOString() : null,
+  };
+}
+
 export const memberRoutes: FastifyPluginAsync = async (app) => {
   app.get('/personnel', { config: { operationId: 'listPersonnel' } }, async (request) => {
     const auth = request.auth!;
@@ -93,70 +154,68 @@ export const memberRoutes: FastifyPluginAsync = async (app) => {
     if (grant === 'area-r') throw forbiddenAreaWrite();
     requireAcr(auth, 'inviteMember');
 
+    const body = InviteBody.parse(request.body);
+    await checkInvite(body);
+    const done = await performInvite(schoolId, auth.userId, body, request.id);
+    const created = (await listMembersForSchool(schoolId, { status: 'all' })).find((r) => r.id === done.membershipId)!;
+    reply.status(201).send({ member: serializeMember(created), invite_token: done.inviteToken, invite_expires_at: done.inviteExpiresAt });
+  });
+
+  // CCR-019 / FR-091: the same invite, many rows. Each row passes or fails on its
+  // own; a dry run runs every check and writes nothing.
+  app.post('/members/import', { config: { operationId: 'importMembers' } }, async (request) => {
+    const auth = request.auth!;
+    const schoolId = requireCurrentSchool(auth);
+    const grant = await resolveGrant('importMembers', auth, schoolId);
+    if (grant === 'area-r') throw forbiddenAreaWrite();
+    requireAcr(auth, 'importMembers');
+
     const body = z.object({
-      email: z.string().email().max(320),
-      display_name: z.string().min(1).max(200),
-      role: z.enum(['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin']),
-      personnel: z.object({
-        full_name: z.string().min(1).max(200),
-        employee_code: z.string().max(50).nullish(),
-        position_role: z.enum(['teacher', 'administrator']),
-        rank_level_code: z.string().min(1),
-      }).optional(),
+      rows: z.array(z.unknown()).min(1).max(500),
+      dry_run: z.boolean().default(false),
     }).parse(request.body);
 
-    // area_admin is an AREA-scoped role (membership_scope=area); granting it a
-    // school-scoped membership would produce a row that violates the
-    // membership_scope_ids CHECK and surface as a 500.
-    if (body.role === 'area_admin') {
-      throw new ApiError('VAL-002', 'area_admin is an area-scoped role and cannot be granted as a school membership');
-    }
+    // Emails already holding a current membership here: RES-003 per row, as the
+    // single invite would answer, but found without touching the database again.
+    const current = new Set((await listMembersForSchool(schoolId, { status: 'current' })).map((m) => m.user.email.toLowerCase()));
+    const seen = new Set<string>();
+    type RowResult = { row: number; status: 'invited' | 'would_invite' | 'rejected'; membershipId?: string;
+      invite_token?: string | null; invite_expires_at?: string | null; error?: ReturnType<ApiError['toBody']> };
+    const results: RowResult[] = [];
 
-    if (body.personnel) {
-      // A teacher rank on an administrator profile silently selects the wrong
-      // framework's rubric rows — VAL-003 (incompatible framework), not a 500.
-      const ok = await rankLevelMatchesFamily(body.personnel.rank_level_code, body.personnel.position_role);
-      if (!ok) {
-        throw new ApiError('VAL-003', 'rank_level_code does not belong to the given position_role framework family');
+    for (const [i, raw] of body.rows.entries()) {
+      const row = i + 1;
+      try {
+        const parsed = InviteBody.safeParse(raw);
+        if (!parsed.success) {
+          throw new ApiError('VAL-001', 'Row is not a valid invite', parsed.error.issues.map((x) => ({ field: x.path.join('.') || '(row)', issue: x.message })));
+        }
+        const invite = parsed.data;
+        const email = invite.email.toLowerCase();
+        if (seen.has(email)) throw new ApiError('VAL-002', 'The same email appears earlier in this import', [{ field: 'email', issue: 'duplicate in import' }]);
+        seen.add(email);
+        if (current.has(email)) throw new ApiError('RES-003', 'That email already holds a current membership in this school');
+        await checkInvite(invite);
+        if (body.dry_run) {
+          results.push({ row, status: 'would_invite' });
+          continue;
+        }
+        const done = await performInvite(schoolId, auth.userId, invite, request.id);
+        current.add(email);
+        results.push({ row, status: 'invited', membershipId: done.membershipId, invite_token: done.inviteToken, invite_expires_at: done.inviteExpiresAt });
+      } catch (e) {
+        if (!(e instanceof ApiError)) throw e;
+        results.push({ row, status: 'rejected', error: e.toBody(request.id) });
       }
     }
 
-    const rawToken = generateInviteToken();
-    const expiresAt = inviteTokenExpiryDate();
-
-    const result = await inviteMember({
-      schoolId,
-      actorUserId: auth.userId,
-      email: body.email,
-      displayName: body.display_name,
-      role: body.role,
-      personnel: body.personnel && {
-        fullName: body.personnel.full_name,
-        employeeCode: body.personnel.employee_code ?? null,
-        positionRole: body.personnel.position_role,
-        rankLevelCode: body.personnel.rank_level_code,
-      },
-      inviteTokenHash: hashInviteToken(rawToken),
-      inviteExpiresAt: expiresAt,
-      requestId: request.id,
-    });
-
-    if (!result.ok) {
-      throw new ApiError('RES-003', 'That email already holds a current membership in this school');
-    }
-
-    const rows = await listMembersForSchool(schoolId, { status: 'all' });
-    const created = rows.find((r) => r.id === result.membershipId)!;
-
-    // The raw token is returned exactly once and never persisted, so it cannot
-    // be recovered later. Null when the account already had a password: issuing
-    // one there would turn this into an admin-triggered password reset for any
-    // email in the system — see the repository note and openapi's description.
-    reply.status(201).send({
-      member: serializeMember(created),
-      invite_token: result.issuedInvite ? rawToken : null,
-      invite_expires_at: result.issuedInvite ? expiresAt.toISOString() : null,
-    });
+    const members = results.some((r) => r.membershipId)
+      ? new Map((await listMembersForSchool(schoolId, { status: 'all' })).map((m) => [m.id, m]))
+      : new Map();
+    return {
+      dry_run: body.dry_run,
+      results: results.map(({ membershipId, ...r }) => (membershipId ? { ...r, member: serializeMember(members.get(membershipId)!) } : r)),
+    };
   });
 
   app.post('/members/:membershipId/end', { config: { operationId: 'endMembership' } }, async (request) => {

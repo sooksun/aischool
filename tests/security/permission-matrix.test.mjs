@@ -189,6 +189,8 @@ const OPERATIONS = () => ({
   // A fresh random email per call: a granted role must not fail on RES-002 from
   // a previous role's successful invite in the same sweep.
   inviteMember: { method: 'POST', url: '/api/v1/members', payload: { email: `sweep-${randomUUID()}@x.io`, display_name: 'sweep', role: 'teacher' } },
+  // CCR-019: a dry run, so a granted role gets 200 and nothing is written.
+  importMembers: { method: 'POST', url: '/api/v1/members/import', payload: { dry_run: true, rows: [{ email: `sweep-import-${randomUUID()}@x.io`, display_name: 'sweep', role: 'teacher' }] } },
   // Random membership id → RES-001 for granted roles (never PERM-001), same
   // philosophy as getReport below.
   endMembership: { method: 'POST', url: `/api/v1/members/${randomUUID()}/end` },
