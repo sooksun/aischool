@@ -18,7 +18,7 @@ async function teacher(schoolId, tag) {
     data: { email: `${tag}-${randomUUID()}@x.io`, displayName: tag, status: 'active', person: { create: { displayName: tag } } },
   });
   const profile = await prisma.personnelProfile.create({
-    data: { schoolId, userId: user.id, personId: user.personId, fullName: tag, positionRole: 'teacher', rankLevelCode: 'itest_kru' },
+    data: { schoolId, userId: user.id, personId: user.personId, fullName: tag, positionRole: 'teacher', rankLevelCode: 'iscope_kru' },
   });
   return { userId: user.id, personId: user.personId, profileId: profile.id };
 }
@@ -29,9 +29,11 @@ before(async () => {
   areaIds.push(areaA, areaB);
   schoolA = created.add(await prisma.school.create({ data: { code: `rA-${randomUUID()}`, name: 'A', areaId: areaA } })).id;
   schoolB = created.add(await prisma.school.create({ data: { code: `rB-${randomUUID()}`, name: 'B', areaId: areaB } })).id;
+  // Its own rank code: evidence.integration.test.mjs upserts itest_kru in
+  // parallel, and two concurrent upserts of one key can both try the insert.
   await prisma.rankLevel.upsert({
-    where: { code: 'itest_kru' },
-    create: { code: 'itest_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 },
+    where: { code: 'iscope_kru' },
+    create: { code: 'iscope_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 },
     update: {},
   });
   teacherA = await teacher(schoolA, 'ta');
