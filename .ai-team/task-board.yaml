@@ -1655,3 +1655,25 @@ tasks:
       - "20 replays while flaky make no duplicate"                                # DONE
       - "local copy deleted only after re-hash + clean scan"                      # DONE
 
+  - id: SEIP-P2-003
+    title: "P2 — FR-014 web: several files at once (drag and drop), one item per file, progress per file"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-001]
+    decisions: []
+    primary_paths:
+      - apps/web/src/pages/BatchUploadPage.tsx
+      - apps/web/src/lib/batchUpload.ts
+      - apps/web/src/lib/batchUpload.test.ts
+      - tests/e2e/batch-upload.spec.ts
+    notes: >
+      No contract change. /evidence/batch: choose a category, drop or pick files.
+      Each file becomes its own evidence item titled after the file, up to 2 upload
+      at once, and one failure never stops the rest. A retry resumes the same item
+      and upload session (Idempotency-Key per file for the life of the page). Each
+      file gets a duplicate warning (CCR-026). Not done: combining several photos
+      into one item (FR-001, app).
+    acceptance_criteria:
+      - "multi-file + drag and drop, progress and Thai status per file"   # DONE — batch-upload.spec
+      - "one failure does not stop the rest; retry resumes"                # DONE — batchUpload.test
+

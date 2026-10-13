@@ -162,6 +162,13 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P2-003, web multi-file upload)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `test:unit` · `gate:ownership` | pass. Web unit 48 (+3 batch queue) |
+| `test:e2e` | 17/17 (new: batch-upload) |
+
 ## Verified runs (2026-10-13, local — SEIP-P2-002, offline outbox engine)
 
 | Command | Result |

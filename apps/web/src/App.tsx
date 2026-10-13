@@ -19,6 +19,7 @@ import { AssignmentScorePage } from './pages/evaluator/AssignmentScorePage';
 import { MembersPage } from './pages/admin/MembersPage';
 import { AreaSchoolsPage } from './pages/area/AreaSchoolsPage';
 import { DevicesPage } from './pages/DevicesPage';
+import { BatchUploadPage } from './pages/BatchUploadPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AgreementPage } from './pages/agreements/AgreementPage';
@@ -86,6 +87,11 @@ function AppNav() {
       {submitEvidence && (
         <Link to="/evidence/new" className={location.pathname === '/evidence/new' ? 'active' : ''}>
           + ส่งหลักฐาน
+        </Link>
+      )}
+      {submitEvidence && (
+        <Link to="/evidence/batch" className={location.pathname === '/evidence/batch' ? 'active' : ''}>
+          ส่งหลายไฟล์
         </Link>
       )}
       {manageCycles && (
@@ -169,6 +175,9 @@ export function App() {
             full 5-step form and only discovered the dead end at POST /evidence. */}
         <Route path="/evidence/new" element={
           <RequireCapability capability="submitEvidence"><EvidenceSubmitPage /></RequireCapability>
+        } />
+        <Route path="/evidence/batch" element={
+          <RequireCapability capability="submitEvidence"><BatchUploadPage /></RequireCapability>
         } />
         <Route path="/evidence/:evidenceId" element={<RequireAuth><EvidenceDetailPage /></RequireAuth>} />
 
