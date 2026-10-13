@@ -1,6 +1,9 @@
 openapi: 3.1.0
-# version 4.4.0 — CCR-021 (additive operations; permissions policy change awaiting
-#   owner approval): an area admin manages the schools of their own area — list,
+# version 4.5.0 — CCR-022 (additive): a school admin issues a one-time password
+#   reset for a member, who redeems it at completePasswordReset (FR-099). Every
+#   session of the account ends when the new password is set.
+# version 4.4.0 — CCR-021 (additive operations; permissions policy change approved by the
+#   owner 2026-10-13): an area admin manages the schools of their own area — list,
 #   create, open/close, appoint a school admin (FR-090).
 # version 4.3.0 — CCR-020 (additive): CurrentUser.memberships[].school_name, for the
 #   school picker of a person who works at more than one school (FR-019).
@@ -18,7 +21,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.4.0
+  version: 4.5.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -258,6 +261,43 @@ paths:
       responses:
         '204':
           description: Password set; the account is now active and may log in
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          description: AUTH-004 — too many attempts (SEC-AUTH-5)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/password-reset:
+    post:
+      operationId: completePasswordReset
+      summary: Set a new password with a one-time reset token (CCR-022, FR-099)
+      description: 'The reset token in the body IS the credential. Single-use and valid
+        for 30 minutes. On success every session of the account ends — refresh
+        tokens, browser sessions, app devices, and the account''s SEIP ID sessions —
+        and the SEIP ID password is set to the same value.
+
+
+        Unknown, expired and already-used tokens are indistinguishable (AUTH-008),
+        and the endpoint is throttled like acceptInvite (SEC-AUTH-5). Returns 204;
+        the person then signs in normally.
+
+        '
+      tags:
+      - auth
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetComplete'
+      responses:
+        '204':
+          description: Password set; every earlier session has ended
         '400':
           $ref: '#/components/responses/ValidationError'
         '401':
@@ -702,6 +742,40 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /members/{membershipId}/password-reset:
+    post:
+      operationId: issuePasswordReset
+      summary: Issue a one-time password reset for a member (school admin, CCR-022)
+      description: 'For a member who forgot their password or is locked out and has no
+        verified email or phone (FR-099). Returns a single-use token, valid for 30
+        minutes, shown once; the admin hands it over in person or as a QR code.
+        Issuing a new one cancels any earlier unused one. Audited.
+
+
+        Not for the caller''s own account, and not for an account that has never set
+        a password (re-invite instead) — both VAL-002. The account''s second factor
+        in SEIP ID is untouched, so a step-up still needs the person''s own device.
+
+        '
+      tags:
+      - members
+      parameters:
+      - $ref: '#/components/parameters/MembershipId'
+      responses:
+        '201':
+          description: Reset issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetIssued'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
   /members/{membershipId}/end:
@@ -3335,6 +3409,31 @@ components:
           - string
           - 'null'
           format: date-time
+    PasswordResetIssued:
+      type: object
+      description: The reset token appears here and nowhere else, ever.
+      required:
+      - reset_token
+      - expires_at
+      properties:
+        reset_token:
+          type: string
+          description: Single-use secret. Only its hash is stored.
+        expires_at:
+          type: string
+          format: date-time
+    PasswordResetComplete:
+      type: object
+      required:
+      - reset_token
+      - password
+      properties:
+        reset_token:
+          type: string
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
     AcceptInviteRequest:
       type: object
       required:

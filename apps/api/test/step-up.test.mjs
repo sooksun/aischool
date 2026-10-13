@@ -184,13 +184,14 @@ const OPERATION_LEVEL = {
   inviteMember: (token) => ({ method: 'POST', url: '/api/v1/members', headers: bearer(token), payload: {} }),
   importMembers: (token) => ({ method: 'POST', url: '/api/v1/members/import', headers: bearer(token), payload: {} }),
   endMembership: (token) => ({ method: 'POST', url: `/api/v1/members/${randomUUID()}/end`, headers: bearer(token) }),
+  issuePasswordReset: (token) => ({ method: 'POST', url: `/api/v1/members/${randomUUID()}/password-reset`, headers: bearer(token) }),
   createSchool: (token) => ({ method: 'POST', url: `/api/v1/areas/${area.id}/schools`, headers: bearer(token), payload: {} }),
   updateSchool: (token) => ({ method: 'PATCH', url: `/api/v1/schools/${school.id}`, headers: bearer(token), payload: {} }),
   appointSchoolAdmin: (token) => ({ method: 'POST', url: `/api/v1/schools/${school.id}/admins`, headers: bearer(token), payload: {} }),
   createAssignment: (token) => ({ method: 'POST', url: `/api/v1/rounds/${roundId}/assignments`, headers: bearer(token), payload: {} }),
 };
 const WHO = { inviteMember: 'admin', importMembers: 'admin', endMembership: 'admin', createAssignment: 'director',
-  createSchool: 'areaAdmin', updateSchool: 'areaAdmin', appointSchoolAdmin: 'areaAdmin' };
+  issuePasswordReset: 'admin', createSchool: 'areaAdmin', updateSchool: 'areaAdmin', appointSchoolAdmin: 'areaAdmin' };
 
 test('every operation-level min_acr operation is gated', { skip }, async () => {
   for (const [op, request] of Object.entries(OPERATION_LEVEL)) {

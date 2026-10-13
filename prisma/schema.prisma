@@ -254,6 +254,7 @@ model School {
   assignments EvaluationAssignment[]
   reports     Report[]
   approvals   Approval[]
+  passwordResets PasswordReset[]
 
   @@index([areaId])
   @@map("school")
@@ -316,6 +317,8 @@ model UserAccount {
   approvals         Approval[]
   refreshTokens     RefreshToken[]
   deviceSessions DeviceSession[]
+  passwordResets       PasswordReset[] @relation("PasswordResetFor")
+  passwordResetsIssued PasswordReset[] @relation("PasswordResetBy")
   webSessions       WebSession[]
 
   @@map("user_account")
@@ -365,6 +368,26 @@ model WebSession {
 
   @@index([userId, revokedAt])
   @@map("web_session")
+}
+
+/// FR-099 / CCR-022: a one-time password reset issued by a school admin.
+/// Only the token's hash is stored; 30 minutes at most (CHECK in the migration).
+model PasswordReset {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  tokenHash      String    @unique @map("token_hash")
+  issuedByUserId String    @map("issued_by_user_id") @db.Uuid
+  schoolId       String    @map("school_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+  expiresAt      DateTime  @map("expires_at")
+  usedAt         DateTime? @map("used_at")
+
+  user     UserAccount @relation("PasswordResetFor", fields: [userId], references: [id], onDelete: Cascade)
+  issuedBy UserAccount @relation("PasswordResetBy", fields: [issuedByUserId], references: [id], onDelete: Restrict)
+  school   School      @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@map("password_reset")
 }
 
 /// FR-093: an app sign-in (a Keycloak offline session of seip-mobile). Revoking

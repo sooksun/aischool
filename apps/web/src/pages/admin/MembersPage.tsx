@@ -194,6 +194,21 @@ function MemberRow({ member, onChanged }: { member: Member; onChanged: () => voi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [reset, setReset] = useState<{ token: string; expiresAt: string } | null>(null);
+
+  // CCR-022 / FR-099: a one-time code for a member who forgot their password.
+  // Shown once; it lasts 30 minutes and ends every session the person has.
+  function issueReset() {
+    if (!window.confirm(`ออกรหัสตั้งรหัสผ่านใหม่ให้ ${member.email}? อุปกรณ์ทุกเครื่องของผู้ใช้นี้จะออกจากระบบเมื่อตั้งรหัสใหม่`)) return;
+    setError(null);
+    api
+      .POST('/members/{membershipId}/password-reset', { params: { path: { membershipId: member.membership_id } } })
+      .then((res) => {
+        const r = unwrap(res);
+        setReset({ token: r.reset_token, expiresAt: r.expires_at });
+      })
+      .catch((e) => setError(e instanceof ApiError ? thaiMessageFor(e) : 'ออกรหัสไม่สำเร็จ'));
+  }
 
   function end() {
     setBusy(true);
@@ -227,6 +242,22 @@ function MemberRow({ member, onChanged }: { member: Member; onChanged: () => voi
 
       {error && <div className="field-error" role="alert">{error}</div>}
 
+      {reset && (
+        <div className="alert alert-info" role="status" style={{ marginTop: 8 }}>
+          <span>
+            ให้ผู้ใช้เปิด {window.location.origin}/reset-password แล้วกรอกรหัสนี้ภายใน{' '}
+            {new Date(reset.expiresAt).toLocaleTimeString('th-TH', { timeStyle: 'short' })} น. — แสดงครั้งเดียว:{' '}
+            <code>{reset.token}</code>
+          </span>
+          <button type="button" className="btn btn-secondary" onClick={() => setReset(null)}>ปิด</button>
+        </div>
+      )}
+
+      {!confirming && member.user_status === 'active' && (
+        <button type="button" className="btn btn-secondary" style={{ marginTop: 8, marginRight: 8 }} onClick={issueReset}>
+          ตั้งรหัสผ่านใหม่
+        </button>
+      )}
       {!confirming && (
         <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }} onClick={() => setConfirming(true)}>
           สิ้นสุดสิทธิ์

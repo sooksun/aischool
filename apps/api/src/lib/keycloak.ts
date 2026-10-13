@@ -45,6 +45,9 @@ export interface Provisioner {
   ensureAccount(input: ProvisionInput): Promise<ProvisionResult>;
   /** Deletes a user session — offline (an app's) or online. Gone already is fine. */
   endSession(kcSessionId: string, offline: boolean): Promise<void>;
+  /** FR-099: set the linked user's password and sign them out everywhere.
+   * False when no realm user carries this seip_uid (nothing to change). */
+  resetPassword(seipUid: string, password: string, offlineSessionIds: string[]): Promise<boolean>;
 }
 
 export interface Keycloak {
@@ -104,6 +107,20 @@ function createProvisioner(issuer: string, clientId: string, secret: string): Pr
       if (created.status === 201) return 'created';
       if (created.status === 409) return 'conflict';
       throw new Error(`keycloak create user ${created.status}`);
+    },
+    async resetPassword(seipUid, password, offlineSessionIds) {
+      const found = await call(`/users?${new URLSearchParams({ q: `seip_uid:${seipUid}`, exact: 'true', max: '2' })}`);
+      if (!found.ok) throw new Error(`keycloak user search ${found.status}`);
+      const [user] = (await found.json()) as { id: string }[];
+      if (!user) return false;
+      const set = await call(`/users/${user.id}/reset-password`, {
+        method: 'PUT', body: JSON.stringify({ type: 'password', value: password, temporary: false }),
+      });
+      if (!set.ok) throw new Error(`keycloak reset password ${set.status}`);
+      const out = await call(`/users/${user.id}/logout`, { method: 'POST' });
+      if (!out.ok) throw new Error(`keycloak logout ${out.status}`);
+      for (const sid of offlineSessionIds) await this.endSession(sid, true);
+      return true;
     },
     async endSession(kcSessionId, offline) {
       // The admin "sign out" of a user does not reliably end offline sessions;

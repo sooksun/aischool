@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { ApiError, thaiMessageFor } from '../api/errors';
 import { WEB_SSO, webLoginHref } from '../api/client';
@@ -73,6 +73,9 @@ export function LoginPage() {
           {submitting ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
         </button>
       </form>
+      <p className="field-hint" style={{ marginTop: 16 }}>
+        ลืมรหัสผ่าน? ขอรหัสตั้งรหัสผ่านใหม่จากผู้ดูแลระบบของโรงเรียน แล้ว <Link to="/reset-password">ตั้งรหัสผ่านใหม่ที่นี่</Link>
+      </p>
     </main>
   );
 }

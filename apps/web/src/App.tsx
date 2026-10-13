@@ -19,6 +19,7 @@ import { AssignmentScorePage } from './pages/evaluator/AssignmentScorePage';
 import { MembersPage } from './pages/admin/MembersPage';
 import { AreaSchoolsPage } from './pages/area/AreaSchoolsPage';
 import { DevicesPage } from './pages/DevicesPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AgreementPage } from './pages/agreements/AgreementPage';
 
@@ -162,6 +163,7 @@ export function App() {
             cannot be behind RequireAuth. Mirrors permissions.yaml's
             `unauthenticated: acceptInvite`. */}
         <Route path="/accept-invite" element={<AcceptInvitePage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/" element={<RequireAuth><EvidenceListPage /></RequireAuth>} />
         {/* Gated, unlike before: an evaluator typing this URL used to get the
             full 5-step form and only discovered the dead end at POST /evidence. */}

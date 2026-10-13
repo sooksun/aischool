@@ -10,8 +10,9 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   listPersonnelForSchool, listMembersForSchool, inviteMember, endMembership, rankLevelMatchesFamily,
+  getUserById, issuePasswordResetRow,
 } from '@seip/database';
-import { generateInviteToken, hashInviteToken, inviteTokenExpiryDate } from '@seip/auth';
+import { generateInviteToken, hashInviteToken, inviteTokenExpiryDate, passwordResetExpiryDate } from '@seip/auth';
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import { requireCurrentSchool } from '../plugins/auth.js';
 import { resolveGrant, requireAcr } from '../lib/permission-guard.js';
@@ -216,6 +217,30 @@ export const memberRoutes: FastifyPluginAsync = async (app) => {
       dry_run: body.dry_run,
       results: results.map(({ membershipId, ...r }) => (membershipId ? { ...r, member: serializeMember(members.get(membershipId)!) } : r)),
     };
+  });
+
+  // CCR-022 / FR-099: for a member with no verified email or phone. The token is
+  // shown once and lasts 30 minutes; the person redeems it at /auth/password-reset.
+  app.post('/members/:membershipId/password-reset', { config: { operationId: 'issuePasswordReset' } }, async (request, reply) => {
+    const auth = request.auth!;
+    const schoolId = requireCurrentSchool(auth);
+    const grant = await resolveGrant('issuePasswordReset', auth, schoolId);
+    if (grant === 'area-r') throw forbiddenAreaWrite();
+    requireAcr(auth, 'issuePasswordReset');
+
+    const { membershipId } = z.object({ membershipId: z.string().uuid() }).parse(request.params);
+    const target = (await listMembersForSchool(schoolId, { status: 'current' })).find((m) => m.id === membershipId);
+    if (!target) throw new ApiError('RES-001', 'Membership not found');
+    if (target.userId === auth.userId) throw new ApiError('VAL-002', 'Not for your own account — sign in and change it, or ask another admin');
+    const user = await getUserById(target.userId);
+    if (!user?.passwordHash) throw new ApiError('VAL-002', 'This account has never set a password — re-invite instead');
+
+    const rawToken = generateInviteToken();
+    const expiresAt = passwordResetExpiryDate();
+    await issuePasswordResetRow({
+      userId: target.userId, schoolId, issuedByUserId: auth.userId, tokenHash: hashInviteToken(rawToken), expiresAt, requestId: request.id,
+    });
+    return reply.code(201).send({ reset_token: rawToken, expires_at: expiresAt.toISOString() });
   });
 
   app.post('/members/:membershipId/end', { config: { operationId: 'endMembership' } }, async (request) => {

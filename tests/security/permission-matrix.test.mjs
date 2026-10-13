@@ -192,6 +192,7 @@ const OPERATIONS = () => ({
   // CCR-019: a dry run, so a granted role gets 200 and nothing is written.
   // CCR-021: the area admin's own area and school. Payloads that cannot change
   // the shared fixture (a no-op rename; invalid bodies for the creates).
+  issuePasswordReset: { method: 'POST', urlFor: async () => `/api/v1/members/${randomUUID()}/password-reset` },
   listAreaSchools: { method: 'GET', urlFor: async () => `/api/v1/areas/${area.id}/schools` },
   createSchool: { method: 'POST', urlFor: async () => `/api/v1/areas/${area.id}/schools`, payload: {} },
   updateSchool: { method: 'PATCH', urlFor: async () => `/api/v1/schools/${school.id}`, payload: { name: 'School' } },

@@ -10,7 +10,7 @@ import {
 import {
   findUserByEmailForLogin, getUserById, getMembershipsForUser, createRefreshToken,
   findActiveRefreshToken, rotateRefreshToken, revokeRefreshToken, revokeAllRefreshTokensForUser,
-  acceptInvite, markKeycloakLinked,
+  acceptInvite, markKeycloakLinked, redeemPasswordReset,
 } from '@seip/database';
 import { ApiError, type Role } from '@seip/backend-shared';
 import type { FastifyBaseLogger } from 'fastify';
@@ -29,6 +29,11 @@ const RefreshBody = z.object({
 
 const LogoutBody = z.object({
   refresh_token: z.string().min(1).optional(),
+});
+
+const PasswordResetBody = z.object({
+  reset_token: z.string().min(1),
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(256),
 });
 
 const AcceptInviteBody = z.object({
@@ -169,6 +174,34 @@ export const authRoutes: FastifyPluginAsync<{ env: Env; keycloak?: Keycloak | nu
 
     // Deliberately no token pair: the caller logs in normally, so the
     // invited -> active gate stays enforced in exactly one place (login).
+    reply.status(204).send();
+  });
+
+  // CCR-022 / FR-099: a one-time reset from the school admin. Same throttle and
+  // single-answer shape as accept-invite. Ends every session, here and in SEIP ID.
+  app.post('/auth/password-reset', { config: { operationId: 'completePasswordReset' } }, async (request, reply) => {
+    const body = PasswordResetBody.parse(request.body);
+    const tokenHash = hashInviteToken(body.reset_token);
+    const limited = getInviteRateLimiter().check(request.ip || 'unknown', tokenHash);
+    if (!limited.ok) {
+      if (limited.retryAfterSec) reply.header('retry-after', String(limited.retryAfterSec));
+      throw new ApiError('AUTH-004', 'Too many attempts — try again later');
+    }
+    if (!isAcceptablePassword(body.password)) {
+      throw new ApiError('VAL-001', `Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+    }
+    const done = await redeemPasswordReset(tokenHash, await hashPassword(body.password), request.id);
+    if (!done) throw new ApiError('AUTH-008', 'Password reset token is not usable');
+
+    // Best effort, like provisioning: the sessions here are already ended, and
+    // a SEIP ID account that is not reset now keeps its old password until the
+    // next attempt — never a reason to fail what the person just did.
+    const provisioner = keycloak?.provisioner;
+    if (provisioner) {
+      await provisioner.resetPassword(done.userId, body.password, done.kcSessionIds).catch((err) => {
+        request.log.warn({ err, userId: done.userId }, 'password reset: SEIP ID not updated');
+      });
+    }
     reply.status(204).send();
   });
 

@@ -37,3 +37,11 @@ export function inviteTokenExpiryDate(from: Date = new Date()): Date {
 export function isAcceptablePassword(plain: string): boolean {
   return plain.length >= MIN_PASSWORD_LENGTH;
 }
+
+/** FR-099 / CCR-022: a reset token lasts 30 minutes. It is the same kind of
+ * secret as an invite token; it lives in its own table, so the two never meet. */
+export const PASSWORD_RESET_TTL_SECONDS = 30 * 60;
+
+export function passwordResetExpiryDate(from: Date = new Date()): Date {
+  return new Date(from.getTime() + PASSWORD_RESET_TTL_SECONDS * 1000);
+}

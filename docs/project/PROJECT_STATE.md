@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Password reset by the school admin (SEIP-P1-013, in review, contract 4.5.0 / CCR-022 additive):** a school admin issues a one-time code (30 min). The member sets a new password at /reset-password. Every session ends, and the SEIP ID password changes too. Self-service reset by email or SMS waits for a provider.
+>
 > **Device sessions (SEIP-P1-012, in review, no contract change):** a person sees each phone and browser signed in, on the web page "อุปกรณ์", and can sign one out. A signed-out app is refused at once and cannot renew, because its Keycloak offline session is deleted. It then wipes its stored session.
 >
 > **Transfer within one สพท. (SEIP-P1-011, in review, no contract change):** after a teacher moves school, the portfolio stays with them and the old school cannot see new evidence. A mapping now belongs to the school where the owner confirmed it, so the new school's director opens the evidence and validates it. Still open: the old school's retention rule (OQ-12) and a move to another สพท.

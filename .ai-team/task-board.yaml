@@ -1503,3 +1503,29 @@ tasks:
       - "another person's session is RES-001"                                 # DONE — devices.test
       - "app wipes local session when renewal is refused"                     # DONE — seip_id_test (SEIP-P1-006)
 
+  - id: SEIP-P1-013
+    title: "P1 — FR-099 password reset issued by the school admin (CCR-022, contract 4.5.0)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-005, SEIP-P1-012]
+    decisions: [CCR-022]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-022-admin-issued-password-reset.md
+      - prisma/migrations/20261013000600_password_reset/migration.sql
+      - packages/database/src/repositories/password-resets.ts
+      - apps/api/src/routes/members.ts
+      - apps/api/src/routes/auth.ts
+      - apps/web/src/pages/ResetPasswordPage.tsx
+      - apps/api/test/password-reset.test.mjs
+    notes: >
+      The admin-issued half of FR-099: a 30-minute, single-use token, shown once.
+      Redeeming it ends every session, here and in SEIP ID, and sets the SEIP ID
+      password. Not done: self-service reset by email/SMS, which waits for a
+      provider in the NFR-Res-06 register. Owner question in CCR-022: should the
+      director's account be excluded from school-admin resets?
+    acceptance_criteria:
+      - "single use, 30 min, newer cancels older, AUTH-008 for all failures"   # DONE
+      - "all sessions end, app refused at once, SEIP ID password updated"      # DONE (real Keycloak)
+      - "not own account / never-activated account; school_admin only, min_acr 2" # DONE
+

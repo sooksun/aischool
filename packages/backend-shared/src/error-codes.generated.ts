@@ -3,7 +3,7 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const ERROR_CODES_VERSION = '2.1.0';
+export const ERROR_CODES_VERSION = '2.2.0';
 
 export type ErrorCode =
   | 'AUTH-001'
@@ -13,6 +13,7 @@ export type ErrorCode =
   | 'AUTH-006'
   | 'AUTH-007'
   | 'AUTH-005'
+  | 'AUTH-008'
   | 'PERM-001'
   | 'PERM-002'
   | 'PERM-003'
@@ -69,6 +70,7 @@ export const ERROR_CODE_TABLE: Record<ErrorCode, { http: number; meaning: string
   'AUTH-006': { http: 403, meaning: "Step-up authentication required — token acr is below the operation's min_acr (ADR-0014)" },
   'AUTH-007': { http: 403, meaning: "Cookie session write without a matching X-CSRF-Token (CCR-018)" },
   'AUTH-005': { http: 401, meaning: "Invite token not usable — unknown" },
+  'AUTH-008': { http: 401, meaning: "Password reset token not usable — unknown" },
   'PERM-001': { http: 403, meaning: "Role not allowed for this operation (permissions.yaml matrix)" },
   'PERM-002': { http: 403, meaning: "Cross-school access denied (tenancy) — resource belongs to another school" },
   'PERM-003': { http: 403, meaning: "Not a committee member of this assignment" },

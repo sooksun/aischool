@@ -76,6 +76,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a new password with a one-time reset token (CCR-022, FR-099)
+         * @description The reset token in the body IS the credential. Single-use and valid for 30 minutes. On success every session of the account ends — refresh tokens, browser sessions, app devices, and the account's SEIP ID sessions — and the SEIP ID password is set to the same value.
+         *
+         *     Unknown, expired and already-used tokens are indistinguishable (AUTH-008), and the endpoint is throttled like acceptInvite (SEC-AUTH-5). Returns 204; the person then signs in normally.
+         */
+        post: operations["completePasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -318,6 +340,28 @@ export interface paths {
          * @description Exactly an inviteMember with role `school_admin` at that school — same checks, same one-time invite token — made by the area admin rather than by the school. This is how a new school gets its first admin.
          */
         post: operations["appointSchoolAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/members/{membershipId}/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a one-time password reset for a member (school admin, CCR-022)
+         * @description For a member who forgot their password or is locked out and has no verified email or phone (FR-099). Returns a single-use token, valid for 30 minutes, shown once; the admin hands it over in person or as a QR code. Issuing a new one cancels any earlier unused one. Audited.
+         *
+         *     Not for the caller's own account, and not for an account that has never set a password (re-invite instead) — both VAL-002. The account's second factor in SEIP ID is untouched, so a step-up still needs the person's own device.
+         */
+        post: operations["issuePasswordReset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1571,6 +1615,17 @@ export interface components {
              * @description Null exactly when `invite_token` is null.
              */
             invite_expires_at: string | null;
+        };
+        /** @description The reset token appears here and nowhere else, ever. */
+        PasswordResetIssued: {
+            /** @description Single-use secret. Only its hash is stored. */
+            reset_token: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        PasswordResetComplete: {
+            reset_token: string;
+            password: string;
         };
         AcceptInviteRequest: {
             invite_token: string;
@@ -2898,6 +2953,39 @@ export interface operations {
             };
         };
     };
+    completePasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetComplete"];
+            };
+        };
+        responses: {
+            /** @description Password set; every earlier session has ended */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description AUTH-004 — too many attempts (SEC-AUTH-5) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -3237,6 +3325,32 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    issuePasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                membershipId: components["parameters"]["MembershipId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reset issued */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResetIssued"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["UnprocessableEntity"];
         };
     };

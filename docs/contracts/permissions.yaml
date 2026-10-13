@@ -33,10 +33,12 @@
 #   New top-level `min_acr`: operations (or actions) that need step-up auth.
 # version: 2.1.0 — CCR-018 (additive): webLogin / webCallback / webLogout, unauthenticated.
 # version: 2.2.0 — CCR-019 (additive): importMembers, same grant and step-up as inviteMember.
-# version: 2.3.0 — CCR-021 (POLICY CHANGE, owner approval pending): area_admin may manage the
+# version: 2.3.0 — CCR-021 (POLICY CHANGE, approved by the owner 2026-10-13): area_admin may manage the
 #   schools of its own area — listAreaSchools, createSchool, updateSchool, appointSchoolAdmin.
 #   writes_by_area_admin stays forbidden for every other operation (area_admin_writes below).
-version: 2.3.0
+# version: 2.4.0 — CCR-022 (additive): issuePasswordReset (school_admin, min_acr 2) and
+#   completePasswordReset (unauthenticated, the token is the credential).
+version: 2.4.0
 status: locked
 locked_at: 2026-07-17
 
@@ -88,6 +90,10 @@ unauthenticated:
     (SEC-AUTH-5) because a token is guessable in principle. Returns 204, never a
     token pair, so `invited` → `active` stays enforced in exactly one place:
     login.
+  completePasswordReset: >
+    CCR-022. The reset token in the body IS the credential. Single-use, 30 minutes.
+    Unknown, expired and already-used tokens all return AUTH-008 identically.
+    Throttled like acceptInvite (SEC-AUTH-5). Ends every session of the account.
   webLogin: >
     CCR-018. Only redirects to Keycloak; the credential is checked there. The
     return_to path is confined to this site (open-redirect guard).
@@ -146,6 +152,7 @@ matrix:
   updateSchool:            { area_admin: area }
   appointSchoolAdmin:      { area_admin: area }
   endMembership:           { school_admin: school }
+  issuePasswordReset:      { school_admin: school }   # never the caller's own account (VAL-002)
 
   # taxonomy (reference data — readable by any authenticated member)
   listFrameworks:          { teacher: school, director: school, deputy: school, evaluator: school, school_admin: school, area_admin: area-r }
@@ -259,6 +266,7 @@ min_acr:
   updateSchool: 2
   appointSchoolAdmin: 2
   endMembership: 2
+  issuePasswordReset: 2
   createExport: { other_person: 2 }
 
 notes:
