@@ -162,6 +162,15 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-009, school context, contract 4.3.0)
+
+| Command | Result |
+|---|---|
+| static gates · `test:unit` | pass. oasdiff 4.2.0 → 4.3.0: no breaking changes. Web unit 44 |
+| api · security | 113 · 12 (+2 school-context) |
+| `test:e2e` | 16/16 (new: school-picker) |
+| Dart client analyse · mobile test | pass |
+
 ## Verified runs (2026-10-13, local — SEIP-P1-008, bulk member import, contract 4.2.0)
 
 | Command | Result |

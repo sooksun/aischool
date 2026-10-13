@@ -25,12 +25,13 @@ export async function getUserById(userId: string) {
   return prisma.userAccount.findUnique({ where: { id: userId } });
 }
 
-export async function getMembershipsForUser(userId: string): Promise<MembershipRow[]> {
-  const rows = await prisma.schoolMembership.findMany({ where: { userId } });
+export async function getMembershipsForUser(userId: string): Promise<(MembershipRow & { schoolName: string | null })[]> {
+  const rows = await prisma.schoolMembership.findMany({ where: { userId }, include: { school: { select: { name: true } } } });
   return rows.map((r) => ({
     role: r.role,
     membershipScope: r.membershipScope,
     schoolId: r.schoolId,
+    schoolName: r.school?.name ?? null,
     areaId: r.areaId,
     status: r.status,
     effectiveFrom: r.effectiveFrom,

@@ -5,7 +5,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   verifyPassword, signAccessToken, ACCESS_TOKEN_TTL_SECONDS, generateRefreshToken, hashRefreshToken,
-  refreshTokenExpiryDate, hashPassword, hashInviteToken, isAcceptablePassword, MIN_PASSWORD_LENGTH,
+  refreshTokenExpiryDate, hashPassword, hashInviteToken, isAcceptablePassword, MIN_PASSWORD_LENGTH, isActiveNow,
 } from '@seip/auth';
 import {
   findUserByEmailForLogin, getUserById, getMembershipsForUser, createRefreshToken,
@@ -202,10 +202,13 @@ export const authRoutes: FastifyPluginAsync<{ env: Env; keycloak?: Keycloak | nu
       personnel: auth.personnel
         ? { id: auth.personnel.id, position_role: auth.personnel.positionRole, rank_level_code: auth.personnel.rankLevelCode }
         : null,
-      memberships: memberships.map((m) => ({
+      // Only what is in effect now (CCR-020): an ended membership grants nothing
+      // in the API, so the client must not offer its screens either.
+      memberships: memberships.filter((m) => isActiveNow(m, new Date())).map((m) => ({
         role: m.role,
         membership_scope: m.membershipScope,
         school_id: m.schoolId,
+        school_name: m.schoolName,
         area_id: m.areaId,
       })),
     };

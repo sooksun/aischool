@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **School context (SEIP-P1-009, in review, contract 4.3.0 / CCR-020 additive):** a person at several schools picks one in the web, and the pick is remembered. `/auth/me` now lists only memberships in effect, with school names. After a transfer, the web no longer offers the old school's screens.
+>
 > **Bulk onboarding (SEIP-P1-008, in review, contract 4.2.0 / CCR-019 additive):** a school admin uploads the staff list as CSV, checks it with a dry run that reports each bad row, then imports the valid rows, with every invite code shown once.
 >
 > **FR-095 gaps closed (SEIP-P1-007, in review):** every denial of a caller whose identity is known (PERM-*, AUTH-006, RES-001) now writes an `access_denied` audit row. The whole permission sweep asserts this. Taxonomy routes require a role, and the last client-supplied FK that could 500 (`createCycle.framework_version_id`) now answers VAL-002.

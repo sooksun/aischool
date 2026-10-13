@@ -1,4 +1,6 @@
 openapi: 3.1.0
+# version 4.3.0 — CCR-020 (additive): CurrentUser.memberships[].school_name, for the
+#   school picker of a person who works at more than one school (FR-019).
 # version 4.2.0 — CCR-019 (additive): importMembers — bulk onboarding from a staff
 #   list (FR-091), with a dry run and a result per row.
 # version 4.1.0 — CCR-018 (additive): web sign-in through Keycloak behind a BFF
@@ -13,7 +15,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.2.0
+  version: 4.3.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -2891,6 +2893,7 @@ components:
                 - teacher_chamnankan
         memberships:
           type: array
+          description: The memberships in effect now (CCR-020). An ended or future-dated membership is not listed, the same way the API ignores it for access.
           items:
             type: object
             required:
@@ -2909,6 +2912,11 @@ components:
                 - string
                 - 'null'
                 format: uuid
+              school_name:
+                type:
+                - string
+                - 'null'
+                description: CCR-020. Set when `school_id` is set, so a client can let the person choose a school by name.
               area_id:
                 type:
                 - string

@@ -21,7 +21,8 @@ export interface TenancyContext {
   areaRoles: Map<string, Set<Role>>;
 }
 
-function isActiveNow(m: MembershipRow, now: Date): boolean {
+/** In effect at `now`: active, started, not ended. The one rule for access and for /auth/me. */
+export function isActiveNow(m: MembershipRow, now: Date): boolean {
   if (m.status !== 'active') return false;
   if (m.effectiveFrom > now) return false;
   if (m.effectiveTo && m.effectiveTo < now) return false;

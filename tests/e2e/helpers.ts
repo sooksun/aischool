@@ -18,6 +18,8 @@ export type E2eCreds = {
   readyReportId: string | null;
   /** CCR-018: the teacher's Keycloak login, or null when web sign-in is off. */
   sso: { email: string; password: string; otpSecret: string } | null;
+  /** FR-019: a teacher with memberships at two schools. */
+  multiSchool: { email: string; password: string; schools: [string, string] };
 };
 
 export function loadE2eCreds(): E2eCreds {

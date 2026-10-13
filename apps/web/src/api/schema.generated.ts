@@ -1374,12 +1374,15 @@ export interface components {
                  */
                 rank_level_code: string;
             };
+            /** @description The memberships in effect now (CCR-020). An ended or future-dated membership is not listed, the same way the API ignores it for access. */
             memberships: {
                 role: components["schemas"]["Role"];
                 /** @enum {string} */
                 membership_scope: "school" | "area";
                 /** Format: uuid */
                 school_id?: string | null;
+                /** @description CCR-020. Set when `school_id` is set, so a client can let the person choose a school by name. */
+                school_name?: string | null;
                 /** Format: uuid */
                 area_id?: string | null;
             }[];

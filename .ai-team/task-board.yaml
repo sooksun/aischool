@@ -1394,3 +1394,30 @@ tasks:
       - "PERM-001 for non-admins; 500-row limit; step-up (min_acr 2) and the permission sweep cover it"                 # DONE
       - "e2e: admin uploads a CSV, checks, imports, sees the new member"                                                # DONE
       - "CI green on the pushed commit"                                                                                  # DONE — run 38347291380 on 3b4d2c3
+
+  - id: SEIP-P1-009
+    title: "P1 — FR-019 school context: pick a school when you work at several (CCR-020, contract 4.3.0)"
+    status: review              # 2026-10-13 — local gates green; CI pending
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: []
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-020-current-memberships-school-name.md
+      - apps/api/src/routes/auth.ts
+      - apps/web/src/lib/schoolContext.ts
+      - apps/web/src/hooks/useAuth.tsx
+      - apps/web/src/App.tsx
+      - tests/e2e/school-picker.spec.ts
+    notes: >
+      /auth/me now lists only memberships in effect (one isActiveNow rule for access
+      and for the client) and adds school_name. Fixed in passing: after a transfer
+      the web still offered the old school's screens. Web picker remembered per
+      account; routes remount on switch. Not done (rest of FR-019): moving evidence
+      to another school context, and a school_admin uploading on someone's behalf
+      needing the owner's acceptance before it counts.
+    acceptance_criteria:
+      - "/auth/me: current memberships only, with school_name"            # DONE — school-context.test
+      - "two schools: picker, remembered; one school: no picker"          # DONE — school-picker.spec + unit
+      - "contract 4.3.0 additive (oasdiff clean)"                          # DONE
+      - "CI green on the pushed commit"                                    # OPEN

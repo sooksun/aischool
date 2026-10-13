@@ -46,6 +46,25 @@ function RequireCapability({
 }
 
 /** Nav driven by capability flags — no ad-hoc role arrays (cleanup M3). */
+/**
+ * FR-019: a person at more than one school picks which one they are working for;
+ * the pick is remembered per account. Until they pick, writes would be ambiguous
+ * (the API answers PERM-002), so the page says so plainly.
+ */
+function SchoolPicker() {
+  const { user, schools, schoolId, selectSchool } = useAuth();
+  if (!user || schools.length < 2) return null;
+  return (
+    <div className={schoolId ? 'school-picker' : 'alert alert-info'} role={schoolId ? undefined : 'alert'}>
+      <label htmlFor="school-picker">{schoolId ? 'โรงเรียน' : 'คุณอยู่หลายโรงเรียน กรุณาเลือกโรงเรียนที่กำลังทำงานให้'}</label>{' '}
+      <select id="school-picker" value={schoolId ?? ''} onChange={(e) => selectSchool(e.target.value)}>
+        {!schoolId && <option value="" disabled>เลือกโรงเรียน</option>}
+        {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function AppNav() {
   const { user, capabilities } = useAuth();
   const location = useLocation();
@@ -119,11 +138,15 @@ function StepUpBanner() {
 }
 
 export function App() {
+  // Switching school remounts the routes, so every page reloads its data for the
+  // school now in X-School-Id instead of showing the previous school's.
+  const { schoolId } = useAuth();
   return (
     <>
       <AppNav />
+      <SchoolPicker />
       <StepUpBanner />
-      <Routes>
+      <Routes key={schoolId ?? 'no-school'}>
         <Route path="/login" element={<LoginPage />} />
         {/* Unauthenticated by contract: the invitee has no password yet, so they
             cannot be behind RequireAuth. Mirrors permissions.yaml's

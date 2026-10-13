@@ -405,6 +405,14 @@ export default async function globalSetup() {
       readyReportId = report.id;
     }
 
+    // FR-019: a teacher at two schools, for the school picker.
+    const school2 = await prisma.school.findFirst({ where: { code: 'e2e-school-2' } })
+      ?? await prisma.school.create({ data: { code: 'e2e-school-2', name: 'E2E Second School' } });
+    const multiEmail = 'e2e-multi@seip.local';
+    const multiPassword = 'e2e-multi-password-1234';
+    await ensureUser(prisma, { email: multiEmail, password: multiPassword, displayName: 'E2E Two Schools', schoolId: school.id, role: 'teacher', withPersonnel: false });
+    await ensureUser(prisma, { email: multiEmail, password: multiPassword, displayName: 'E2E Two Schools', schoolId: school2.id, role: 'teacher', withPersonnel: false });
+
     // CCR-018: a Keycloak account linked to the e2e teacher, when the stack
     // serves web sign-in (the same condition the SPA uses to show the button).
     let sso = null;
@@ -417,6 +425,7 @@ export default async function globalSetup() {
     mkdirSync(dirname(AUTH_STATE), { recursive: true });
     writeFileSync(AUTH_STATE, JSON.stringify({
       sso,
+      multiSchool: { email: multiEmail, password: multiPassword, schools: ['E2E Test School', 'E2E Second School'] },
       teacher: { email: E2E_TEACHER_EMAIL, password: E2E_TEACHER_PASSWORD },
       director: { email: E2E_DIRECTOR_EMAIL, password: E2E_DIRECTOR_PASSWORD },
       admin: { email: E2E_ADMIN_EMAIL, password: E2E_ADMIN_PASSWORD },

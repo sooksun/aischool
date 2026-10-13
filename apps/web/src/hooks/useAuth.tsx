@@ -22,6 +22,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { api, unwrap, setAccessToken, setRefreshToken, setCurrentSchoolId, registerSessionHooks, WEB_SSO } from '../api/client';
 import type { components } from '../api/schema.generated';
 import { capabilitiesFromMemberships, FEATURE_SCORING, type Capabilities } from '../lib/capabilities';
+import { pickSchool, rememberSchool, rememberedSchool, schoolOptions, type SchoolOption } from '../lib/schoolContext';
 
 type CurrentUser = components['schemas']['CurrentUser'];
 type Role = components['schemas']['Role'];
@@ -36,6 +37,9 @@ interface AuthState {
    * these instead of ad-hoc role arrays. Not a substitute for permissions.yaml.
    */
   capabilities: Capabilities;
+  /** FR-019: the schools this person can act for; more than one → they choose. */
+  schools: SchoolOption[];
+  selectSchool: (schoolId: string) => void;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -58,14 +62,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
   const applySchoolContext = useCallback((u: CurrentUser) => {
-    const schoolMemberships = u.memberships.filter((m) => m.membership_scope === 'school' && m.school_id);
-    // Same "implicit if exactly one" rule as CCR-003's server-side resolution —
-    // the client picks the same way the server would, so 99% of users (a single-
-    // school teacher) never see a school picker.
-    const resolved = schoolMemberships.length === 1 ? (schoolMemberships[0].school_id ?? null) : null;
+    // Same "implicit if exactly one" rule as CCR-003's server-side resolution, so
+    // most people (a single-school teacher) never see a picker; with several,
+    // the school used last on this browser (FR-019), else none until they pick.
+    const resolved = pickSchool(schoolOptions(u.memberships), rememberedSchool(u.id));
     setSchoolId(resolved);
     setCurrentSchoolId(resolved);
   }, []);
+
+  const selectSchool = useCallback((id: string) => {
+    if (!user || !schoolOptions(user.memberships).some((o) => o.id === id)) return;
+    rememberSchool(user.id, id);
+    setSchoolId(id);
+    setCurrentSchoolId(id);
+  }, [user]);
+
+  const schools = useMemo(() => (user ? schoolOptions(user.memberships) : []), [user]);
 
   const refreshCurrentUser = useCallback(async () => {
     const u = unwrap(await api.GET('/auth/me', {}));
@@ -146,8 +158,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ user, loading, schoolId, capabilities, login, logout }),
-    [user, loading, schoolId, capabilities, login, logout],
+    () => ({ user, loading, schoolId, capabilities, schools, selectSchool, login, logout }),
+    [user, loading, schoolId, capabilities, schools, selectSchool, login, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
