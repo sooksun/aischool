@@ -24,7 +24,8 @@
 # version: 2.0.0 — CCR-017 (BREAKING): AI-001 retired (synchronous suggest removed); MAP-001
 #   keyed on framework version; MAP-002 now guards validate/return; new AUTH-006, RES-004/005,
 #   IDEMP-001, UPL-007/008, AI-002/003/004, EXP-001/002, SYNC-001, SYS-003.
-version: 2.0.0
+# version: 2.1.0 — CCR-018 (additive): AUTH-007 CSRF check on a cookie session.
+version: 2.1.0
 status: locked
 locked_at: 2026-07-17
 error_shape:
@@ -57,6 +58,7 @@ codes:
   # One code covers unknown, expired and already-used on purpose: three codes
   # would tell an attacker which invite tokens once existed (CCR-014).
   AUTH-006: { http: 403, meaning: 'Step-up authentication required — token acr is below the operation''s min_acr (ADR-0014)' }
+  AUTH-007: { http: 403, meaning: 'Cookie session write without a matching X-CSRF-Token (CCR-018)' }
   AUTH-005: { http: 401, meaning: Invite token not usable — unknown, expired, or already accepted (indistinguishable by design) }
 
   # --- PERM (403) ---

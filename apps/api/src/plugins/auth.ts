@@ -6,12 +6,23 @@ import fp from 'fastify-plugin';
 import type { FastifyPluginAsync, FastifyInstance, FastifyRequest } from 'fastify';
 import {
   verifyAccessToken, AccessTokenExpiredError, resolveTenancy, hasSchoolRole, hasAreaReadAccess,
-  createOidcVerifier, isExternalToken, OWN_TOKEN_ACR,
+  isExternalToken, OWN_TOKEN_ACR,
   type TenancyContext,
 } from '@seip/auth';
-import { getUserById, getMembershipsForUser, getPersonnelForUser, getSchoolAreaId } from '@seip/database';
+import {
+  getUserById, getMembershipsForUser, getPersonnelForUser, getSchoolAreaId,
+  getLiveWebSession, touchWebSession, claimKeycloakCheck, recordKeycloakCheck, revokeWebSession,
+} from '@seip/database';
 import { ApiError, isExempt } from '@seip/backend-shared';
 import type { Env } from '../env.js';
+import type { Keycloak } from '../lib/keycloak.js';
+import {
+  KC_CHECK_EVERY_MS, SESSION_COOKIE, equalSecrets, openRefreshToken, parseCookies, sealRefreshToken, sha256,
+} from '../lib/web-session.js';
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/** A request that wins the Keycloak check holds it this long before another may try. */
+const KC_CHECK_LEASE_MS = 30 * 1000;
 
 export interface AuthedRequest {
   userId: string;
@@ -41,33 +52,69 @@ declare module 'fastify' {
   }
 }
 
-export const authPlugin: FastifyPluginAsync<{ env: Env }> = fp(async (app: FastifyInstance, { env }: { env: Env }) => {
-  const verifyOidc = env.KEYCLOAK_ISSUER
-    ? createOidcVerifier({ issuer: env.KEYCLOAK_ISSUER, audience: env.KEYCLOAK_AUDIENCE })
-    : null;
+type AuthPluginOptions = { env: Env; keycloak: Keycloak | null };
+
+export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = fp(async (app: FastifyInstance, { env, keycloak }: AuthPluginOptions) => {
+  /** Bearer token (mobile, scripts, tests): HS256 is ours; anything else is
+   * Keycloak's, and only if a realm is configured. Without one an RS256 token is
+   * simply invalid (AUTH-001). */
+  async function fromBearer(token: string): Promise<{ userId: string; acr: number }> {
+    try {
+      if (keycloak && isExternalToken(token)) {
+        const { userId, acr } = await keycloak.verifyAccessToken(token);
+        return { userId, acr };
+      }
+      const { sub } = await verifyAccessToken(token, env.JWT_SECRET);
+      return { userId: sub, acr: OWN_TOKEN_ACR };
+    } catch (e) {
+      if (e instanceof AccessTokenExpiredError) throw new ApiError('AUTH-002', 'Token expired');
+      throw new ApiError('AUTH-001', 'Invalid token');
+    }
+  }
+
+  /** Cookie session (web BFF, CCR-018): live row, CSRF on writes, and at most
+   * once a minute a refresh against Keycloak so a session ended there (logout
+   * elsewhere, admin revoke) ends here too. */
+  async function fromSession(request: FastifyRequest, cookie: string): Promise<{ userId: string; acr: number }> {
+    const session = await getLiveWebSession(sha256(cookie));
+    if (!session) throw new ApiError('AUTH-001', 'Session expired or unknown');
+    if (!SAFE_METHODS.has(request.method)) {
+      const header = request.headers['x-csrf-token'];
+      if (typeof header !== 'string' || !equalSecrets(sha256(header), session.csrfHash)) {
+        throw new ApiError('AUTH-007', 'X-CSRF-Token missing or does not match the session');
+      }
+    }
+    const web = keycloak?.web;
+    if (web && session.kcCheckDueAt <= new Date() && await claimKeycloakCheck(session.id, KC_CHECK_LEASE_MS)) {
+      try {
+        const fresh = await web.refresh(openRefreshToken(env.JWT_SECRET, session.kcRefreshToken));
+        if (!fresh) {
+          await revokeWebSession(session.id);
+          throw new ApiError('AUTH-001', 'Session ended at the identity provider');
+        }
+        await recordKeycloakCheck(session.id, sealRefreshToken(env.JWT_SECRET, fresh.refreshToken), new Date(Date.now() + KC_CHECK_EVERY_MS));
+      } catch (e) {
+        if (e instanceof ApiError) throw e;
+        // Keycloak unreachable: keep the session and try again after the lease.
+        // Revocation waits for Keycloak to answer; availability does not.
+        request.log.warn({ err: e }, 'web session: keycloak check failed; retrying later');
+      }
+    }
+    await touchWebSession(session);
+    return { userId: session.userId, acr: session.acr };
+  }
 
   app.addHook('preHandler', async (request: FastifyRequest) => {
     const operationId = request.routeOptions?.config?.operationId as string | undefined;
     if (operationId && isExempt(operationId) === 'unauthenticated') return;
 
     const header = request.headers.authorization;
-    if (!header?.startsWith('Bearer ')) throw new ApiError('AUTH-001', 'Missing bearer token');
-    const token = header.slice('Bearer '.length);
-
-    // HS256 is ours; anything else is Keycloak's, and only if a realm is
-    // configured. Without one an RS256 token is simply invalid (AUTH-001).
-    let userId: string;
-    let acr = OWN_TOKEN_ACR;
-    try {
-      if (verifyOidc && isExternalToken(token)) {
-        ({ userId, acr } = await verifyOidc(token));
-      } else {
-        ({ sub: userId } = await verifyAccessToken(token, env.JWT_SECRET));
-      }
-    } catch (e) {
-      if (e instanceof AccessTokenExpiredError) throw new ApiError('AUTH-002', 'Token expired');
-      throw new ApiError('AUTH-001', 'Invalid token');
-    }
+    const cookie = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+    let identity: { userId: string; acr: number };
+    if (header?.startsWith('Bearer ')) identity = await fromBearer(header.slice('Bearer '.length));
+    else if (cookie) identity = await fromSession(request, cookie);
+    else throw new ApiError('AUTH-001', 'Missing bearer token or session');
+    const { userId, acr } = identity;
 
     const user = await getUserById(userId);
     if (!user || user.status !== 'active') throw new ApiError('AUTH-003', 'Account disabled or not found');

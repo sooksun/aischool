@@ -1,4 +1,7 @@
 openapi: 3.1.0
+# version 4.1.0 — CCR-018 (additive): web sign-in through Keycloak behind a BFF
+#   (ADR-0014 §4): webLogin / webCallback / webLogout, the `webSession` cookie
+#   security scheme (+ X-CSRF-Token on unsafe methods), AUTH-007.
 # version 4.0.0 — CCR-017 (BREAKING, APPROVED by the owner 2026-10-12): person-owned
 #   portfolio (ADR-0015), two-tier mapping confirmation, async in-country AI
 #   analysis + suggestions (ADR-0010), resumable uploads (ADR-0016 §5), delta sync,
@@ -8,7 +11,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.0.0
+  version: 4.1.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -109,6 +112,7 @@ servers:
   description: Version-prefixed base path (host is deployment config)
 security:
 - bearerAuth: []
+- webSession: []
 tags:
 - name: auth
   description: Authentication and session identity
@@ -282,6 +286,97 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
       x-seip-sunset: P1 — replaced by Keycloak OIDC + BFF session (ADR-0014)
+  /auth/web/login:
+    get:
+      operationId: webLogin
+      summary: Start a browser sign-in through Keycloak (CCR-018, ADR-0014 §4)
+      description: 'Redirects to the realm''s authorization endpoint (code flow + PKCE)
+        and sets a short-lived, signed `__Host-seip-oidc` cookie carrying state, nonce
+        and verifier. `acr=mfa` asks for the second factor — the step-up after an
+        AUTH-006.
+
+        '
+      tags:
+      - auth
+      security: []
+      parameters:
+      - name: return_to
+        in: query
+        required: false
+        description: Same-site path to land on afterwards. Must start with a single `/`; anything else falls back to `/`.
+        schema:
+          type: string
+          maxLength: 2000
+      - name: acr
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - pwd
+          - mfa
+          default: pwd
+      responses:
+        '302':
+          description: To the Keycloak authorization endpoint
+        '501':
+          description: SYS-003 — web sign-in is not configured on this deployment (no Keycloak realm)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/web/callback:
+    get:
+      operationId: webCallback
+      summary: Finish a browser sign-in (CCR-018)
+      description: 'Checks state against the `__Host-seip-oidc` cookie, exchanges the code
+        (confidential client, PKCE), verifies the ID token''s nonce and the access token,
+        then starts a server-side session: `__Host-seip` (httpOnly, 30 min idle, 8 h
+        maximum) and `__Host-seip-csrf` (readable by the page, echoed as X-CSRF-Token).
+        Any failure redirects to `/login?error=sso` rather than showing a JSON error
+        in the browser.
+
+        '
+      tags:
+      - auth
+      security: []
+      parameters:
+      - name: code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: error
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '302':
+          description: To `return_to` on success, `/login?error=sso` otherwise
+  /auth/web/logout:
+    post:
+      operationId: webLogout
+      summary: End the browser session (CCR-018)
+      description: 'Revokes the server-side session, ends the Keycloak session behind it
+        and clears both cookies. Idempotent: 204 even without a live session.
+
+        '
+      tags:
+      - auth
+      security: []
+      parameters:
+      - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: Signed out
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /auth/me:
     get:
       operationId: getCurrentUser
@@ -2320,7 +2415,23 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    webSession:
+      type: apiKey
+      in: cookie
+      name: __Host-seip
+      description: 'CCR-018 — the browser session the BFF sets after webCallback. On
+        POST / PUT / PATCH / DELETE the request must also carry X-CSRF-Token equal to
+        the `__Host-seip-csrf` cookie, or it is refused with 403 AUTH-007.
+
+        '
   parameters:
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: false
+      description: Double-submit token for a cookie session (CCR-018); the value of the `__Host-seip-csrf` cookie.
+      schema:
+        type: string
     FrameworkId:
       name: frameworkId
       in: path
@@ -2469,7 +2580,7 @@ components:
             $ref: '#/components/schemas/Error'
     Forbidden:
       description: PERM-* — role or tenancy denial · AUTH-006 when the operation needs step-up authentication (acr
-        ≥ 2)
+        ≥ 2) · AUTH-007 when a cookie-session write lacks a matching X-CSRF-Token
       content:
         application/json:
           schema:

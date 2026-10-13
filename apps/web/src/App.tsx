@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { STEP_UP_EVENT, WEB_SSO, webLoginHref } from './api/client';
 import { useAuth } from './hooks/useAuth';
 import type { UiCapability } from './lib/capabilities';
 import { LoginPage } from './pages/LoginPage';
@@ -91,10 +93,36 @@ function AppNav() {
   );
 }
 
+/**
+ * ADR-0014 step-up: when the API answers AUTH-006, offer a sign-in with the
+ * second factor that returns to this page. A link, not an automatic redirect,
+ * so nothing half-typed on the page (a return note, say) is lost unasked.
+ */
+function StepUpBanner() {
+  const [needed, setNeeded] = useState(false);
+  const location = useLocation();
+  useEffect(() => {
+    const on = () => setNeeded(true);
+    window.addEventListener(STEP_UP_EVENT, on);
+    return () => window.removeEventListener(STEP_UP_EVENT, on);
+  }, []);
+  useEffect(() => setNeeded(false), [location.pathname]);
+  if (!needed) return null;
+  return (
+    <div className="alert alert-info" role="alert">
+      <span>รายการนี้ต้องยืนยันตัวตนด้วยรหัส OTP อีกขั้นหนึ่ง</span>
+      {WEB_SSO
+        ? <a className="btn btn-primary" href={webLoginHref(location.pathname + location.search, 'mfa')}>ยืนยันตัวตนด้วย OTP</a>
+        : <span>กรุณาออกจากระบบแล้วเข้าสู่ระบบด้วย SEIP ID</span>}
+    </div>
+  );
+}
+
 export function App() {
   return (
     <>
       <AppNav />
+      <StepUpBanner />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         {/* Unauthenticated by contract: the invitee has no password yet, so they

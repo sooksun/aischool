@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { createPrismaClient } from '../../prisma/client.mjs';
 import { hash as argonHash } from '@node-rs/argon2';
 import { writeFileSync, mkdirSync } from 'node:fs';
+import { createUser as createKeycloakUser, deleteUsersLinkedTo } from '../helpers/keycloak.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -404,8 +405,18 @@ export default async function globalSetup() {
       readyReportId = report.id;
     }
 
+    // CCR-018: a Keycloak account linked to the e2e teacher, when the stack
+    // serves web sign-in (the same condition the SPA uses to show the button).
+    let sso = null;
+    if (process.env.KEYCLOAK_ISSUER && process.env.WEB_PUBLIC_ORIGIN) {
+      await deleteUsersLinkedTo(teacher.user.id);
+      const kc = await createKeycloakUser(teacher.user.id);
+      sso = { email: kc.email, password: kc.password, otpSecret: kc.otpSecret };
+    }
+
     mkdirSync(dirname(AUTH_STATE), { recursive: true });
     writeFileSync(AUTH_STATE, JSON.stringify({
+      sso,
       teacher: { email: E2E_TEACHER_EMAIL, password: E2E_TEACHER_PASSWORD },
       director: { email: E2E_DIRECTOR_EMAIL, password: E2E_DIRECTOR_PASSWORD },
       admin: { email: E2E_ADMIN_EMAIL, password: E2E_ADMIN_PASSWORD },

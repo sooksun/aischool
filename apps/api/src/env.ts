@@ -19,6 +19,12 @@ const EnvSchema = z.object({
    * alongside the API's own (e.g. http://localhost:8180/realms/seip). */
   KEYCLOAK_ISSUER: z.string().url().optional(),
   KEYCLOAK_AUDIENCE: z.string().min(1).default('seip-api'),
+  /** CCR-018 web BFF: the confidential client, and the origin the browser sees
+   * (the callback URL is built from it, never from the Host header). Web sign-in
+   * is served only when all three Keycloak settings are present. */
+  KEYCLOAK_WEB_CLIENT_ID: z.string().min(1).default('seip-web'),
+  KEYCLOAK_WEB_CLIENT_SECRET: z.string().min(1).optional(),
+  WEB_PUBLIC_ORIGIN: z.string().url().optional(),
   /** permissions.yaml `min_acr` → 403 AUTH-006 below the level. Off until the
    * clients can step up through Keycloak; the API's own tokens are acr 1, so
    * turning this on without Keycloak locks out every step-up operation. */

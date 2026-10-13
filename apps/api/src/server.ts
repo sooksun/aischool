@@ -14,6 +14,8 @@ import { reportRoutes } from './routes/reports.js';
 import { memberRoutes } from './routes/members.js';
 import { agreementRoutes } from './routes/agreements.js';
 import { phaseGatedRoutes } from './routes/phase-gated.js';
+import { webAuthRoutes } from './routes/web-auth.js';
+import { createKeycloak } from './lib/keycloak.js';
 import { createS3Client, ensureBucket } from './lib/s3.js';
 import { configureLoginRateLimiterFromEnv, configureInviteRateLimiterFromEnv } from './lib/login-rate-limit.js';
 
@@ -39,11 +41,13 @@ export async function buildServer() {
 
   await app.register(errorHandlerPlugin);
   await app.register(securityHeadersPlugin);
-  await app.register(authPlugin, { env });
+  const keycloak = createKeycloak(env);
+  await app.register(authPlugin, { env, keycloak });
 
   // openapi.yaml: servers[0].url = /api/v1
   await app.register(async (v1) => {
     await v1.register(authRoutes, { env });
+    await v1.register(webAuthRoutes, { env, keycloak });
     await v1.register(taxonomyRoutes);
     await v1.register(evidenceRoutes, { env });
     await v1.register(mappingRoutes);

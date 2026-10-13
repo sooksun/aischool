@@ -415,6 +415,10 @@ jobs:
       # v2 committee scoring + reports (ADR-0017) stay frozen in product but are
       # exercised here, so the frozen code keeps passing its tests (CCR-017).
       FEATURE_SCORING: "true"
+      # CCR-018: web sign-in through the dev Keycloak realm (tests/e2e/sso.spec.ts).
+      KEYCLOAK_ISSUER: http://localhost:8180/realms/seip
+      KEYCLOAK_WEB_CLIENT_SECRET: seip-web-dev-secret-not-for-real-use
+      WEB_PUBLIC_ORIGIN: http://127.0.0.1:5173
       PORT: "3011"
       # NODE_ENV deliberately NOT set at job level: `npm ci` under
       # NODE_ENV=production skips devDependencies, so the install/build step had
@@ -428,6 +432,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: Start Keycloak (ADR-0014; boots while the job installs)
+        run: scripts/ci/keycloak.sh start
       - name: Start SeaweedFS (S3 API, ADR-0013)
         run: scripts/ci/start-seaweedfs.sh
       - name: Create seip_migrator / seip_app (ADR-0012 §4)
@@ -444,6 +450,8 @@ jobs:
           node scripts/ci/ensure-bucket.mjs
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
+      - name: Wait for Keycloak
+        run: scripts/ci/keycloak.sh wait
       - name: Start API and web
         run: |
           NODE_ENV=production node apps/api/dist/index.js &

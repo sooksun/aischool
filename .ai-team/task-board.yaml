@@ -1215,3 +1215,46 @@ tasks:
       - "SEIP accounts provisioned into Keycloak on invite / accept"                                  # OPEN — next slice
       - "ENFORCE_MIN_ACR=true in staging once both clients use Keycloak"                              # OPEN
       - "ThaID brokered IdP (sandbox) — needs the สพท. RP registration"                               # BLOCKED — external
+
+  - id: SEIP-P1-004
+    title: "P1 — identity slice 2: web sign-in through Keycloak behind the BFF (CCR-018, ADR-0014 §4)"
+    status: review              # 2026-10-13 — local gates green; CI pending
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-003]
+    decisions: [ADR-0014]
+    primary_paths:
+      - docs/contracts/
+      - docs/reviews/CCR-018-web-sign-in-bff.md
+      - prisma/migrations/20261013000300_web_session/
+      - packages/database/src/repositories/web-sessions.ts
+      - apps/api/src/lib/keycloak.ts
+      - apps/api/src/lib/web-session.ts
+      - apps/api/src/routes/web-auth.ts
+      - apps/api/src/plugins/auth.ts
+      - apps/web/src/
+      - tests/e2e/sso.spec.ts
+    notes: >
+      Contract 4.1.0 (additive; oasdiff: no breaking changes from 4.0.0):
+      webLogin / webCallback / webLogout, webSession cookie scheme, X-CSRF-Token,
+      AUTH-007; permissions 2.1.0, error-codes 2.1.0. Session row stores only
+      SHA-256 of the cookie and of the CSRF token; the Keycloak refresh token is
+      AES-256-GCM sealed (key from JWT_SECRET via HKDF). 30 min idle, 8 h max.
+      At most once a minute a request refreshes against Keycloak; invalid_grant
+      ends the web session (revocation ≤ ~60 s), an unreachable Keycloak does
+      not (availability over revocation, logged). A new sign-in (step-up)
+      replaces the browser's session — acr is never upgraded in place. Open
+      redirect guard on return_to; state, PKCE and ID-token nonce bind the
+      callback to the browser. SPA: SEIP ID button (shown when the build sees
+      KEYCLOAK_ISSUER + WEB_PUBLIC_ORIGIN), CSRF header on writes, no token in
+      JS for cookie sessions, step-up banner on AUTH-006 linking to
+      webLogin?acr=mfa. The password/bearer path stays until the end of P1.
+    acceptance_criteria:
+      - "contract 4.1.0 additive; gate:contracts green; oasdiff 4.0.0→4.1.0 no breaking"            # DONE
+      - "httpOnly session + readable CSRF cookie; only hashes stored; refresh token sealed"           # DONE — web-session.test
+      - "writes without / with a foreign X-CSRF-Token → AUTH-007"                                     # DONE
+      - "tampered state, missing state cookie, off-site return_to never sign anyone in"               # DONE
+      - "step-up: password session AUTH-006 → sign-in with OTP replaces the session → validate ok"    # DONE
+      - "idle 30 min, 8 h max, Keycloak logout elsewhere each end the session"                        # DONE
+      - "e2e: SEIP ID button → Keycloak → shell; reload keeps it; sign-out (CSRF) ends it"             # DONE — sso.spec
+      - "CI green on the pushed commit"                                                               # OPEN
+      - "e2e for the step-up banner (needs an e2e stack with ENFORCE_MIN_ACR=true)"                   # OPEN

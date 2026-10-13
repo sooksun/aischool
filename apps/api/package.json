@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "SEIP HTTP API — evidence-workflow slice of openapi.yaml (module-boundaries.md).",
+  "description": "SEIP HTTP API \u2014 evidence-workflow slice of openapi.yaml (module-boundaries.md).",
   "scripts": {
     "dev": "node --env-file=../../.env --watch dist/index.js",
     "build": "tsc -p tsconfig.json",
@@ -20,6 +20,7 @@
     "@seip/database": "*",
     "fastify": "^5.2.0",
     "fastify-plugin": "^5.0.1",
+    "jose": "^5.9.6",
     "pdfkit": "^0.19.1",
     "zod": "^3.24.1"
   },

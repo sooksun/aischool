@@ -38,6 +38,9 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   // comment lives on the Approval row itself, readable by anyone who may read the
   // report, without being duplicated into an append-only log.
   Approval: ['id', 'reportId', 'approverUserId', 'stepCode', 'decision'],
+  // CCR-018. Hashes and the sealed Keycloak token are excluded: they are
+  // credentials, and an audit reader needs only who signed in at which level.
+  WebSession: ['id', 'userId', 'acr'],
 };
 
 function allowlist(entityType: string, obj: Record<string, unknown> | undefined): Snapshot | undefined {

@@ -162,6 +162,18 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-004, web sign-in through Keycloak, contract 4.1.0)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `test:unit` | pass |
+| `gate:contracts` · `gate:ownership` · `gate:dep-audit` | pass; oasdiff 4.0.0 → 4.1.0: no breaking changes |
+| api · security · `test:backend` · database · worker | 100 · 9 · 27 · 23 · 23 — all pass (+7 web-session, against the real realm) |
+| `test:e2e` | 14/14 (new: sso.spec — SEIP ID button → Keycloak → shell → reload → CSRF-checked sign-out) |
+
+**Not run locally:** the Dart client and `apps/mobile` gates (no Dart/Flutter SDK in this
+container after it was recycled). CI runs both against the 4.1.0 contract.
+
 ## Verified runs (2026-10-13, local — SEIP-P1-003, Keycloak + step-up)
 
 Keycloak 26.7.5 with `infra/keycloak/seip-realm.dev.json`, `KEYCLOAK_ISSUER` set.

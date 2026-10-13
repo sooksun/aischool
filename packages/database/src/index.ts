@@ -15,3 +15,4 @@ export * from './repositories/outbox.js';
 export * from './repositories/jobs.js';
 export * from './repositories/reports.js';
 export * from './lib/local-heuristic-mapping.js';
+export * from './repositories/web-sessions.js';

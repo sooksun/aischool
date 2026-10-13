@@ -13,8 +13,13 @@
 // 15-minute expiry no longer logs the user out: client.ts transparently rotates
 // the pair via /auth/refresh on the first 401 and replays the request, and
 // logout() revokes server-side, so a stolen refresh token dies with the session.
+//
+// CCR-018 adds the cookie session (sign-in through Keycloak, ADR-0014 §4): no
+// token reaches JS at all. On start-up with no stored token the provider asks
+// /auth/me; the browser sends the httpOnly cookie by itself. The token path above
+// stays until the API stops issuing its own tokens (end of P1).
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, unwrap, setAccessToken, setRefreshToken, setCurrentSchoolId, registerSessionHooks } from '../api/client';
+import { api, unwrap, setAccessToken, setRefreshToken, setCurrentSchoolId, registerSessionHooks, WEB_SSO } from '../api/client';
 import type { components } from '../api/schema.generated';
 import { capabilitiesFromMemberships, FEATURE_SCORING, type Capabilities } from '../lib/capabilities';
 
@@ -85,9 +90,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => registerSessionHooks({});
   }, []);
 
+  // 'session' = signed in through Keycloak with the BFF cookie (CCR-018).
+  const [mode, setMode] = useState<'token' | 'session' | null>(null);
+
   useEffect(() => {
     const stored = sessionStorage.getItem(STORAGE_KEY);
-    if (!stored) { setLoading(false); return; }
+    if (!stored) {
+      if (!WEB_SSO) { setLoading(false); return; }
+      // No token: maybe a cookie session. A 401 here just means "not signed in".
+      refreshCurrentUser()
+        .then(() => setMode('session'))
+        .catch(() => undefined)
+        .finally(() => setLoading(false));
+      return;
+    }
+    setMode('token');
     setAccessToken(stored);
     setRefreshToken(sessionStorage.getItem(REFRESH_STORAGE_KEY));
     refreshCurrentUser()
@@ -101,19 +118,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.setItem(REFRESH_STORAGE_KEY, tokens.refresh_token);
     setAccessToken(tokens.access_token);
     setRefreshToken(tokens.refresh_token);
+    setMode('token');
     await refreshCurrentUser();
   }, [refreshCurrentUser]);
 
   const logout = useCallback(() => {
-    // Server-side revocation first (CCR-008) — best-effort: local state clears
-    // regardless, and an unreachable server just leaves a token that ages out.
-    const refresh = sessionStorage.getItem(REFRESH_STORAGE_KEY);
-    void api.POST('/auth/logout', { body: refresh ? { refresh_token: refresh } : undefined }).catch(() => {});
+    if (mode === 'session') {
+      // Revokes the session and the Keycloak session behind it; the client
+      // middleware adds X-CSRF-Token. Best-effort, like the token path below.
+      void api.POST('/auth/web/logout', {}).catch(() => {});
+    } else {
+      // Server-side revocation first (CCR-008) — best-effort: local state clears
+      // regardless, and an unreachable server just leaves a token that ages out.
+      const refresh = sessionStorage.getItem(REFRESH_STORAGE_KEY);
+      void api.POST('/auth/logout', { body: refresh ? { refresh_token: refresh } : undefined }).catch(() => {});
+    }
+    setMode(null);
     clearStoredSession();
     setCurrentSchoolId(null);
     setUser(null);
     setSchoolId(null);
-  }, []);
+  }, [mode]);
 
   const capabilities = useMemo(
     () => capabilitiesFromMemberships(user?.memberships, FEATURE_SCORING),

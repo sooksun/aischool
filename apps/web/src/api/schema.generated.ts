@@ -99,6 +99,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/web/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Start a browser sign-in through Keycloak (CCR-018, ADR-0014 §4)
+         * @description Redirects to the realm's authorization endpoint (code flow + PKCE) and sets a short-lived, signed `__Host-seip-oidc` cookie carrying state, nonce and verifier. `acr=mfa` asks for the second factor — the step-up after an AUTH-006.
+         */
+        get: operations["webLogin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/web/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Finish a browser sign-in (CCR-018)
+         * @description Checks state against the `__Host-seip-oidc` cookie, exchanges the code (confidential client, PKCE), verifies the ID token's nonce and the access token, then starts a server-side session: `__Host-seip` (httpOnly, 30 min idle, 8 h maximum) and `__Host-seip-csrf` (readable by the page, echoed as X-CSRF-Token). Any failure redirects to `/login?error=sso` rather than showing a JSON error in the browser.
+         */
+        get: operations["webCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/web/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End the browser session (CCR-018)
+         * @description Revokes the server-side session, ends the Keycloak session behind it and clears both cookies. Idempotent: 204 even without a live session.
+         */
+        post: operations["webLogout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -2511,7 +2571,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description PERM-* — role or tenancy denial · AUTH-006 when the operation needs step-up authentication (acr ≥ 2) */
+        /** @description PERM-* — role or tenancy denial · AUTH-006 when the operation needs step-up authentication (acr ≥ 2) · AUTH-007 when a cookie-session write lacks a matching X-CSRF-Token */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
@@ -2585,6 +2645,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Double-submit token for a cookie session (CCR-018); the value of the `__Host-seip-csrf` cookie. */
+        CsrfToken: string;
         FrameworkId: string;
         CycleId: string;
         RoundId: string;
@@ -2720,6 +2782,81 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    webLogin: {
+        parameters: {
+            query?: {
+                /** @description Same-site path to land on afterwards. Must start with a single `/`; anything else falls back to `/`. */
+                return_to?: string;
+                acr?: "pwd" | "mfa";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To the Keycloak authorization endpoint */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description SYS-003 — web sign-in is not configured on this deployment (no Keycloak realm) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    webCallback: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To `return_to` on success, `/login?error=sso` otherwise */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webLogout: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Double-submit token for a cookie session (CCR-018); the value of the `__Host-seip-csrf` cookie. */
+                "X-CSRF-Token"?: components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signed out */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
         };
     };
     getCurrentUser: {

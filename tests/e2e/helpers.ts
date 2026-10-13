@@ -16,6 +16,8 @@ export type E2eCreds = {
   roundId: string | null;
   assignmentId: string | null;
   readyReportId: string | null;
+  /** CCR-018: the teacher's Keycloak login, or null when web sign-in is off. */
+  sso: { email: string; password: string; otpSecret: string } | null;
 };
 
 export function loadE2eCreds(): E2eCreds {

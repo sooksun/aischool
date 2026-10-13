@@ -85,6 +85,29 @@ export const mfaToken = (user) => browserToken(user, 'mfa');
  * is supplied, so it can never stand in for a step-up.)
  */
 async function browserToken(user, acr) {
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  const location = await signIn(`${KEYCLOAK_ISSUER}/protocol/openid-connect/auth?${form({
+    client_id: CLIENT_ID, response_type: 'code', scope: 'openid', redirect_uri: REDIRECT,
+    code_challenge: challenge, code_challenge_method: 'S256', acr_values: acr, state: randomUUID(),
+  })}`, user);
+  const code = new URL(location).searchParams.get('code');
+  const tokenRes = await fetch(`${KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
+    method: 'POST',
+    body: form({ grant_type: 'authorization_code', code, redirect_uri: REDIRECT, client_id: CLIENT_ID, client_secret: CLIENT_SECRET, code_verifier: verifier }),
+  });
+  if (!tokenRes.ok) throw new Error(`keycloak code exchange ${tokenRes.status}: ${await tokenRes.text()}`);
+  return (await tokenRes.json()).access_token;
+}
+
+/**
+ * Given an authorization URL (any client — the API's webLogin redirect, say),
+ * fill the login form, then the OTP form if the requested level asks for it, and
+ * return the redirect Keycloak sends back to the client: its redirect_uri with
+ * `code` and `state`. A fresh cookie jar each time, so nothing is reused from an
+ * earlier SSO session.
+ */
+export async function signIn(authorizationUrl, user) {
   const jar = new Map();
   const keep = (res) => {
     for (const c of res.headers.getSetCookie()) {
@@ -108,26 +131,30 @@ async function browserToken(user, acr) {
     return res;
   };
 
-  const verifier = randomBytes(32).toString('base64url');
-  const challenge = createHash('sha256').update(verifier).digest('base64url');
-  const auth = await fetch(`${KEYCLOAK_ISSUER}/protocol/openid-connect/auth?${form({
-    client_id: CLIENT_ID, response_type: 'code', scope: 'openid', redirect_uri: REDIRECT,
-    code_challenge: challenge, code_challenge_method: 'S256', acr_values: acr, state: randomUUID(),
-  })}`, { redirect: 'manual' });
+  const auth = await fetch(authorizationUrl, { redirect: 'manual' });
   keep(auth);
   let res = await post(actionOf(await auth.text()), { username: user.email, password: user.password });
   if (res.status === 200) res = await post(actionOf(await res.text()), { otp: totp(user.otpSecret) });
   const location = res.headers.get('location');
-  if (res.status !== 302 || !location?.startsWith(REDIRECT)) {
+  if (res.status !== 302 || !location) {
     throw new Error(`keycloak: login did not redirect back (${res.status}): ${(await res.text()).slice(0, 200)}`);
   }
-  const code = new URL(location).searchParams.get('code');
-  const tokenRes = await fetch(`${KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
-    method: 'POST',
-    body: form({ grant_type: 'authorization_code', code, redirect_uri: REDIRECT, client_id: CLIENT_ID, client_secret: CLIENT_SECRET, code_verifier: verifier }),
-  });
-  if (!tokenRes.ok) throw new Error(`keycloak code exchange ${tokenRes.status}: ${await tokenRes.text()}`);
-  return (await tokenRes.json()).access_token;
+  return location;
+}
+
+/** Deletes every realm user linked to `seipUid` — for fixtures recreated each run. */
+export async function deleteUsersLinkedTo(seipUid) {
+  const adm = await adminToken();
+  const res = await fetch(`${BASE}/admin/realms/${REALM}/users?${form({ q: `seip_uid:${seipUid}` })}`, { headers: { authorization: `Bearer ${adm}` } });
+  if (!res.ok) throw new Error(`keycloak user search ${res.status}`);
+  for (const u of await res.json()) await deleteUser(u);
+}
+
+/** Ends every Keycloak session of the user (an admin's "sign out everywhere"). */
+export async function logoutEverywhere(user) {
+  const adm = await adminToken();
+  const res = await fetch(`${BASE}/admin/realms/${REALM}/users/${user.id}/logout`, { method: 'POST', headers: { authorization: `Bearer ${adm}` } });
+  if (!res.ok) throw new Error(`keycloak logout ${res.status}`);
 }
 
 export const claimsOf = (token) => JSON.parse(Buffer.from(token.split('.')[1], 'base64url'));

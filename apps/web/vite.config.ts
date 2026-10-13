@@ -8,11 +8,16 @@ export default defineConfig(({ mode }) => {
   // never disagree about whether the v2 screens exist. Baked in at build time.
   const rootEnv = loadEnv(mode, '../..', '');
   const featureScoring = (rootEnv.FEATURE_SCORING ?? 'false') === 'true';
+  // CCR-018: web sign-in through Keycloak. The API serves it when it knows the
+  // realm and the origin the browser sees; the SPA offers the button on the same
+  // condition (the client secret stays server-side and is not read here).
+  const webSso = Boolean(rootEnv.KEYCLOAK_ISSUER && rootEnv.WEB_PUBLIC_ORIGIN);
 
   return {
     plugins: [react()],
     define: {
       'import.meta.env.VITE_FEATURE_SCORING': JSON.stringify(featureScoring),
+      'import.meta.env.VITE_WEB_SSO': JSON.stringify(webSso),
     },
     server: {
       port: 5173,
