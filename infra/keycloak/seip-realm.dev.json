@@ -85,8 +85,30 @@
             "access.token.claim": "true",
             "id.token.claim": "true"
           }
+        },
+        {
+          "name": "auth_time",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "config": {
+            "user.session.note": "AUTH_TIME",
+            "claim.name": "auth_time",
+            "jsonType.label": "long",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
         }
       ]
+    },
+    {
+      "name": "offline_access",
+      "description": "Offline session per device (ADR-0014 §5): a refresh token that outlives the SSO session, revocable per device.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
     }
   ],
   "clients": [
@@ -106,6 +128,9 @@
       },
       "defaultClientScopes": [
         "seip-api"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
       ]
     },
     {

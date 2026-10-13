@@ -23,10 +23,27 @@ export const ACR_LEVELS: Readonly<Record<string, number>> = { pwd: 1, mfa: 2 };
 /** The level of the API's own HS256 tokens: password only. */
 export const OWN_TOKEN_ACR = 1;
 
+/**
+ * How long a second factor counts (ADR-0014 step-up). Keycloak carries `acr`
+ * unchanged through every refresh — measured: an offline (mobile) session that
+ * did OTP once would otherwise hold acr 2 for 30 days, and a web session for its
+ * 8 hours. Past this age, measured from the sign-in itself (`auth_time`, which a
+ * refresh does not move), a level-2 sign-in counts as level 1 and the next
+ * step-up operation asks for the OTP again.
+ */
+export const STEP_UP_MAX_AGE_S = 15 * 60;
+
+/** The level an authentication still counts for at `nowMs`. */
+export function effectiveAcr(level: number, authTimeS: number | null, nowMs = Date.now()): number {
+  if (level < 2) return level;
+  if (authTimeS === null || nowMs / 1000 - authTimeS > STEP_UP_MAX_AGE_S) return 1;
+  return level;
+}
+
 export interface OidcClaims {
   /** UserAccount.id, from the `seip_uid` claim. */
   userId: string;
-  /** Level of authentication (ACR_LEVELS). */
+  /** Level of authentication (ACR_LEVELS), after effectiveAcr. */
   acr: number;
   /** Keycloak session id, for device-session revocation (P2). */
   sessionId: string | null;
@@ -68,7 +85,9 @@ export function createOidcVerifier(opts: OidcVerifierOptions): (token: string) =
     const userId = payload.seip_uid;
     // A Keycloak user not linked to a SEIP account is authenticated but is nobody here.
     if (typeof userId !== 'string' || !UUID.test(userId)) throw new AccessTokenInvalidError('token has no seip_uid');
-    const acr = typeof payload.acr === 'string' ? ACR_LEVELS[payload.acr] ?? 0 : 0;
+    const level = typeof payload.acr === 'string' ? ACR_LEVELS[payload.acr] ?? 0 : 0;
+    const authTime = typeof payload.auth_time === 'number' ? payload.auth_time : null;
+    const acr = effectiveAcr(level, authTime);
     const sessionId = typeof payload.sid === 'string' ? payload.sid : null;
     return { userId, acr, sessionId };
   };

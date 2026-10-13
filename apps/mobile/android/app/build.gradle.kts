@@ -27,6 +27,9 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // flutter_appauth: the browser hands the authorization code back to this
+        // scheme (ADR-0014 §5; Keycloak client seip-mobile's redirect URI).
+        manifestPlaceholders["appAuthRedirectScheme"] = "th.go.seip.app"
     }
 
     buildTypes {

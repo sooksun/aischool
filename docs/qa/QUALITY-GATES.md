@@ -162,6 +162,20 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-006, Flutter SEIP ID + step-up expiry)
+
+Flutter 3.47.7 reinstalled in the container.
+
+| Command | Result |
+|---|---|
+| Dart client: generate · `dart analyze --fatal-infos` · `dart test` | pass |
+| `apps/mobile`: `flutter analyze --fatal-infos` · `flutter test` | no issues · 9 pass, 1 live test skipped (+7 seip_id_test) |
+| `typecheck` · `lint` · `format:check` · `test:unit` · `gate:contracts` · `gate:ownership` · `gate:dep-audit` | pass (auth unit tests +1 for step-up expiry) |
+| api · security · `test:backend` · database · worker | 108 · 9 · 27 · 23 · 23. All pass (+2 mobile offline session / acr through refresh, +1 web step-up expiry) |
+| `test:e2e` | 14/14 |
+
+**Not run:** the app on an Android emulator or iOS simulator. No emulator is available here.
+
 ## Verified runs (2026-10-13, local — SEIP-P1-005, Keycloak provisioning)
 
 | Command | Result |

@@ -6,7 +6,7 @@ import fp from 'fastify-plugin';
 import type { FastifyPluginAsync, FastifyInstance, FastifyRequest } from 'fastify';
 import {
   verifyAccessToken, AccessTokenExpiredError, resolveTenancy, hasSchoolRole, hasAreaReadAccess,
-  isExternalToken, OWN_TOKEN_ACR,
+  isExternalToken, OWN_TOKEN_ACR, effectiveAcr,
   type TenancyContext,
 } from '@seip/auth';
 import {
@@ -101,7 +101,8 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = fp(async (app: 
       }
     }
     await touchWebSession(session);
-    return { userId: session.userId, acr: session.acr };
+    // The session's sign-in is its auth time; a step-up does not last its 8 h.
+    return { userId: session.userId, acr: effectiveAcr(session.acr, session.createdAt.getTime() / 1000) };
   }
 
   app.addHook('preHandler', async (request: FastifyRequest) => {

@@ -21,6 +21,7 @@ import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.
 import { bearer, postEvidence, postMapping, actOnMapping } from '../../../tests/helpers/api-evidence.mjs';
 import {
   KEYCLOAK_ISSUER, createUser, deleteUser, passwordToken, mfaToken, claimsOf,
+  mobileSignIn, mobileRefresh, logoutEverywhere, revokeOfflineSessions,
 } from '../../../tests/helpers/keycloak.mjs';
 
 const skip = !KEYCLOAK_ISSUER && !process.env.CI ? 'KEYCLOAK_ISSUER not set (docker compose up -d keycloak)' : false;
@@ -217,4 +218,35 @@ test('identity: unknown account, unlinked user, and a realm the API does not tru
   const untrusted = await me(noKeycloak, people.teacher.pwd);
   assert.equal(untrusted.statusCode, 401);
   assert.equal(untrusted.json().code, 'AUTH-001', 'without KEYCLOAK_ISSUER an RS256 token is just invalid');
+});
+
+test('mobile (ADR-0014 §5): a PKCE offline session works with the API, and revoking it ends it', { skip }, async () => {
+  const me = (token) => enforced.inject({ method: 'GET', url: '/api/v1/auth/me', headers: bearer(token) });
+  const first = await mobileSignIn(people.teacher.kc);
+  assert.equal(claimsOf(first.refresh_token).typ, 'Offline', 'a per-device offline session');
+  assert.equal((await me(first.access_token)).statusCode, 200);
+
+  const renewed = await mobileRefresh(first.refresh_token);
+  assert.ok(renewed, 'the app renews its 60 s access token');
+  assert.equal((await me(renewed.access_token)).statusCode, 200);
+
+  // Measured: Keycloak's "sign out everywhere" does NOT end an offline session —
+  // the phone keeps renewing. Device revocation (P2 revokeDeviceSession) must
+  // delete the offline session itself; then the next renewal (at most 60 s
+  // away, the access token's lifetime) is refused.
+  await logoutEverywhere(people.teacher.kc);
+  const stillAlive = await mobileRefresh(renewed.refresh_token);
+  assert.ok(stillAlive, 'logout-everywhere leaves the offline session alive');
+  assert.ok(await revokeOfflineSessions(people.teacher.kc) >= 1);
+  assert.equal(await mobileRefresh(stillAlive.refresh_token), null);
+});
+
+test('a second factor stops counting STEP_UP_MAX_AGE_S after sign-in, even though refresh keeps acr "mfa"', { skip }, async () => {
+  const session = await mobileSignIn(people.director.kc, 'mfa');
+  const refreshed = await mobileRefresh(session.refresh_token);
+  const claims = claimsOf(refreshed.access_token);
+  assert.equal(claims.acr, 'mfa', 'Keycloak carries acr through a refresh (why the API must not trust it forever)');
+  assert.equal(claims.auth_time, claimsOf(session.access_token).auth_time, 'auth_time stays the sign-in time');
+  // The aging itself is unit-tested (packages/auth oidc.test.ts) and covered for
+  // web sessions in web-session.test.mjs; a 15-minute wait has no place here.
 });

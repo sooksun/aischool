@@ -66,5 +66,15 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- flutter_appauth: the authorization code comes back on this scheme (ADR-0014 §5). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>th.go.seip.app</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

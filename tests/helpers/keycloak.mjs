@@ -133,7 +133,18 @@ export async function signIn(authorizationUrl, user) {
   const auth = await fetch(authorizationUrl, { redirect: 'manual' });
   keep(auth);
   let res = await post(actionOf(await auth.text()), { username: user.email, password: user.password });
-  if (res.status === 200) res = await post(actionOf(await res.text()), { otp: totp(user.otpSecret) });
+  if (res.status === 200) {
+    const otpPage = await res.text();
+    res = await post(actionOf(otpPage), { otp: totp(user.otpSecret) });
+    // Keycloak refuses a code already used in this 30 s window (replay
+    // protection) — as when the same user stepped up a moment ago. Wait for the
+    // next window and try once more.
+    if (res.status === 200) {
+      const retryPage = await res.text();
+      await new Promise((r) => setTimeout(r, 30_000 - (Date.now() % 30_000) + 500));
+      res = await post(actionOf(retryPage), { otp: totp(user.otpSecret) });
+    }
+  }
   const location = res.headers.get('location');
   if (res.status !== 302 || !location) {
     throw new Error(`keycloak: login did not redirect back (${res.status}): ${(await res.text()).slice(0, 200)}`);
@@ -155,6 +166,52 @@ export async function deleteUsersLinkedTo(seipUid) {
   const res = await fetch(`${BASE}/admin/realms/${REALM}/users?${form({ q: `seip_uid:${seipUid}` })}`, { headers: { authorization: `Bearer ${adm}` } });
   if (!res.ok) throw new Error(`keycloak user search ${res.status}`);
   for (const u of await res.json()) await deleteUser(u);
+}
+
+/**
+ * What the Flutter app does (ADR-0014 §5): public client seip-mobile, PKCE,
+ * scope offline_access. Returns the token response (refresh token is Offline).
+ */
+export async function mobileSignIn(user, acr = 'pwd') {
+  const redirect = 'th.go.seip.app:/oauth2redirect';
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  const location = await signIn(`${KEYCLOAK_ISSUER}/protocol/openid-connect/auth?${form({
+    client_id: 'seip-mobile', response_type: 'code', scope: 'openid offline_access', redirect_uri: redirect,
+    code_challenge: challenge, code_challenge_method: 'S256', acr_values: acr, state: randomUUID(),
+  })}`, user);
+  const code = new URL(location.replace(/^th\.go\.seip\.app:/, 'https://app.invalid')).searchParams.get('code');
+  const res = await fetch(`${KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
+    method: 'POST', body: form({ grant_type: 'authorization_code', code, redirect_uri: redirect, client_id: 'seip-mobile', code_verifier: verifier }),
+  });
+  if (!res.ok) throw new Error(`keycloak mobile code exchange ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+/** The app's refresh call. Null when Keycloak refuses (session gone). */
+export async function mobileRefresh(refreshToken) {
+  const res = await fetch(`${KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
+    method: 'POST', body: form({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: 'seip-mobile' }),
+  });
+  return res.ok ? res.json() : null;
+}
+
+/**
+ * Revokes the user's offline (device) sessions for seip-mobile — what the P2
+ * revokeDeviceSession must do. Measured 2026-10-13: logoutEverywhere() (the
+ * admin "sign out" endpoint) leaves offline sessions alive; a phone keeps
+ * refreshing after it.
+ */
+export async function revokeOfflineSessions(user) {
+  const adm = await adminToken();
+  const h = { authorization: `Bearer ${adm}` };
+  const [client] = await (await fetch(`${BASE}/admin/realms/${REALM}/clients?${form({ clientId: 'seip-mobile' })}`, { headers: h })).json();
+  const sessions = await (await fetch(`${BASE}/admin/realms/${REALM}/users/${user.id}/offline-sessions/${client.id}`, { headers: h })).json();
+  for (const s of sessions) {
+    const res = await fetch(`${BASE}/admin/realms/${REALM}/sessions/${s.id}?isOffline=true`, { method: 'DELETE', headers: h });
+    if (!res.ok) throw new Error(`keycloak delete offline session ${res.status}`);
+  }
+  return sessions.length;
 }
 
 /** Ends every Keycloak session of the user (an admin's "sign out everywhere"). */

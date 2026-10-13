@@ -18,6 +18,36 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _busy = false;
   String? _error;
 
+  @override
+  void initState() {
+    super.initState();
+    // A device that signed in with SEIP ID before goes straight in, unless its
+    // session was revoked or expired meanwhile.
+    _run(widget.session.restore, quietWhenNone: true);
+  }
+
+  void _open(CurrentUser me) {
+    Navigator.of(context).pushReplacement(MaterialPageRoute(
+      builder: (_) => HomeScreen(session: widget.session, me: me),
+    ));
+  }
+
+  Future<void> _run(Future<CurrentUser?> Function() attempt, {bool quietWhenNone = false}) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final me = await attempt();
+      if (!mounted) return;
+      if (me != null) _open(me);
+    } catch (_) {
+      if (!quietWhenNone) setState(() => _error = 'เข้าสู่ระบบด้วย SEIP ID ไม่สำเร็จ กรุณาลองใหม่');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _submit() async {
     setState(() {
       _busy = true;
@@ -26,9 +56,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final me = await widget.session.signIn(_email.text.trim(), _password.text);
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) => HomeScreen(session: widget.session, me: me),
-      ));
+      _open(me);
     } on DioException catch (e) {
       // The API answers AUTH-001 for unknown user and wrong password alike
       // (SEC-AUTH-5) — the app must not try to tell them apart either.
@@ -52,6 +80,15 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.session.oidc != null) ...[
+              FilledButton(
+                key: const Key('seipId'),
+                onPressed: _busy ? null : () => _run(widget.session.signInWithSeipId),
+                child: const Text('เข้าสู่ระบบด้วย SEIP ID'),
+              ),
+              const SizedBox(height: 8),
+              const Text('หรือใช้อีเมลและรหัสผ่านเดิม'),
+            ],
             TextField(
               key: const Key('email'),
               controller: _email,
@@ -87,7 +124,18 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('หลักฐานของฉัน')),
+      appBar: AppBar(title: const Text('หลักฐานของฉัน'), actions: [
+        IconButton(
+          key: const Key('signOut'),
+          tooltip: 'ออกจากระบบ',
+          icon: const Icon(Icons.logout),
+          onPressed: () async {
+            await session.signOut();
+            if (!context.mounted) return;
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => LoginScreen(session: session)));
+          },
+        ),
+      ]),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

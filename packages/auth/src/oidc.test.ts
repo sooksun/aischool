@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from 'jose';
-import { createOidcVerifier, isExternalToken } from './oidc.ts';
+import { createOidcVerifier, effectiveAcr, isExternalToken, STEP_UP_MAX_AGE_S } from './oidc.ts';
 import { signAccessToken, AccessTokenExpiredError, AccessTokenInvalidError } from './jwt.ts';
 
 const ISSUER = 'http://kc.test/realms/seip';
@@ -12,7 +12,7 @@ const jwk = { ...(await exportJWK(publicKey)), kid: 'k1', alg: 'RS256' };
 const verify = createOidcVerifier({ issuer: ISSUER, audience: 'seip-api', jwks: createLocalJWKSet({ keys: [jwk] }) });
 
 function kcToken(claims: Record<string, unknown>, { exp = '60s', iss = ISSUER, aud = 'seip-api', key = privateKey } = {}) {
-  return new SignJWT({ seip_uid: UID, acr: 'pwd', sid: 's1', ...claims })
+  return new SignJWT({ seip_uid: UID, acr: 'pwd', sid: 's1', auth_time: Math.floor(Date.now() / 1000), ...claims })
     .setProtectedHeader({ alg: 'RS256', kid: 'k1' })
     .setIssuer(iss).setAudience(aud).setSubject('kc-sub').setIssuedAt().setExpirationTime(exp)
     .sign(key);
@@ -53,4 +53,14 @@ test('routing: HS256 is ours; an HS256 token never reaches the OIDC verifier', a
   assert.equal(isExternalToken('garbage'), false);
   // Even if it were handed over, the verifier only accepts asymmetric algorithms.
   await assert.rejects(() => verify(own), AccessTokenInvalidError);
+});
+
+test('a second factor counts for STEP_UP_MAX_AGE_S after the sign-in, then as a password', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  assert.equal((await verify(await kcToken({ acr: 'mfa', auth_time: now - 60 }))).acr, 2);
+  assert.equal((await verify(await kcToken({ acr: 'mfa', auth_time: now - STEP_UP_MAX_AGE_S - 5 }))).acr, 1,
+    'a refreshed token keeps acr mfa and the old auth_time — it must not keep the step-up');
+  assert.equal((await verify(await kcToken({ acr: 'mfa', auth_time: undefined }))).acr, 1, 'no auth_time, no step-up');
+  assert.equal(effectiveAcr(1, null), 1);
+  assert.equal(effectiveAcr(0, null), 0);
 });

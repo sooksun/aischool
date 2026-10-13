@@ -1292,3 +1292,41 @@ tasks:
       - "CI green on the pushed commit"                                                            # OPEN
       - "staging compose runs Keycloak with a real (non-dev) realm and secrets"                    # OPEN — with staging in Bangkok
       - "accounts that never log in again get a reset-link path (needs email delivery)"            # OPEN
+
+  - id: SEIP-P1-006
+    title: "P1 — identity slice 4: Flutter SEIP ID sign-in (PKCE, offline session per device) + step-up expiry (ADR-0014 §5)"
+    status: review              # 2026-10-13 — local gates + flutter analyze/test green; CI pending
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-003, SEIP-P1-005]
+    decisions: [ADR-0014]
+    primary_paths:
+      - apps/mobile/lib/src/auth.dart
+      - apps/mobile/lib/src/api.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/seip_id_test.dart
+      - apps/mobile/android/app/build.gradle.kts
+      - apps/mobile/ios/Runner/Info.plist
+      - infra/keycloak/seip-realm.dev.json
+      - packages/auth/src/oidc.ts
+      - apps/api/src/plugins/auth.ts
+    notes: >
+      App: flutter_appauth (system browser, PKCE, seip-mobile public client,
+      scope offline_access, redirect th.go.seip.app:/oauth2redirect) and
+      flutter_secure_storage for the refresh token only; access tokens (60 s)
+      in memory. 401 → one shared renewal, replay; renewal refused → signed out
+      and the stored session dropped; restart restores from the keystore without
+      a browser round trip; stepUp() = authorize(acr: mfa); sign-out ends the
+      Keycloak session. Email/password login stays until the end of P1. Realm:
+      offline_access client scope; auth_time claim. API: a second factor counts
+      for 15 min from auth_time (bearer) or from session sign-in (web) —
+      measured that Keycloak keeps acr "mfa" through every refresh. Also
+      measured: Keycloak's admin sign-out does not end offline sessions, so P2
+      revokeDeviceSession must delete the device's offline session (ADR-0014
+      implementation notes). Test helper now waits out Keycloak's TOTP replay
+      window instead of flaking.
+    acceptance_criteria:
+      - "flutter analyze --fatal-infos; flutter test (SEIP ID sign-in, renewal, shared renewal, revoked device, restore, step-up, sign-out)"   # DONE (9 tests)
+      - "API accepts a seip-mobile PKCE offline token and its renewal; deleting the offline session stops renewal"                          # DONE — step-up.test
+      - "a second factor older than 15 min counts as acr 1 (bearer + web session)"                                                          # DONE — oidc.test + web-session.test
+      - "CI green on the pushed commit"                                                                                                       # OPEN
+      - "run on an Android emulator / iOS simulator against the dev realm"                                                                   # OPEN — no emulator in this environment

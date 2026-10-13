@@ -203,6 +203,34 @@ test('step-up: a password session gets AUTH-006; signing in again with the secon
   assert.equal(high.json().status, 'validated');
 });
 
+test('a second factor counts for 15 minutes of a session, not its 8 hours', { skip }, async () => {
+  const t = (await browserSignIn(teacher)).jar;
+  const csrf = { 'x-csrf-token': t['__Host-seip-csrf'] };
+  const evidence = await app.inject({
+    method: 'POST', url: '/api/v1/evidence', headers: withSession(t, { ...csrf, 'idempotency-key': randomUUID() }),
+    payload: { category_id: categoryId, title: 'aged step-up', kind: 'file', contains_learners: 'unknown', client_uuid: randomUUID() },
+  });
+  const mapping = await app.inject({
+    method: 'POST', url: `/api/v1/evidence/${evidence.json().id}/mappings`,
+    headers: withSession(t, { ...csrf, 'idempotency-key': randomUUID() }), payload: { indicator_id: indicatorId },
+  });
+  // The earlier step-up test validated this indicator's mapping on another item;
+  // this one is fresh, so only the session's age decides.
+  assert.equal(mapping.statusCode, 201, mapping.body);
+  const m = mapping.json();
+
+  const { jar } = await browserSignIn(director, { acr: 'mfa' });
+  const sixteenMinutesAgo = new Date(Date.now() - 16 * 60 * 1000);
+  await prisma.webSession.updateMany({
+    where: { userId: director.user.id, revokedAt: null }, data: { createdAt: sixteenMinutesAgo, lastSeenAt: sixteenMinutesAgo },
+  });
+  const res = await app.inject({
+    method: 'PATCH', url: `/api/v1/mappings/${m.id}`,
+    headers: withSession(jar, { 'x-csrf-token': jar['__Host-seip-csrf'], 'if-match': `"${m.version}"` }), payload: { action: 'validate' },
+  });
+  assert.equal(res.json().code, 'AUTH-006', 'the OTP is asked for again');
+});
+
 test('idle 30 min, 8 h maximum, and a Keycloak session ended elsewhere all end the web session', { skip }, async () => {
   const idle = (await browserSignIn(teacher)).jar;
   await prisma.webSession.updateMany({ where: { userId: teacher.user.id, revokedAt: null }, data: { lastSeenAt: new Date(Date.now() - 31 * 60 * 1000) } });
