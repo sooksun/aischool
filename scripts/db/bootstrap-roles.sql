@@ -3,6 +3,9 @@
 -- Everything after this runs WITHOUT superuser:
 --   seip_migrator  owns the schema; `prisma migrate deploy` connects as it
 --   seip_app       the API/worker role; DML only, owns nothing
+--   seip_scoped    NOLOGIN, read-only. seip_app switches to it with SET LOCAL ROLE
+--                  inside an area-scoped transaction, where the RLS backstop
+--                  hides rows outside the caller's สพท. (ADR-0019)
 -- Neither role is SUPERUSER or BYPASSRLS, so a migration that only works under a
 -- superuser fails in CI instead of on the first real deployment (the MySQL
 -- ERROR 1419 lesson, ADR-0012 Context).
@@ -17,6 +20,10 @@ SELECT 'CREATE ROLE seip_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBY
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'seip_migrator') \gexec
 SELECT 'CREATE ROLE seip_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS'
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'seip_app') \gexec
+SELECT 'CREATE ROLE seip_scoped NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS'
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'seip_scoped') \gexec
+-- SET only: seip_app may become seip_scoped but does not inherit anything from it.
+GRANT seip_scoped TO seip_app WITH INHERIT FALSE, SET TRUE;
 ALTER ROLE seip_migrator PASSWORD :'migrator_password';
 ALTER ROLE seip_app PASSWORD :'app_password';
 
@@ -25,6 +32,7 @@ ALTER DATABASE :"db" OWNER TO seip_migrator;
 ALTER SCHEMA public OWNER TO seip_migrator;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO seip_app;
+GRANT USAGE ON SCHEMA public TO seip_scoped;
 
 -- pgvector is not a trusted extension, so the administrator creates it here.
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -35,3 +43,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE seip_migrator IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO seip_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE seip_migrator IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO seip_app;
+-- seip_scoped reads only. A write inside a scoped transaction fails with
+-- "permission denied" rather than slipping past the backstop.
+ALTER DEFAULT PRIVILEGES FOR ROLE seip_migrator IN SCHEMA public
+  GRANT SELECT ON TABLES TO seip_scoped;

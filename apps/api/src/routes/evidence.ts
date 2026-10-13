@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
-  listEvidence, createEvidence, getEvidenceDetail, updateEvidence, softDeleteEvidence,
+  listEvidence, withAreaScope, resolveAreaScope, createEvidence, getEvidenceDetail, updateEvidence, softDeleteEvidence,
   getEvidenceCategoryById, writeAuditEvent, aggregateScanStatus, getSchoolAreaId,
   listEvaluateePersonIdsForCommitteeMember, getPersonnelInSchoolByPerson,
   openUploadSession, getUploadSession, claimUploadForCompletion, releaseUploadClaim,
@@ -179,14 +179,20 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
       scope.ownerPersonId = q.owner_person_id;
     }
 
-    const { items, total } = await listEvidence({
+    // The filter above is the authorization; withAreaScope is the RLS backstop
+    // behind it (ADR-0019) — a filter bug here still cannot list another สพท.
+    const areaScope = await resolveAreaScope({
+      userId: auth.userId, personId: auth.personId,
+      schoolIds: [...auth.tenancy.schoolRoles.keys()], areaIds: [...auth.tenancy.areaRoles.keys()],
+    });
+    const { items, total } = await withAreaScope(areaScope, (tx) => listEvidence({
       ...scope,
       categoryId: q.category_id,
       status: q.status,
       mappedToIndicatorId: q.mapped_to_indicator_id,
       page: q.page,
       pageSize: q.page_size,
-    });
+    }, tx));
     return { items: items.map(serializeEvidence), meta: { page: q.page, page_size: q.page_size, total } };
   });
 

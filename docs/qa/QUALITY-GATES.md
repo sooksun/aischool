@@ -162,6 +162,20 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-002, RLS backstop)
+
+Bootstrap re-run (adds `seip_scoped`), then `migrate deploy` of `20261013000200_rls_backstop`.
+
+| Command | Result |
+|---|---|
+| `build` · `typecheck` · `lint` · `format:check` · `test:unit` | pass (web 39 unit tests, +1 for the FEATURE_SCORING mask) |
+| `gate:contracts` · `gate:ownership` · `gate:dep-audit` · `gate:secret-scan` | pass |
+| `test:backend` · database · worker · api · security | 27 · 23 · 23 · 85 · 9 — all pass (+7 rls-backstop, +5 area-scope) |
+| `test:storage` · `test:e2e` | 4/4 · 13/13 |
+
+**Caveat:** the backstop covers only what runs inside `withAreaScope` (today `listEvidence`).
+A green run does not mean every read is area-fenced at the database (ADR-0019 Consequences).
+
 ## Verified runs (2026-10-12, local and CI — SEIP-P1-001, contract 4.0.0 applied)
 
 CI: run [38321728017](https://github.com/sooksun/aischool/actions/runs/38321728017) on `03f64b8` — all 15 jobs green.

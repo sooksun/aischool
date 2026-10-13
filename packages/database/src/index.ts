@@ -1,4 +1,5 @@
 export { prisma, createPrismaClient } from './client.js';
+export { withAreaScope, resolveAreaScope, type AreaScope } from './area-scope.js';
 export { writeAuditEvent, type AuditWrite } from './audit.js';
 export * from './repositories/identity.js';
 export * from './repositories/taxonomy.js';

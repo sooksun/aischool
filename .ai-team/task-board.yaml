@@ -1136,3 +1136,38 @@ tasks:
       - "CI green on the pushed commit"                                                               # DONE — run 38321728017 on 03f64b8, 15/15 jobs
       - "min_acr (acr ≥ 2 for validate / return / cross-person export) enforced"                     # OPEN — needs step-up auth (ADR-0014), P2
       - "web hides v2 screens when FEATURE_SCORING=false"                                            # DONE — vite.config reads the same FEATURE_SCORING; capabilities mask the v2 affordances
+
+  - id: SEIP-P1-002
+    title: "P1 — RLS backstop by สพท. (ADR-0012 §3): seip_scoped role + withAreaScope"
+    status: review              # 2026-10-13 — all local gates green; ADR-0019 proposed, awaiting owner
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0012, ADR-0015, ADR-0019]
+    primary_paths:
+      - scripts/db/bootstrap-roles.sql
+      - prisma/migrations/20261013000200_rls_backstop/
+      - packages/database/src/area-scope.ts
+      - apps/api/src/routes/evidence.ts
+      - tests/backend/rls-backstop.test.mjs
+      - packages/database/test/area-scope.integration.test.mjs
+    notes: >
+      NOLOGIN read-only role seip_scoped (seip_app may SET ROLE to it, inherits
+      nothing). Policies on evidence, evidence_file, evidence_indicator_mapping,
+      upload_session and personnel_profile apply only to that role: an owner in
+      scope, the controller area, or the origin school when the school has no
+      area. Scope = transaction-local seip.area_ids / school_ids / person_ids;
+      empty fails closed, malformed raises. withAreaScope opens the transaction;
+      resolveAreaScope derives the scope from active memberships plus committee
+      evaluatees. listEvidence now reads through it. The backstop is opt-in: an
+      unwrapped query is still guarded only by the API's authorization (ADR-0019
+      Consequences). Rejected alternative: per-checkout context via
+      AsyncLocalStorage — Prisma batches findUnique across requests.
+    acceptance_criteria:
+      - "raw SQL as the scoped role cannot read another สพท.'s evidence, files, mappings or profiles"  # DONE — tests/backend/rls-backstop.test.mjs
+      - "unset or empty scope sees nothing; malformed scope errors; writes refused"                     # DONE
+      - "an unfiltered ORM query inside withAreaScope returns only the caller's area"                    # DONE — area-scope.integration
+      - "a committee seat across the area boundary keeps the evaluatee's portfolio visible"             # DONE
+      - "test:backend 27, database 23, worker 23, api 85, security 9, storage 4, e2e 13; all gates"     # DONE (local)
+      - "CI green on the pushed commit"                                                                  # OPEN
+      - "owner accepts ADR-0019"                                                                         # OPEN
+      - "raw-SQL tenant reads (P3 vector search) go through withAreaScope"                               # OPEN — P3

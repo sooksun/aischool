@@ -31,7 +31,9 @@ export interface ListEvidenceFilter {
 
 const LIVE_MAPPING_STATUSES = ['owner_confirmed', 'validated', 'returned'] as const;
 
-export async function listEvidence(f: ListEvidenceFilter) {
+/** `db` is the client to read through — pass withAreaScope's `tx` so the RLS
+ * backstop applies (ADR-0019). Defaults to the unscoped client. */
+export async function listEvidence(f: ListEvidenceFilter, db: Prisma.TransactionClient = prisma) {
   if (!f.originSchoolId && !f.ownerPersonId && !f.ownerPersonIdIn) {
     throw new Error('listEvidence needs a scope filter (school, owner or committee) — refusing an unscoped query');
   }
@@ -46,7 +48,7 @@ export async function listEvidence(f: ListEvidenceFilter) {
       : {}),
   };
   const [items, total] = await Promise.all([
-    prisma.evidence.findMany({
+    db.evidence.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       skip: (f.page - 1) * f.pageSize,
@@ -54,7 +56,7 @@ export async function listEvidence(f: ListEvidenceFilter) {
       // scan_status aggregate for list badges (CCR-009) — status columns only
       include: { files: { select: { scanStatus: true, mediaState: true } } },
     }),
-    prisma.evidence.count({ where }),
+    db.evidence.count({ where }),
   ]);
   return { items, total };
 }
