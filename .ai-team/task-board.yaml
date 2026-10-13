@@ -1578,3 +1578,27 @@ tasks:
       - "owner moves item to another own school, same สพท. only"   # DONE
       - "audit for accept and move"                                # DONE
 
+  - id: SEIP-P1-016
+    title: "P1 — owner decisions OQ-31 / OQ-12: area admin acknowledges directors' agreements; the old school keeps only what it used (CCR-025)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-010, SEIP-P1-011]
+    decisions: [CCR-025]
+    primary_paths:
+      - docs/contracts/permissions.yaml
+      - docs/reviews/CCR-025-administrator-agreement-approver-and-retention.md
+      - apps/api/src/routes/agreements.ts
+      - apps/api/src/lib/evidence-access.ts
+      - packages/database/src/repositories/evidence.ts
+      - apps/api/test/agreement-approver.test.mjs
+      - apps/api/test/transfer.test.mjs
+    notes: >
+      Owner answers of 2026-10-13. OQ-31: area_admin acknowledges a school
+      administrator's agreement until a สพท. supervisor role exists (FR-096). OQ-12:
+      after a move, the origin school keeps only items mapped there. CCR-022 stays as
+      built.
+    acceptance_criteria:
+      - "director's agreement: school roles PERM-001, area admin acknowledges"  # DONE
+      - "teacher's agreement: area admin PERM-004"                             # DONE
+      - "old school keeps mapped items only after the move"                   # DONE
+

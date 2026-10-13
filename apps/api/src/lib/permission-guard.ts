@@ -7,7 +7,7 @@ import { ApiError, forbiddenRole } from '@seip/backend-shared';
 import type { AuthedRequest } from '../plugins/auth.js';
 import { getSchoolAreaId, listEvaluateePersonnelIdsForCommitteeMember } from '@seip/database';
 
-export type Grant = 'own' | 'own-revoke' | 'school' | 'area-r' | 'committee';
+export type Grant = 'own' | 'own-revoke' | 'school' | 'area-r' | 'area' | 'committee';
 
 /**
  * Resolves the grant this request holds for `operationId` against `schoolId` (the

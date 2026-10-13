@@ -8,8 +8,9 @@
 //      operation is `own` / `own-revoke` — from any school. A teacher who moved
 //      schools keeps their portfolio.
 //   2. a grant at the item's ORIGIN school (director / school_admin `school`,
-//      area_admin `area-r` via the school's ESA). An `own` grant at that school
-//      does NOT let a non-owner in.
+//      area_admin `area-r` via the school's ESA), while the school still keeps
+//      the item: the owner works there, or it is mapped there (OQ-12). An `own`
+//      grant at that school does NOT let a non-owner in.
 //   3. a `committee` grant, if the caller sits on a committee for the owner.
 //   4. reads only: a `school` / `area-r` grant at a school holding a live mapping
 //      of the item — after a transfer, the new school validates the teacher's
@@ -19,7 +20,7 @@
 // so the item's existence never leaks (permissions.yaml tenancy rule). PERM-001 is
 // reserved for "you can see this school, but your role may not do this".
 import { grantFor, ApiError, forbiddenRole } from '@seip/backend-shared';
-import { getSchoolAreaId, listEvaluateePersonIdsForCommitteeMember, listLiveMappingSchoolIds } from '@seip/database';
+import { getSchoolAreaId, listEvaluateePersonIdsForCommitteeMember, listLiveMappingSchoolIds, isRetainedBySchool } from '@seip/database';
 import type { AuthedRequest } from '../plugins/auth.js';
 import { resolveGrant, type Grant } from './permission-guard.js';
 
@@ -80,6 +81,14 @@ export async function authorizeEvidence(operationId: string, auth: AuthedRequest
   if (grant === 'committee') {
     if (await onCommitteeFor(operationId, auth, ev)) return 'committee';
     throw forbiddenRole();
+  }
+  // OQ-12: after the owner leaves, the origin school keeps only what its own
+  // evaluation used. Anything else is gone for it — RES-001, like a missing id.
+  if (ev.id && !(await isRetainedBySchool(ev.id, ev.originSchoolId))) {
+    if (await onCommitteeFor(operationId, auth, ev)) return 'committee';
+    const viaMapping = await mappingSchoolGrant(operationId, auth, ev);
+    if (viaMapping) return viaMapping;
+    throw new ApiError('RES-001', 'Evidence not found');
   }
   return grant;
 }

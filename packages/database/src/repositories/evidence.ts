@@ -16,7 +16,8 @@ import { enqueueOutboxEvent } from './outbox.js';
 import { enqueueWorkerJob } from './jobs.js';
 
 export interface ListEvidenceFilter {
-  /** school grant: everything that originated in this school. */
+  /** school grant: what originated in this school and the school still keeps
+   * (OQ-12, retainedBySchool). */
   originSchoolId?: string;
   /** own grant: the caller's portfolio, wherever it was created. */
   ownerPersonId?: string;
@@ -40,6 +41,7 @@ export async function listEvidence(f: ListEvidenceFilter, db: Prisma.Transaction
   const where: Prisma.EvidenceWhereInput = {
     deletedAt: null,
     originSchoolId: f.originSchoolId,
+    ...(f.originSchoolId ? retainedBySchool(f.originSchoolId) : {}),
     ownerPersonId: f.ownerPersonId ?? (f.ownerPersonIdIn ? { in: f.ownerPersonIdIn } : undefined),
     categoryId: f.categoryId,
     status: f.status,
@@ -59,6 +61,29 @@ export async function listEvidence(f: ListEvidenceFilter, db: Prisma.Transaction
     db.evidence.count({ where }),
   ]);
   return { items, total };
+}
+
+/**
+ * OQ-12 (owner decision 2026-10-13): a school keeps what originated there while
+ * the owner still works there; after they leave, only what was used in the
+ * school's own evaluation — an item with a live mapping at that school.
+ */
+export function retainedBySchool(schoolId: string, today = new Date()): Prisma.EvidenceWhereInput {
+  return {
+    OR: [
+      { owner: { account: { memberships: { some: {
+        schoolId, status: 'active', effectiveFrom: { lte: today }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: startOfDay(today) } }],
+      } } } } },
+      { mappings: { some: { schoolId, status: { in: [...LIVE_MAPPING_STATUSES] } } } },
+    ],
+  };
+}
+
+const startOfDay = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+
+/** True when the school still keeps this item (retainedBySchool). */
+export async function isRetainedBySchool(evidenceId: string, schoolId: string): Promise<boolean> {
+  return (await prisma.evidence.count({ where: { id: evidenceId, ...retainedBySchool(schoolId) } })) > 0;
 }
 
 /** Worst-of file scan states for list/detail badges. null = no uploaded files.

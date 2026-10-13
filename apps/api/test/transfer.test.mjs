@@ -15,7 +15,7 @@ import { bearer, postEvidence, postMapping, actOnMapping } from '../../../tests/
 
 const created = trackSchools();
 const prisma = createPrismaClient();
-let app, area, schoolA, schoolB, teacher, teacherToken, directorA, directorB, categoryId, indicatorId, oldEvidenceId, newEvidenceId;
+let app, area, schoolA, schoolB, teacher, teacherToken, directorA, directorB, categoryId, indicatorId, oldEvidenceId, newEvidenceId, usedAtAId;
 
 async function account(name) {
   const password = `tr-${randomUUID()}`;
@@ -55,6 +55,9 @@ before(async () => {
   teacherToken = await teacher.login();
   oldEvidenceId = (await postEvidence(app, teacherToken, { category_id: categoryId, title: 'ก่อนย้าย' })).json().id;
   assert.ok(oldEvidenceId);
+  // Used in school A's evaluation before the move: A keeps this one (OQ-12).
+  usedAtAId = (await postEvidence(app, teacherToken, { category_id: categoryId, title: 'ใช้ที่ A' })).json().id;
+  assert.equal((await postMapping(app, teacherToken, usedAtAId, indicatorId)).statusCode, 201);
 
   // The move: school A ends the membership, school B adds one.
   await prisma.schoolMembership.update({ where: { id: tA.id }, data: { status: 'ended', effectiveTo: new Date(Date.now() - 86_400_000) } });
@@ -108,4 +111,13 @@ test('a mapping confirmed after the move belongs to school B: its director opens
   const byB = await actOnMapping(app, directorB, m.json().id, m.json().version, 'validate');
   assert.equal(byB.statusCode, 200, byB.body);
   assert.equal(byB.json().status, 'validated');
+});
+
+test('OQ-12: after the move school A keeps only what its own evaluation used', async () => {
+  assert.equal((await get(directorA, `/evidence/${usedAtAId}`)).statusCode, 200, 'mapped at A: kept');
+  assert.equal((await get(directorA, `/evidence/${oldEvidenceId}`)).json().code, 'RES-001', 'never used at A: gone for A');
+  const listed = (await get(directorA, '/evidence')).json().items.map((i) => i.id);
+  assert.ok(listed.includes(usedAtAId));
+  assert.ok(!listed.includes(oldEvidenceId));
+  assert.equal((await get(teacherToken, `/evidence/${oldEvidenceId}`)).statusCode, 200, 'the owner still has it');
 });

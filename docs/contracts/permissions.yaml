@@ -41,7 +41,10 @@
 # version: 2.5.0 — CCR-023 (additive): updatePersonnel (school_admin, min_acr 2);
 #   confirmMyPersonnel / requestPersonnelCorrection, self-scoped.
 # version: 2.6.0 — CCR-024 (additive): acceptEvidence, owner only.
-version: 2.6.0
+# version: 2.7.0 — CCR-025 (POLICY CHANGE, decided by the owner 2026-10-13, OQ-31): area_admin
+#   acknowledges a school administrator's agreement (ว10), and only that; school roles
+#   acknowledge teachers' agreements only. acknowledgeAgreement joins area_admin_writes.
+version: 2.7.0
 status: locked
 locked_at: 2026-07-17
 
@@ -65,7 +68,7 @@ tenancy:
   # CCR-021 (FR-090): the only writes an area-scoped role makes. They act on the
   # school record itself, never on a school's data, and only inside the caller's
   # own area (another area's school is RES-001). Each needs step-up (min_acr).
-  area_admin_writes: [createSchool, updateSchool, appointSchoolAdmin]
+  area_admin_writes: [createSchool, updateSchool, appointSchoolAdmin, acknowledgeAgreement]   # the last only for administrators' agreements (CCR-025)
   ownership:
     evidence: Owner (personnel) or school_admin may mutate; others per matrix below.
     scores: Only the evaluator who owns the per-evaluator record may write it.
@@ -237,7 +240,7 @@ matrix:
   # someone else's commitments. A director filing their own agreement (they are
   # evaluatees under ว10 too) must be acknowledged by school_admin or another
   # director — enforced in the route, since the matrix cannot express "not myself".
-  acknowledgeAgreement:    { director: school, school_admin: school }
+  acknowledgeAgreement:    { director: school, school_admin: school, area_admin: area }   # CCR-025: administrators' agreements → area_admin only; teachers' → school roles only
 
   # scoring — committee of 3, per-evaluator records
   listAssignments:         { director: school, school_admin: school, evaluator: committee, teacher: own, deputy: own, area_admin: area-r }

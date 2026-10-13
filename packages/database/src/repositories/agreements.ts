@@ -29,6 +29,7 @@ const AGREEMENT_SELECT = {
   schoolId: true,
   cycleId: true,
   personnelId: true,
+  personnel: { select: { positionRole: true } },
   formVariant: true,
   status: true,
   submittedAt: true,

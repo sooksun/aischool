@@ -222,6 +222,16 @@ export const agreementRoutes: FastifyPluginAsync = async (app) => {
     const agreement = await getAgreement(schoolId, agreementId);
     if (!agreement) throw new ApiError('RES-001', 'Agreement not found');
 
+    // CCR-025 / FR-097 (OQ-31, owner decision 2026-10-13): a school administrator's
+    // agreement (ว10) is acknowledged above the school — by the area admin, for
+    // now, until a สพท. supervisor role exists. Nobody inside the school signs off
+    // their own head's commitments, and the area admin signs nothing else.
+    const administratorAgreement = agreement.personnel.positionRole === 'administrator';
+    if (administratorAgreement && grant !== 'area') {
+      throw new ApiError('PERM-001', "A school administrator's agreement is acknowledged by the area admin");
+    }
+    if (!administratorAgreement && grant === 'area') throw forbiddenAreaWrite();
+
     // A director is an evaluatee too under ว10, so the matrix alone cannot
     // express this — acknowledging is a signature on SOMEONE ELSE'S commitments,
     // and self-signing is not one. Enforced here because permissions.yaml has no
