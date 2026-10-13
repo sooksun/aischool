@@ -1397,7 +1397,7 @@ tasks:
 
   - id: SEIP-P1-009
     title: "P1 — FR-019 school context: pick a school when you work at several (CCR-020, contract 4.3.0)"
-    status: review              # 2026-10-13 — local gates green; CI pending
+    status: review              # 2026-10-13 — CI green (run 38348405185)
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P1-001]
     decisions: []
@@ -1420,4 +1420,4 @@ tasks:
       - "/auth/me: current memberships only, with school_name"            # DONE — school-context.test
       - "two schools: picker, remembered; one school: no picker"          # DONE — school-picker.spec + unit
       - "contract 4.3.0 additive (oasdiff clean)"                          # DONE
-      - "CI green on the pushed commit"                                    # OPEN
+      - "CI green on the pushed commit"                                    # DONE — run 38348405185 on f3e0024
