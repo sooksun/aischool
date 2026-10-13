@@ -1139,7 +1139,7 @@ tasks:
 
   - id: SEIP-P1-002
     title: "P1 — RLS backstop by สพท. (ADR-0012 §3): seip_scoped role + withAreaScope"
-    status: review              # 2026-10-13 — all local gates green; ADR-0019 proposed, awaiting owner
+    status: review              # 2026-10-13 — CI green (run 38325277042); ADR-0019 proposed, awaiting owner
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P1-001]
     decisions: [ADR-0012, ADR-0015, ADR-0019]
@@ -1168,6 +1168,6 @@ tasks:
       - "an unfiltered ORM query inside withAreaScope returns only the caller's area"                    # DONE — area-scope.integration
       - "a committee seat across the area boundary keeps the evaluatee's portfolio visible"             # DONE
       - "test:backend 27, database 23, worker 23, api 85, security 9, storage 4, e2e 13; all gates"     # DONE (local)
-      - "CI green on the pushed commit"                                                                  # OPEN
+      - "CI green on the pushed commit"                                                                  # DONE — run 38325277042 on 7a6a9d3
       - "owner accepts ADR-0019"                                                                         # OPEN
       - "raw-SQL tenant reads (P3 vector search) go through withAreaScope"                               # OPEN — P3

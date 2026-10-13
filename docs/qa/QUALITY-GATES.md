@@ -162,7 +162,9 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
-## Verified runs (2026-10-13, local — SEIP-P1-002, RLS backstop)
+## Verified runs (2026-10-13, local and CI — SEIP-P1-002, RLS backstop)
+
+CI: run [38325277042](https://github.com/sooksun/aischool/actions/runs/38325277042) on `7a6a9d3` — green.
 
 Bootstrap re-run (adds `seip_scoped`), then `migrate deploy` of `20261013000200_rls_backstop`.
 
