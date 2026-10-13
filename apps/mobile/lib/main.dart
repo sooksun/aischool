@@ -9,15 +9,18 @@ void main() => runApp(SeipApp(
     ));
 
 class SeipApp extends StatelessWidget {
-  const SeipApp({super.key, required this.session});
+  const SeipApp({super.key, required this.session, this.services});
   final SeipSession session;
+
+  /// Device capture and the offline outbox; tests pass fakes.
+  final AppServices? services;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'SEIP',
       theme: ThemeData(colorSchemeSeed: const Color(0xFF1B5E9A), useMaterial3: true),
-      home: LoginScreen(session: session),
+      home: LoginScreen(session: session, services: services),
     );
   }
 }

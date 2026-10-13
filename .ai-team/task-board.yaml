@@ -1677,3 +1677,26 @@ tasks:
       - "multi-file + drag and drop, progress and Thai status per file"   # DONE — batch-upload.spec
       - "one failure does not stop the rest; retry resumes"                # DONE — batchUpload.test
 
+  - id: SEIP-P2-004
+    title: "P2 — app capture: photo, video, gallery into the offline outbox, status in Thai (FR-001/003/004/017, first cut)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-002]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/capture.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/capture_flow_test.dart
+    notes: >
+      The home screen offers ถ่ายรูป, อัดวิดีโอ and เลือกจากคลัง (image_picker). The
+      file is copied into the app's private support directory, with the video length
+      read by video_player. The person picks a category (only those taking that file
+      type) and a title. The item joins the outbox and is listed as รอส่ง / กำลังส่ง /
+      กำลังตรวจ / ส่งไม่ผ่าน. The outbox drains on open, on pull-to-refresh and every
+      30 s while the screen is open. Not done: several photos in one item (FR-001),
+      document scan (FR-002), the recording timer and size warning (FR-003),
+      share-in (FR-004), background drain, encrypting bytes at rest, iOS
+      backup-exclusion flag, and a device run.
+    acceptance_criteria:
+      - "capture offline → queued with category/title/duration, shown as รอส่ง"   # DONE — capture_flow_test
+

@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **App capture, first cut (SEIP-P2-004, in review):** the app's home screen takes a photo or video, or picks one from the gallery, into the offline outbox. Each item shows its status in Thai (รอส่ง / กำลังส่ง / กำลังตรวจ). Not done yet: several photos in one item, document scan, share-in, background sending and a device run.
+>
 > **Web multi-file upload (SEIP-P2-003, in review):** "ส่งหลายไฟล์" takes several files at once, by drag and drop or by picking them. Each file becomes its own evidence item, with progress and a status per file. A failed file retries without duplicating.
 >
 > **Offline outbox engine (SEIP-P2-002, in review, no contract change):** in the app, evidence captured offline waits in an outbox that survives the app being closed. Bytes go up resumably, sending only the parts the server lacks, and an expired session is replaced. Twenty flaky replays make no duplicate. The local copy is deleted only after the server's re-hash and a clean scan. This was verified live with a 17 MiB file against the real API, SeaweedFS and worker. The capture screens and background running come next.
