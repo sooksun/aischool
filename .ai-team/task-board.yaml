@@ -1218,7 +1218,7 @@ tasks:
 
   - id: SEIP-P1-004
     title: "P1 — identity slice 2: web sign-in through Keycloak behind the BFF (CCR-018, ADR-0014 §4)"
-    status: review              # 2026-10-13 — local gates green; CI pending
+    status: review              # 2026-10-13 — CI green (run 38328163583), incl. dart client + mobile + e2e sso
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P1-003]
     decisions: [ADR-0014]
@@ -1256,5 +1256,5 @@ tasks:
       - "step-up: password session AUTH-006 → sign-in with OTP replaces the session → validate ok"    # DONE
       - "idle 30 min, 8 h max, Keycloak logout elsewhere each end the session"                        # DONE
       - "e2e: SEIP ID button → Keycloak → shell; reload keeps it; sign-out (CSRF) ends it"             # DONE — sso.spec
-      - "CI green on the pushed commit"                                                               # OPEN
+      - "CI green on the pushed commit"                                                               # DONE — run 38328163583 on d3beedb
       - "e2e for the step-up banner (needs an e2e stack with ENFORCE_MIN_ACR=true)"                   # OPEN

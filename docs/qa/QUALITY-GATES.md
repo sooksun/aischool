@@ -172,7 +172,9 @@ above remains the recommendation for release verification.
 | `test:e2e` | 14/14 (new: sso.spec — SEIP ID button → Keycloak → shell → reload → CSRF-checked sign-out) |
 
 **Not run locally:** the Dart client and `apps/mobile` gates (no Dart/Flutter SDK in this
-container after it was recycled). CI runs both against the 4.1.0 contract.
+container after it was recycled). CI ran both against the 4.1.0 contract: run
+[38328163583](https://github.com/sooksun/aischool/actions/runs/38328163583) on `d3beedb`,
+all jobs green, e2e sso.spec included.
 
 ## Verified runs (2026-10-13, local — SEIP-P1-003, Keycloak + step-up)
 
