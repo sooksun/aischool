@@ -27,10 +27,83 @@ export interface WebClient {
   verifyIdToken(idToken: string, nonce: string): Promise<boolean>;
 }
 
+export interface ProvisionInput {
+  userId: string;
+  email: string;
+  displayName: string;
+  /** The password the person just proved or chose — the only time the API has it. */
+  password: string;
+  /** Holds a role ADR-0014 §6 puts behind a second factor: enrol TOTP at first sign-in. */
+  needsSecondFactor: boolean;
+}
+
+/** created / exists → the account is linked; conflict → a Keycloak user with
+ * that email belongs to another seip_uid (left alone, for an admin to resolve). */
+export type ProvisionResult = 'created' | 'exists' | 'conflict';
+
+export interface Provisioner {
+  ensureAccount(input: ProvisionInput): Promise<ProvisionResult>;
+}
+
 export interface Keycloak {
   verifyAccessToken(token: string): Promise<OidcClaims>;
   /** Null unless KEYCLOAK_WEB_CLIENT_SECRET and WEB_PUBLIC_ORIGIN are set. */
   web: WebClient | null;
+  /** Null unless KEYCLOAK_ADMIN_CLIENT_SECRET is set. */
+  provisioner: Provisioner | null;
+}
+
+/**
+ * Creates the realm user for a SEIP account through the seip-provisioner
+ * service account (client credentials, manage-users in this realm only).
+ * Idempotent: an existing user with this seip_uid is left exactly as it is —
+ * a password or second factor changed in Keycloak is never overwritten.
+ */
+function createProvisioner(issuer: string, clientId: string, secret: string): Provisioner {
+  const admin = issuer.replace('/realms/', '/admin/realms/');
+  let cached: { token: string; until: number } | null = null;
+  const token = async () => {
+    if (cached && cached.until > Date.now()) return cached.token;
+    const res = await fetch(`${issuer}/protocol/openid-connect/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: secret }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`keycloak provisioner token ${res.status}`);
+    const j = (await res.json()) as { access_token: string; expires_in: number };
+    cached = { token: j.access_token, until: Date.now() + (j.expires_in - 15) * 1000 };
+    return j.access_token;
+  };
+  const call = async (path: string, init: RequestInit = {}) => fetch(`${admin}${path}`, {
+    ...init,
+    headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json', ...init.headers },
+    signal: AbortSignal.timeout(5000),
+  });
+
+  return {
+    async ensureAccount(input) {
+      const found = await call(`/users?${new URLSearchParams({ q: `seip_uid:${input.userId}`, exact: 'true', max: '2' })}`);
+      if (!found.ok) throw new Error(`keycloak user search ${found.status}`);
+      if (((await found.json()) as unknown[]).length > 0) return 'exists';
+
+      const created = await call('/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: input.email, email: input.email,
+          // SEIP proved the address: the invite token was delivered to it.
+          emailVerified: true, enabled: true,
+          firstName: input.displayName,
+          attributes: { seip_uid: [input.userId] },
+          credentials: [{ type: 'password', value: input.password, temporary: false }],
+          requiredActions: input.needsSecondFactor ? ['CONFIGURE_TOTP'] : [],
+        }),
+      });
+      if (created.status === 201) return 'created';
+      if (created.status === 409) return 'conflict';
+      throw new Error(`keycloak create user ${created.status}`);
+    },
+  };
 }
 
 export function createKeycloak(env: Env): Keycloak | null {
@@ -90,5 +163,8 @@ export function createKeycloak(env: Env): Keycloak | null {
       },
     };
   }
-  return { verifyAccessToken, web };
+  const provisioner = env.KEYCLOAK_ADMIN_CLIENT_SECRET
+    ? createProvisioner(issuer, env.KEYCLOAK_ADMIN_CLIENT_ID, env.KEYCLOAK_ADMIN_CLIENT_SECRET)
+    : null;
+  return { verifyAccessToken, web, provisioner };
 }

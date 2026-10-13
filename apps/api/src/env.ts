@@ -25,6 +25,10 @@ const EnvSchema = z.object({
   KEYCLOAK_WEB_CLIENT_ID: z.string().min(1).default('seip-web'),
   KEYCLOAK_WEB_CLIENT_SECRET: z.string().min(1).optional(),
   WEB_PUBLIC_ORIGIN: z.string().url().optional(),
+  /** ADR-0014 provisioning: the service-account client that creates the
+   * Keycloak user for a SEIP account at accept-invite / password login. */
+  KEYCLOAK_ADMIN_CLIENT_ID: z.string().min(1).default('seip-provisioner'),
+  KEYCLOAK_ADMIN_CLIENT_SECRET: z.string().min(1).optional(),
   /** permissions.yaml `min_acr` → 403 AUTH-006 below the level. Off until the
    * clients can step up through Keycloak; the API's own tokens are acr 1, so
    * turning this on without Keycloak locks out every step-up operation. */

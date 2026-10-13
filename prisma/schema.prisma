@@ -296,6 +296,10 @@ model UserAccount {
   /// an invite is 1:1 with the account it creates.
   inviteTokenHash String?   @unique @map("invite_token_hash")
   inviteExpiresAt DateTime? @map("invite_expires_at")
+  /// ADR-0014: when a Keycloak user carrying this account's id (`seip_uid`) was
+  /// confirmed to exist. Null = not yet provisioned; the API provisions on the
+  /// next accept-invite or password login, the two moments it holds the password.
+  kcLinkedAt      DateTime? @map("kc_linked_at")
 
   person            Person?                    @relation(fields: [personId], references: [id], onDelete: Restrict)
   memberships       SchoolMembership[]

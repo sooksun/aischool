@@ -10,10 +10,12 @@ import {
 import {
   findUserByEmailForLogin, getUserById, getMembershipsForUser, createRefreshToken,
   findActiveRefreshToken, rotateRefreshToken, revokeRefreshToken, revokeAllRefreshTokensForUser,
-  acceptInvite,
+  acceptInvite, markKeycloakLinked,
 } from '@seip/database';
-import { ApiError } from '@seip/backend-shared';
+import { ApiError, type Role } from '@seip/backend-shared';
+import type { FastifyBaseLogger } from 'fastify';
 import type { Env } from '../env.js';
+import type { Keycloak } from '../lib/keycloak.js';
 import { getLoginRateLimiter, getInviteRateLimiter } from '../lib/login-rate-limit.js';
 
 const LoginBody = z.object({
@@ -34,7 +36,40 @@ const AcceptInviteBody = z.object({
   password: z.string().min(MIN_PASSWORD_LENGTH).max(256),
 });
 
-export const authRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env }) => {
+/** ADR-0014 §6: roles whose sign-in needs a second factor — enrolled at first SEIP ID sign-in. */
+const SECOND_FACTOR_ROLES: ReadonlySet<Role> = new Set<Role>(['director', 'school_admin', 'evaluator', 'area_admin']);
+
+export const authRoutes: FastifyPluginAsync<{ env: Env; keycloak?: Keycloak | null }> = async (app, { env, keycloak = null }) => {
+  /**
+   * ADR-0014: make sure this account has its Keycloak user, so it can sign in
+   * with SEIP ID. Runs only at accept-invite and password login — the two moments
+   * the API holds the password, which therefore never has to be stored. Best
+   * effort: Keycloak being down must not stop a sign-in; the next password login
+   * tries again (kc_linked_at stays null until it works).
+   */
+  async function linkKeycloak(
+    user: { id: string; email: string; displayName: string; kcLinkedAt: Date | null },
+    password: string,
+    log: FastifyBaseLogger,
+  ): Promise<void> {
+    const provisioner = keycloak?.provisioner;
+    if (!provisioner || user.kcLinkedAt) return;
+    try {
+      const memberships = await getMembershipsForUser(user.id);
+      const needsSecondFactor = memberships.some((m) => m.status === 'active' && SECOND_FACTOR_ROLES.has(m.role));
+      const result = await provisioner.ensureAccount({
+        userId: user.id, email: user.email, displayName: user.displayName, password, needsSecondFactor,
+      });
+      if (result === 'conflict') {
+        log.warn({ userId: user.id }, 'keycloak: a user with this email is linked to another account; not provisioned');
+        return;
+      }
+      await markKeycloakLinked(user.id);
+    } catch (e) {
+      log.warn({ err: e, userId: user.id }, 'keycloak provisioning failed; retried at the next password login');
+    }
+  }
+
   app.post('/auth/login', { config: { operationId: 'login' } }, async (request, reply) => {
     const body = LoginBody.parse(request.body);
 
@@ -57,6 +92,7 @@ export const authRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env })
     if (!user || !ok || user.status !== 'active') {
       throw new ApiError('AUTH-001', 'Invalid email or password');
     }
+    await linkKeycloak(user, body.password, request.log);
 
     const accessToken = await signAccessToken(user.id, env.JWT_SECRET);
     const rawRefresh = generateRefreshToken();
@@ -128,6 +164,8 @@ export const authRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env })
     // One code for unknown / expired / already-accepted. Distinguishing them
     // would tell an attacker which invite tokens once existed (AUTH-005).
     if (!result.ok) throw new ApiError('AUTH-005', 'Invite token is not usable');
+    const accepted = await getUserById(result.userId);
+    if (accepted) await linkKeycloak(accepted, body.password, request.log);
 
     // Deliberately no token pair: the caller logs in normally, so the
     // invited -> active gate stays enforced in exactly one place (login).

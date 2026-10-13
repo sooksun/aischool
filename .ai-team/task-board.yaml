@@ -1258,3 +1258,37 @@ tasks:
       - "e2e: SEIP ID button → Keycloak → shell; reload keeps it; sign-out (CSRF) ends it"             # DONE — sso.spec
       - "CI green on the pushed commit"                                                               # DONE — run 38328163583 on d3beedb
       - "e2e for the step-up banner (needs an e2e stack with ENFORCE_MIN_ACR=true)"                   # OPEN
+
+  - id: SEIP-P1-005
+    title: "P1 — identity slice 3: provision SEIP accounts into Keycloak (ADR-0014)"
+    status: review              # 2026-10-13 — local gates green; CI pending
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-003]
+    decisions: [ADR-0014]
+    primary_paths:
+      - infra/keycloak/seip-realm.dev.json
+      - prisma/migrations/20261013000400_kc_link/
+      - apps/api/src/lib/keycloak.ts
+      - apps/api/src/routes/auth.ts
+      - apps/api/test/keycloak-provisioning.test.mjs
+    notes: >
+      Service-account client seip-provisioner (client credentials; realm-management
+      manage-users / view-users / query-users in the seip realm only). The API
+      creates the realm user (username = email, emailVerified, seip_uid, the
+      password) at accept-invite and at password login — the two moments it holds
+      the password, so it is never stored. Roles behind a second factor (director,
+      school_admin, evaluator, area_admin; ADR-0014 §6) get CONFIGURE_TOTP as a
+      required action. Idempotent by seip_uid; an existing realm user is never
+      modified. Best effort with 5 s timeouts: Keycloak down never blocks a
+      sign-in, and user_account.kc_linked_at stays null so the next password
+      login retries. An email held by another seip_uid is left alone and logged.
+      Contract unchanged (no new operation or field).
+    acceptance_criteria:
+      - "accept-invite creates the realm user; SEIP ID sign-in works with the chosen password"   # DONE
+      - "step-up roles must enrol TOTP at first SEIP ID sign-in"                                   # DONE
+      - "existing accounts provisioned at next password login, exactly once"                       # DONE
+      - "Keycloak refusing/unreachable never blocks login; retried later"                          # DONE
+      - "email conflict leaves the other realm user untouched"                                     # DONE
+      - "CI green on the pushed commit"                                                            # OPEN
+      - "staging compose runs Keycloak with a real (non-dev) realm and secrets"                    # OPEN — with staging in Bangkok
+      - "accounts that never log in again get a reset-link path (needs email delivery)"            # OPEN

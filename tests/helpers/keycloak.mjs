@@ -41,9 +41,8 @@ export function totp(secret, at = Date.now()) {
  * A realm user linked to `seipUid`, with a password and a TOTP credential.
  * Returns what the token helpers need, plus `id` for deleteUser.
  */
-export async function createUser(seipUid, { linked = true } = {}) {
+export async function createUser(seipUid, { linked = true, email = `kc-${randomUUID()}@seip.local` } = {}) {
   const adm = await adminToken();
-  const email = `kc-${randomUUID()}@seip.local`;
   const password = randomBytes(12).toString('base64url');
   const otpSecret = randomBytes(20).toString('hex');
   const res = await fetch(`${BASE}/admin/realms/${REALM}/users`, {
@@ -140,6 +139,14 @@ export async function signIn(authorizationUrl, user) {
     throw new Error(`keycloak: login did not redirect back (${res.status}): ${(await res.text()).slice(0, 200)}`);
   }
   return location;
+}
+
+/** Realm users linked to `seipUid` (UserRepresentation, incl. requiredActions). */
+export async function linkedUsers(seipUid) {
+  const adm = await adminToken();
+  const res = await fetch(`${BASE}/admin/realms/${REALM}/users?${form({ q: `seip_uid:${seipUid}`, exact: 'true' })}`, { headers: { authorization: `Bearer ${adm}` } });
+  if (!res.ok) throw new Error(`keycloak user search ${res.status}`);
+  return res.json();
 }
 
 /** Deletes every realm user linked to `seipUid` — for fixtures recreated each run. */

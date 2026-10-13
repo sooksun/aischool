@@ -46,7 +46,7 @@ export async function buildServer() {
 
   // openapi.yaml: servers[0].url = /api/v1
   await app.register(async (v1) => {
-    await v1.register(authRoutes, { env });
+    await v1.register(authRoutes, { env, keycloak });
     await v1.register(webAuthRoutes, { env, keycloak });
     await v1.register(taxonomyRoutes);
     await v1.register(evidenceRoutes, { env });

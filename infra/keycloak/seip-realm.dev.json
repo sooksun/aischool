@@ -147,6 +147,18 @@
       "defaultClientScopes": [
         "seip-api"
       ]
+    },
+    {
+      "clientId": "seip-provisioner",
+      "name": "SEIP account provisioning (service account)",
+      "description": "The API creates Keycloak users for SEIP accounts (ADR-0014): client credentials only, manage-users in this realm, no user-facing flows.",
+      "publicClient": false,
+      "secret": "seip-provisioner-dev-secret-not-for-real-use",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "defaultClientScopes": []
     }
   ],
   "authenticationFlows": [
@@ -255,6 +267,20 @@
       "config": {
         "loa-condition-level": "2",
         "loa-max-age": "300"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-seip-provisioner",
+      "enabled": true,
+      "serviceAccountClientId": "seip-provisioner",
+      "clientRoles": {
+        "realm-management": [
+          "manage-users",
+          "view-users",
+          "query-users"
+        ]
       }
     }
   ]

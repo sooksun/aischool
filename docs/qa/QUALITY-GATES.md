@@ -162,6 +162,14 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-13, local — SEIP-P1-005, Keycloak provisioning)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `test:unit` · `gate:contracts` · `gate:ownership` · `gate:dep-audit` | pass |
+| api · security · `test:backend` · database · worker | 105 · 9 · 27 · 23 · 23. All pass, with provisioning switched on for every suite (+5 keycloak-provisioning) |
+| `test:e2e` | 14/14 |
+
 ## Verified runs (2026-10-13, local — SEIP-P1-004, web sign-in through Keycloak, contract 4.1.0)
 
 | Command | Result |

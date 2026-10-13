@@ -17,7 +17,7 @@ export async function findUserByEmail(email: string) {
 export async function findUserByEmailForLogin(email: string) {
   return prisma.userAccount.findUnique({
     where: { email: email.toLowerCase() },
-    select: { id: true, email: true, displayName: true, status: true, passwordHash: true },
+    select: { id: true, email: true, displayName: true, status: true, passwordHash: true, kcLinkedAt: true },
   });
 }
 
@@ -458,4 +458,9 @@ export async function revokeAllRefreshTokensForUser(userId: string) {
     where: { userId, revokedAt: null },
     data: { revokedAt: new Date() },
   });
+}
+
+/** ADR-0014: the account's Keycloak user exists (created now, or found). */
+export async function markKeycloakLinked(userId: string, at = new Date()) {
+  await prisma.userAccount.updateMany({ where: { id: userId, kcLinkedAt: null }, data: { kcLinkedAt: at } });
 }
