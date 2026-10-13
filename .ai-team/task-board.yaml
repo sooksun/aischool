@@ -1174,7 +1174,7 @@ tasks:
 
   - id: SEIP-P1-003
     title: "P1 — identity slice 1: dev Keycloak realm, Keycloak tokens in the API, min_acr step-up (ADR-0014)"
-    status: review              # 2026-10-13 — local gates green; CI pending
+    status: review              # 2026-10-13 — CI green (run 38326875657); slices 2+ continue in SEIP-P1-004
     branch: claude/remote-control-5aclif
     dependencies: [SEIP-P1-001]
     decisions: [ADR-0014]
@@ -1209,8 +1209,8 @@ tasks:
       - "role check before step-up (PERM-001, not AUTH-006)"                                          # DONE
       - "unlinked or unknown Keycloak users and an untrusted realm are refused"                       # DONE
       - "CI starts the realm and runs the step-up suite (fails, not skips, when missing)"             # DONE (ci.yml)
-      - "CI green on the pushed commit"                                                               # OPEN
-      - "web logs in through the Keycloak BFF (cookie __Host-seip, ADR-0014 §4)"                      # OPEN — next slice
+      - "CI green on the pushed commit"                                                               # DONE — run 38326875657 on 229e8dc
+      - "web logs in through the Keycloak BFF (cookie __Host-seip, ADR-0014 §4)"                      # DONE in SEIP-P1-004
       - "Flutter logs in with PKCE (flutter_appauth)"                                                 # OPEN — next slice
       - "SEIP accounts provisioned into Keycloak on invite / accept"                                  # OPEN — next slice
       - "ENFORCE_MIN_ACR=true in staging once both clients use Keycloak"                              # OPEN
