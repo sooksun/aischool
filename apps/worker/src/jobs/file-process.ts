@@ -16,6 +16,7 @@ import {
   markDuplicateIfAny,
   recordMediaProbe,
   createRenditionFile,
+  requestAnalysis,
   hasRendition,
   setFileMediaState,
   enqueueOutboxEvent,
@@ -267,6 +268,8 @@ export async function processFileJob(
   // a verified original is the whole of the item.
   await setFileMediaState(file.id, sizeMismatch || hashMismatch || tooLong ? 'failed' : 'ready');
   const scanStatus = outcome.status;
+  // P3: a verified, scanned original starts (or joins) the item's analysis.
+  if (scanStatus !== 'blocked' && file.role === 'original') await requestAnalysis(file.evidenceId, null);
 
   await enqueueOutboxEvent({
     eventType: 'evidence.file.scan_completed',

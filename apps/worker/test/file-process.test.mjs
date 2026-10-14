@@ -615,3 +615,61 @@ test('FR-021: a video gets a poster from its opening frame', async () => {
   assert.deepEqual([poster.width, poster.height], [480, 360]);
   assert.ok(!(await objectBytes(poster.storageUri)).includes(Buffer.from('+13.7563')));
 });
+
+/** A real two-page PDF with a Thai text layer (pdfkit + Noto Sans Thai). */
+async function thaiPdf(pages) {
+  const { default: PDFDocument } = await import('pdfkit');
+  const doc = new PDFDocument({ autoFirstPage: false });
+  doc.registerFont('Thai', new URL('../../../assets/fonts/NotoSansThai-Regular.ttf', import.meta.url).pathname);
+  const chunks = [];
+  doc.on('data', (c) => chunks.push(c));
+  const done = new Promise((r) => doc.on('end', r));
+  for (const text of pages) {
+    doc.addPage();
+    doc.font('Thai').fontSize(14).text(text);
+  }
+  doc.end();
+  await done;
+  return Buffer.concat(chunks);
+}
+
+test('P3 v0: a verified PDF is analysed on the heuristic floor — page segments, a verbatim quote, degraded + provisional', async () => {
+  const { file, evidence } = await fixture('plan.pdf');
+  const bytes = await thaiPdf([
+    'แผนการจัดการเรียนรู้ที่ 3 วิชาภาษาไทย',
+    'ครูออกแบบการจัดการเรียนรู้แบบ Active Learning โดยใช้เกมการอ่าน',
+  ]);
+  await putObject(file.storageUri, bytes, 'application/pdf');
+  await prisma.evidenceFile.update({
+    where: { id: file.id },
+    data: { byteSize: BigInt(bytes.length), checksumSha256: createHash('sha256').update(bytes).digest('hex') },
+  });
+
+  await runOnce(env, s3, { scheduleGc: false }); // file.process → queues evidence.analyze
+  await runOnce(env, s3, { scheduleGc: false }); // evidence.analyze
+
+  const analysis = await prisma.evidenceAnalysis.findFirst({ where: { evidenceId: evidence.id }, orderBy: { createdAt: 'desc' } });
+  assert.equal(analysis.status, 'degraded');
+  assert.equal(analysis.provisional, true);
+  const segments = await prisma.contentSegment.findMany({ where: { analysisId: analysis.id }, orderBy: { ordinal: 'asc' } });
+  assert.deepEqual(segments.map((s) => s.page), [1, 2]);
+  assert.match(segments[1].text, /ออกแบบการจัดการเรียนรู้/);
+
+  const suggestions = await prisma.aiSuggestion.findMany({ where: { evidenceId: evidence.id }, include: { indicator: true } });
+  const plan = suggestions.find((s) => s.indicator.code === 'T-1.2');
+  assert.ok(plan, `T-1.2 suggested (got ${suggestions.map((s) => s.indicator.code)})`);
+  assert.equal(plan.status, 'open');
+  assert.notEqual(plan.band, 'clear');
+  assert.equal(plan.modelLabel, 'SEIP local_heuristic');
+  const [loc] = plan.locators;
+  assert.equal(loc.segment_id, segments[1].id, 'locator points at the stored page-2 segment');
+  assert.ok(segments[1].text.replace(/\s+/g, ' ').includes(loc.quote), 'quote is verbatim');
+
+  // A second analysis supersedes the open suggestions rather than duplicating them.
+  const { requestAnalysis } = await import('@seip/database');
+  await requestAnalysis(evidence.id, null);
+  await runOnce(env, s3, { scheduleGc: false });
+  const open = await prisma.aiSuggestion.count({ where: { evidenceId: evidence.id, status: 'open', indicatorId: plan.indicatorId } });
+  assert.equal(open, 1);
+  assert.equal(await prisma.aiSuggestion.count({ where: { id: plan.id, status: 'superseded' } }), 1);
+});

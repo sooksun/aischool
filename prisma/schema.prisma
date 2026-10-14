@@ -499,6 +499,7 @@ model FrameworkVersion {
   indicators Indicator[]
   cycles     EvaluationCycle[]
   mappings   EvidenceIndicatorMapping[]
+  suggestions AiSuggestion[]
 
   @@index([roleFamily, status])
   @@map("framework_version")
@@ -539,6 +540,7 @@ model Indicator {
 
   levelDescriptions IndicatorLevelDescription[]
   mappings          EvidenceIndicatorMapping[]
+  suggestions       AiSuggestion[]
   scores            IndicatorScore[]
   challenges        AgreementChallenge[]
 
@@ -756,6 +758,9 @@ model Evidence {
 
   files          EvidenceFile[]
   mappings       EvidenceIndicatorMapping[]
+  analyses       EvidenceAnalysis[]
+  segments       ContentSegment[]
+  suggestions    AiSuggestion[]
   sectionRefs    ReportSectionRef[]
   uploadSessions UploadSession[]
 
@@ -805,6 +810,7 @@ model EvidenceFile {
   uploadSession UploadSession?
   duplicateOf   EvidenceFile?  @relation("FileDuplicate", fields: [duplicateOfFileId], references: [id], onDelete: SetNull)
   duplicates    EvidenceFile[] @relation("FileDuplicate")
+  segments      ContentSegment[]
 
   @@index([evidenceId])
   @@index([scanStatus])
@@ -1126,4 +1132,151 @@ model AuditEvent {
   @@index([schoolId, occurredAt])
   @@index([entityType, entityId])
   @@map("audit_event")
+}
+
+// ── P3 in-country AI (ADR-0010, contract 4.0.0 "analysis" tag) ──
+// AI only suggests: a suggestion becomes a mapping only when the owner accepts it
+// (acceptSuggestion → owner_confirmed, source ai_accepted). Until the GPU tier
+// exists every analysis finishes `degraded` on the local_heuristic floor and its
+// suggestions are provisional.
+
+enum AnalysisStatus {
+  queued
+  extracting
+  perceiving
+  mapping
+  validating
+  succeeded
+  degraded
+  failed
+}
+
+model EvidenceAnalysis {
+  id                String         @id @default(uuid()) @db.Uuid
+  evidenceId        String         @map("evidence_id") @db.Uuid
+  status            AnalysisStatus @default(queued)
+  stage             String?
+  provisional       Boolean        @default(true)
+  errorCode         String?        @map("error_code")
+  requestedByUserId String?        @map("requested_by_user_id") @db.Uuid // null = automatic after verify + scan
+  createdAt         DateTime       @default(now()) @map("created_at")
+  finishedAt        DateTime?      @map("finished_at")
+
+  evidence    Evidence         @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  segments    ContentSegment[]
+  suggestions AiSuggestion[]
+
+  @@index([evidenceId, createdAt])
+  @@map("evidence_analysis")
+}
+
+enum SegmentKind {
+  page_block
+  transcript
+  keyframe
+  image_caption
+  sheet_range
+  note
+  link_text
+}
+
+/// A locator target: a page block, a transcript span, a keyframe. Extracted text
+/// is evidence content — personal data, never logged, never sent abroad.
+model ContentSegment {
+  id             String      @id @default(uuid()) @db.Uuid
+  evidenceId     String      @map("evidence_id") @db.Uuid
+  evidenceFileId String      @map("evidence_file_id") @db.Uuid
+  analysisId     String      @map("analysis_id") @db.Uuid
+  kind           SegmentKind
+  ordinal        Int
+  page           Int?
+  tStartMs       Int?        @map("t_start_ms")
+  tEndMs         Int?        @map("t_end_ms")
+  frameMs        Int?        @map("frame_ms")
+  bbox           Json?
+  text           String?     @db.Text
+  confidence     Float?
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  evidence Evidence         @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  file     EvidenceFile     @relation(fields: [evidenceFileId], references: [id], onDelete: Cascade)
+  analysis EvidenceAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId, analysisId, ordinal])
+  @@map("content_segment")
+}
+
+enum SuggestionStatus {
+  open
+  accepted
+  rejected
+  superseded
+  needs_review
+}
+
+enum SuggestionBand {
+  clear
+  likely
+  possible
+}
+
+enum SuggestionSupport {
+  supports
+  partially_supports
+}
+
+enum SuggestionRejectReason {
+  not_relevant
+  wrong_indicator
+  weak_evidence
+  wrong_period
+  duplicate
+  other
+}
+
+model AiSuggestion {
+  id                 String            @id @default(uuid()) @db.Uuid
+  evidenceId         String            @map("evidence_id") @db.Uuid
+  analysisId         String            @map("analysis_id") @db.Uuid
+  indicatorId        String            @map("indicator_id") @db.Uuid
+  frameworkVersionId String            @map("framework_version_id") @db.Uuid
+  band               SuggestionBand
+  support            SuggestionSupport @default(supports)
+  calibratedP        Float?            @map("calibrated_p")
+  rationaleTh        String?           @map("rationale_th") @db.Text
+  /// Server-validated locators only (Locator[] in the contract).
+  locators           Json              @default("[]")
+  provisional        Boolean           @default(true)
+  status             SuggestionStatus  @default(open)
+  modelLabel         String?           @map("model_label")
+  promptVersion      String?           @map("prompt_version")
+  inputSha256        String?           @map("input_sha256")
+  supersededById     String?           @map("superseded_by_id") @db.Uuid
+  decidedByUserId    String?           @map("decided_by_user_id") @db.Uuid
+  decidedAt          DateTime?         @map("decided_at")
+  createdAt          DateTime          @default(now()) @map("created_at")
+
+  evidence         Evidence             @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  analysis         EvidenceAnalysis     @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  indicator        Indicator            @relation(fields: [indicatorId], references: [id], onDelete: Restrict)
+  frameworkVersion FrameworkVersion     @relation(fields: [frameworkVersionId], references: [id], onDelete: Restrict)
+  feedback         SuggestionFeedback[]
+
+  @@index([evidenceId, status])
+  @@map("ai_suggestion")
+}
+
+/// Why the owner rejected a suggestion — feeds calibration (FR-042).
+model SuggestionFeedback {
+  id           String                 @id @default(uuid()) @db.Uuid
+  suggestionId String                 @map("suggestion_id") @db.Uuid
+  userId       String                 @map("user_id") @db.Uuid
+  reasonCode   SuggestionRejectReason @map("reason_code")
+  note         String?                @db.Text
+  createdAt    DateTime               @default(now()) @map("created_at")
+
+  suggestion AiSuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+
+  @@index([suggestionId])
+  @@map("suggestion_feedback")
 }
