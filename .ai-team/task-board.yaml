@@ -2057,3 +2057,28 @@ tasks:
       - "owner and director cannot clear; school admin clears with audit; same content stays cleared"  # DONE — api analysis.test
       - "permission sweep covers clearInjectionFlag"                                         # DONE — test:security
 
+  - id: SEIP-P3-004
+    title: "P3 — the app: sent evidence and its suggested indicators — accept, or reject with a reason"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001, SEIP-P3-003]
+    decisions: [ADR-0010, ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/suggestions.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/suggestions_test.dart
+    notes: >
+      No contract change. The Dart client is generated at build time from the current
+      contract (4.9.0), so it already knows injection_suspected. A "หลักฐานที่ส่งแล้ว"
+      button on the home screen, shown when the account has a person, lists the
+      owner's items (listEvidence owner_person_id). An item opens its open
+      suggestions: band in Thai, rationale and quotes as plain text with page numbers,
+      a note when they are provisional, and the hidden-instruction warning.
+      "ใช่ ผูกตัวชี้วัดนี้" calls acceptSuggestion with a fresh Idempotency-Key.
+      "ไม่ใช่" asks for one of the six reasons and calls rejectSuggestion. These
+      decisions need the network and are not queued in the outbox, since a
+      suggestion only exists online. Not done: push notification when suggestions
+      are ready (P4), and acting on suggestions offline.
+    acceptance_criteria:
+      - "list → item → accept removes it with a 'waiting for the director' note; reject sends the chosen reason"  # DONE — suggestions_test
+

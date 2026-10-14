@@ -8,6 +8,7 @@ import 'api.dart';
 import 'background.dart';
 import 'capture.dart';
 import 'outbox.dart';
+import 'suggestions.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.session, this.services});
@@ -340,6 +341,15 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('หลักฐานของฉัน'),
         actions: [
+          if (me.personId != null)
+            IconButton(
+              key: const Key('myEvidence'),
+              tooltip: 'หลักฐานที่ส่งแล้ว',
+              icon: const Icon(Icons.folder_open_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => MyEvidenceScreen(api: widget.session.api, personId: me.personId!)),
+              ),
+            ),
           IconButton(
             key: const Key('signOut'),
             tooltip: 'ออกจากระบบ',

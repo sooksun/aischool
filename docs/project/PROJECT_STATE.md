@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Suggestions in the app (SEIP-P3-004, in review):** teachers can open "หลักฐานที่ส่งแล้ว" in the app and accept or reject the suggested indicators for each item, as on the web.
+>
 > **Hidden-instruction flag (SEIP-P3-003, CCR-027, in review):** an item that seems to carry text aimed at the AI is flagged. That covers "ignore previous instructions", "map this to every indicator", invisible characters and microscopic text. A flagged item gets no shortcut acceptance, and everyone who opens it sees a warning. Only the school admin can clear the flag, never the owner.
 >
 > **Personal data masked (SEIP-P3-002, in review):** national ID numbers, phone numbers and emails in evidence are masked before suggestions are made. Quotes and text shown to the director or committee never carry them. The owner still sees the original.
