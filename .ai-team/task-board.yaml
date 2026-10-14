@@ -2145,3 +2145,39 @@ tasks:
       - "seated evaluator from another school + director see items per indicator; off-committee PERM-003; stranger RES-001; evaluatee 403; closed round ends committee access"  # DONE — coverage.test
       - "permission sweep covers listAssignmentEvidence"  # DONE — test:security
 
+  - id: SEIP-P4-003
+    title: "P4 — in-app notifications from outbox events (suggestions ready, file blocked, mapping validated/returned); web inbox and settings"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001]
+    decisions: [ADR-0016]
+    primary_paths:
+      - prisma/migrations/20261014000300_notifications/migration.sql
+      - packages/database/src/repositories/notifications.ts
+      - apps/worker/src/jobs/outbox-dispatch.ts
+      - apps/api/src/routes/notifications.ts
+      - apps/web/src/pages/NotificationsPage.tsx
+      - tests/e2e/notifications.spec.ts
+    notes: >
+      No contract change: the four notification operations and their self-scoped rows
+      were in contract 4.0.0 and now leave phase-gated.ts. completeAnalysis now emits
+      analysis.completed (events.yaml), which it did not before. The outbox dispatcher
+      runs the notification consumer before marking an event published. It handles
+      analysis.completed with suggestions (suggestions_ready),
+      evidence.file.scan_completed blocked (processing_failed), mapping.validated and
+      mapping.returned, each to every active account of the evidence owner. The
+      notification table has a unique (source_event_id, user_id), so a re-dispatched
+      event never notifies twice. The Thai texts name no evidence title or file
+      name, and route is always an in-app path, which the web follows only if it
+      starts with a single "/". Read marking and preferences touch the caller's
+      own rows only. Preferences are push (default on), email (default off) and
+      quiet hours (HH:MM, validated). On the web, 🔔 shows the unread count
+      (refreshed every minute and on inbox changes); the page lists notifications,
+      opens them, has "อ่านทั้งหมดแล้ว" and the settings. Not done: actually sending
+      push (FCM/APNs ping only, needs the push-token ops, P2) and email (needs a
+      provider, NFR-Res-06); deadline reminders; the app inbox; per-kind settings.
+    acceptance_criteria:
+      - "suggestions_ready and mapping_validated reach only the owner, exactly once; nobody else can mark them read"  # DONE — api analysis.test
+      - "preferences default, replace, quiet-hours validation"                                                     # DONE
+      - "web: note → notification → opens the item"                                                                # DONE — e2e notifications.spec
+

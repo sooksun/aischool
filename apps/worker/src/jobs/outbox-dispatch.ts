@@ -1,7 +1,9 @@
-// Marks unpublished outbox events as published after a no-op "dispatch".
-// Notification channels are deferred (events.yaml) — publishing means the event
-// is durable and available for future consumers without dual-write loss.
+// Dispatches unpublished outbox events. The notification consumer (events.yaml)
+// writes in-app inbox rows, idempotent on (event, recipient), before the event
+// is marked published; a failure leaves it for the next cycle. Push and email
+// channels are later (FR-100; push carries no content, FR-101).
 import {
+  notifyFromEvent,
   claimUnpublishedOutbox,
   markOutboxPublished,
   markOutboxFailed,
@@ -12,7 +14,7 @@ export async function dispatchOutboxBatch(limit = 50): Promise<number> {
   let n = 0;
   for (const ev of batch) {
     try {
-      // Future: fan-out to notification service. For now, publish = acknowledge.
+      await notifyFromEvent(ev);
       // Counted only when a row actually changed: a claim whose row disappeared
       // before publish was not dispatched, and saying it was would overstate what
       // this cycle achieved.

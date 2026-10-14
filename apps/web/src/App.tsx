@@ -22,6 +22,7 @@ import { DevicesPage } from './pages/DevicesPage';
 import { BatchUploadPage } from './pages/BatchUploadPage';
 import { LinkNotePage } from './pages/LinkNotePage';
 import { CoveragePage } from './pages/CoveragePage';
+import { NotificationsPage, useUnreadNotifications } from './pages/NotificationsPage';
 import { AssignmentEvidencePage } from './pages/evaluator/AssignmentEvidencePage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
@@ -75,6 +76,7 @@ function SchoolPicker() {
 function AppNav() {
   const { user, capabilities } = useAuth();
   const location = useLocation();
+  const unread = useUnreadNotifications(!!user && location.pathname !== '/login');
   if (!user || location.pathname === '/login') return null;
 
   const { manageCycles, scoreAsCommittee, viewReports, submitEvidence, manageMembers, manageAreaSchools } = capabilities;
@@ -130,6 +132,9 @@ function AppNav() {
           ความครอบคลุม
         </Link>
       )}
+      <Link to="/notifications" className={location.pathname === '/notifications' ? 'active' : ''} aria-label={`การแจ้งเตือน ยังไม่อ่าน ${unread}`}>
+        🔔{unread > 0 ? ` ${unread}` : ''}
+      </Link>
       <Link to="/devices" className={location.pathname === '/devices' ? 'active' : ''}>
         อุปกรณ์
       </Link>
@@ -219,6 +224,7 @@ export function App() {
 
         <Route path="/devices" element={<RequireAuth><DevicesPage /></RequireAuth>} />
         <Route path="/coverage" element={<RequireAuth><CoveragePage /></RequireAuth>} />
+        <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
 
         <Route path="/area/schools" element={
           <RequireCapability capability="manageAreaSchools"><AreaSchoolsPage /></RequireCapability>

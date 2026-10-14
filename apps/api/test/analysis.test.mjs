@@ -222,3 +222,43 @@ test('ordinary evidence is not flagged', async () => {
   const got = (await app.inject({ method: 'GET', url: `/api/v1/evidence/${ev.id}`, headers: h('teacher') })).json();
   assert.equal(got.injection_suspected, false);
 });
+
+test('P4 notifications: suggestions ready and a validated mapping reach the owner\'s inbox, once each; only they can read them', async () => {
+  const before = (await app.inject({ method: 'GET', url: '/api/v1/notifications', headers: h('teacher') })).json().unread_count;
+  const ev = await noteEvidence('ประสานความร่วมมือกับผู้ปกครอง ภาคีเครือข่าย');
+  await worker(); // analysis → analysis.completed in the outbox
+  await worker(); // dispatcher → inbox
+  let inbox = (await app.inject({ method: 'GET', url: '/api/v1/notifications', headers: h('teacher') })).json();
+  const ready = inbox.items.find((n) => n.kind === 'suggestions_ready' && n.entity_id === ev.id);
+  assert.ok(ready, 'suggestions_ready notification');
+  assert.equal(ready.route, `/evidence/${ev.id}`);
+  assert.ok(!ready.title_th.includes('บันทึกหลังสอน') && !(ready.body_th ?? '').includes('บันทึกหลังสอน'), 'no evidence title in the text');
+  assert.ok(inbox.unread_count > before);
+
+  // The director validates an accepted suggestion → mapping_validated for the owner.
+  const s = (await app.inject({ method: 'GET', url: `/api/v1/evidence/${ev.id}/suggestions`, headers: h('teacher') })).json().items[0];
+  const m = (await app.inject({ method: 'POST', url: `/api/v1/suggestions/${s.id}/accept`, headers: h('teacher', { 'idempotency-key': randomUUID() }) })).json();
+  const v = await app.inject({ method: 'PATCH', url: `/api/v1/mappings/${m.id}`, headers: { ...h('director'), 'if-match': `"${m.version}"` }, payload: { action: 'validate' } });
+  assert.equal(v.statusCode, 200, v.body);
+  await worker();
+  await worker();
+  inbox = (await app.inject({ method: 'GET', url: '/api/v1/notifications?unread=true', headers: h('teacher') })).json();
+  assert.equal(inbox.items.filter((n) => n.kind === 'mapping_validated' && n.entity_id === ev.id).length, 1, 'exactly once');
+  assert.equal((await app.inject({ method: 'GET', url: '/api/v1/notifications', headers: h('director') })).json().items.filter((n) => n.entity_id === ev.id).length, 0, 'not the director\'s');
+
+  // Someone else cannot mark the teacher's notifications read.
+  const ids = inbox.items.map((n) => n.id);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/v1/notifications/read', headers: h('director'), payload: { ids } })).statusCode, 204);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/v1/notifications?unread=true', headers: h('teacher') })).json().items.length, ids.length);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/v1/notifications/read', headers: h('teacher'), payload: { all: true } })).statusCode, 204);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/v1/notifications', headers: h('teacher') })).json().unread_count, 0);
+});
+
+test('P4 notification preferences: defaults, replace, quiet hours validated', async () => {
+  assert.deepEqual((await app.inject({ method: 'GET', url: '/api/v1/notification-preferences', headers: h('other') })).json(), { push: true, email: false });
+  const put = await app.inject({ method: 'PUT', url: '/api/v1/notification-preferences', headers: h('other'), payload: { push: false, email: true, quiet_hours: { start: '21:00', end: '06:30' } } });
+  assert.equal(put.statusCode, 200, put.body);
+  assert.deepEqual((await app.inject({ method: 'GET', url: '/api/v1/notification-preferences', headers: h('other') })).json(), { push: false, email: true, quiet_hours: { start: '21:00', end: '06:30' } });
+  const bad = await app.inject({ method: 'PUT', url: '/api/v1/notification-preferences', headers: h('other'), payload: { push: true, email: false, quiet_hours: { start: '9pm', end: '06:30' } } });
+  assert.equal(bad.statusCode, 400);
+});

@@ -7,6 +7,7 @@ import { Prisma, type SegmentKind, type SuggestionRejectReason, type SuggestionS
 import { prisma } from '../client.js';
 import { enqueueWorkerJob } from './jobs.js';
 import { createOwnerMapping } from './mappings.js';
+import { enqueueOutboxEvent } from './outbox.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -203,6 +204,14 @@ export async function completeAnalysis(input: {
       where: { id: input.analysisId },
       data: { status: input.status, provisional: input.provisional, stage: null, finishedAt: new Date() },
     });
+    const ev = await tx.evidence.findUniqueOrThrow({ where: { id: input.evidenceId }, select: { originSchoolId: true } });
+    await enqueueOutboxEvent({
+      eventType: 'analysis.completed', schoolId: ev.originSchoolId, actorUserId: null,
+      payload: {
+        analysis_id: input.analysisId, evidence_id: input.evidenceId, status: input.status,
+        suggestion_count: input.frameworkVersionId ? input.suggestions.length : 0,
+      },
+    }, tx);
   });
 }
 

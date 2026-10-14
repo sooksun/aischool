@@ -1288,3 +1288,47 @@ model SuggestionFeedback {
   @@index([suggestionId])
   @@map("suggestion_feedback")
 }
+
+// ── P4 notifications (FR-100/102, ADR-0016 §7) ──
+// The in-app inbox is the source of truth for every channel. A push carries no
+// content, only a sync ping (FR-101). Rows are made by the outbox dispatcher
+// from domain events, once per (event, recipient).
+
+enum NotificationKind {
+  suggestions_ready
+  processing_failed
+  mapping_returned
+  mapping_validated
+  deadline
+  export_ready
+  transfer_approved
+}
+
+model Notification {
+  id            String           @id @default(uuid()) @db.Uuid
+  userId        String           @map("user_id") @db.Uuid
+  kind          NotificationKind
+  titleTh       String           @map("title_th")
+  bodyTh        String?          @map("body_th")
+  entityType    String?          @map("entity_type")
+  entityId      String?          @map("entity_id") @db.Uuid
+  route         String?
+  sourceEventId String?          @map("source_event_id") @db.Uuid
+  readAt        DateTime?        @map("read_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  @@unique([sourceEventId, userId])
+  @@index([userId, createdAt])
+  @@map("notification")
+}
+
+model NotificationPreference {
+  userId     String   @id @map("user_id") @db.Uuid
+  push       Boolean  @default(true)
+  email      Boolean  @default(false)
+  quietStart String?  @map("quiet_start")
+  quietEnd   String?  @map("quiet_end")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("notification_preference")
+}

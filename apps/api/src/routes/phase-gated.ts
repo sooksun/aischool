@@ -15,10 +15,6 @@ const GATED: [Method, string, string, string][] = [
   ['put', '/devices/current/push-token', 'registerPushToken', 'P2'],
   ['delete', '/devices/current/push-token', 'removePushToken', 'P2'],
   // Notifications, coverage, committee evidence view — P4
-  ['get', '/notifications', 'listNotifications', 'P4'],
-  ['post', '/notifications/read', 'markNotificationsRead', 'P4'],
-  ['get', '/notification-preferences', 'getNotificationPreferences', 'P4'],
-  ['put', '/notification-preferences', 'updateNotificationPreferences', 'P4'],
   // Exports — P5 (DPA pack, PA2 workbook, portability)
   ['get', '/dpa-slot-profiles', 'listDpaSlotProfiles', 'P5'],
   ['get', '/exports', 'listExports', 'P5'],

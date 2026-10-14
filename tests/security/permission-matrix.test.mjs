@@ -540,7 +540,7 @@ test('X-School-Id header behavior: single membership ignores it safely; multi-me
 
 test('every phase-gated operation answers 501 SYS-003 to an authenticated caller (CCR-017)', async () => {
   const { PHASE_GATED_ROUTES } = await import('../../apps/api/dist/routes/phase-gated.js');
-  assert.ok(PHASE_GATED_OPERATIONS.length >= 10);
+  assert.ok(PHASE_GATED_OPERATIONS.length >= 5);
   for (const [method, path, operationId] of PHASE_GATED_ROUTES) {
     const url = '/api/v1' + path.replace(/:[A-Za-z]+/g, randomUUID());
     const res = await app.inject({ method: method.toUpperCase(), url, headers: { authorization: `Bearer ${tokenFor.teacher}` }, payload: method === 'get' || method === 'delete' ? undefined : {} });
