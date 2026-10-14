@@ -1825,3 +1825,29 @@ tasks:
       - "web form validates http(s)"                       # DONE — LinkNotePage.test
       - "app: note queued offline, created once, no upload" # DONE — outbox_test, capture_flow_test
 
+  - id: SEIP-P2-010
+    title: "P2 — FR-008 large files wait for Wi-Fi in the app; the person can choose mobile data per item"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-002]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/outbox.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/outbox_test.dart
+      - apps/mobile/test/capture_flow_test.dart
+    notes: >
+      No contract change. Outbox.drain asks NetworkInfo (connectivity_plus on a device)
+      whether the connection is metered. On mobile data with no Wi-Fi or ethernet, a file
+      above wifiOnlyAboveBytes (default 50 MB) does not start sending bytes; small files
+      and links/notes still go. A file the server already has is still checked. The row
+      shows "รอ Wi-Fi (ไฟล์ใหญ่)" with a "ใช้เน็ตมือถือ" button, which sets
+      allow_mobile_data for the item (the whole group) and is stored with the queue. The
+      held-for-Wi-Fi flag itself is not stored, since it depends on the network now. Not
+      done: a settings screen to change the 50 MB limit, and re-draining automatically
+      when Wi-Fi returns (with background drain).
+    acceptance_criteria:
+      - "metered: big waits, small goes; allow -> big goes"  # DONE — outbox_test
+      - "allow_mobile_data survives a restart"              # DONE
+      - "widget: รอ Wi-Fi + ใช้เน็ตมือถือ"                    # DONE — capture_flow_test
+

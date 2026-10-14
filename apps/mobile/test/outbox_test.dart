@@ -167,17 +167,24 @@ class _FakeBytes implements LocalBytes {
   Future<void> delete(String path) async => data.remove(path);
 }
 
+class _Network implements NetworkInfo {
+  bool metered = false;
+  @override
+  Future<bool> isMetered() async => metered;
+}
+
 ({Outbox outbox, _FakeServer server, _FakeObjects objects, _FakeBytes bytes, MemoryOutboxStore store}) _make({
   MemoryOutboxStore? store,
   _FakeServer? server,
   _FakeBytes? bytes,
+  NetworkInfo network = const UnmeteredNetwork(),
 }) {
   final s = server ?? _FakeServer();
   final api = SeipApi(Dio()..httpClientAdapter = s, baseUrl: 'https://api.test/api/v1');
   final st = store ?? MemoryOutboxStore();
   final b = bytes ?? _FakeBytes();
   final objects = _FakeObjects(s);
-  return (outbox: Outbox(api: api, store: st, bytes: b, objects: objects), server: s, objects: objects, bytes: b, store: st);
+  return (outbox: Outbox(api: api, store: st, bytes: b, objects: objects, network: network, wifiOnlyAboveBytes: 10), server: s, objects: objects, bytes: b, store: st);
 }
 
 OutboxItem _item(String path, int size) => OutboxItem(
@@ -316,5 +323,44 @@ void main() {
     expect(await m.outbox.items(), isEmpty);
     expect(m.server.evidenceCreated, 1);
     expect(m.server.sessionsCreated, 0);
+  });
+
+  test('FR-008: on mobile data a file above the limit waits for Wi-Fi; a small one goes', () async {
+    final net = _Network()..metered = true;
+    final m = _make(network: net);
+    m.bytes.data['/private/big'] = List.generate(18, (i) => i); // above the test limit of 10 bytes
+    m.bytes.data['/private/small'] = List.generate(6, (i) => i);
+    final big = _item('/private/big', 18);
+    await m.outbox.add(big);
+    await m.outbox.add(_item('/private/small', 6));
+    await m.outbox.drain();
+    var items = await m.outbox.items();
+    expect(items.map((i) => i.path), ['/private/big'], reason: 'the small file went; the big one waits');
+    expect(m.objects.sent.length, 2, reason: 'only the small file\'s two parts');
+    expect(m.server.sessionsCreated, 1);
+
+    await m.outbox.drain();
+    expect((await m.outbox.items()).single.waitingForWifi, isTrue);
+
+    // The person chooses mobile data for this file.
+    await m.outbox.allowMobileData(big.clientUuid);
+    await m.outbox.drain();
+    expect(await m.outbox.items(), isEmpty);
+  });
+
+  test('FR-008: on Wi-Fi a large file goes without asking, and the choice survives a restart', () async {
+    final net = _Network()..metered = true;
+    final m = _make(network: net);
+    m.bytes.data['/private/big'] = List.generate(18, (i) => i);
+    final big = _item('/private/big', 18);
+    await m.outbox.add(big);
+    await m.outbox.allowMobileData(big.clientUuid);
+    expect((await m.store.load()).single.allowMobileData, isTrue, reason: 'stored, not just in memory');
+
+    final wifi = _make(network: _Network());
+    wifi.bytes.data['/private/w'] = List.generate(18, (i) => i);
+    await wifi.outbox.add(_item('/private/w', 18));
+    await wifi.outbox.drain();
+    expect(await wifi.outbox.items(), isEmpty);
   });
 }

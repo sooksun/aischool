@@ -134,7 +134,7 @@ class AppServices {
   AppServices({required this.outboxFor, required this.capture, required this.hash});
 
   factory AppServices.device() => AppServices(
-    outboxFor: (api) => Outbox(api: api, store: SecureOutboxStore(), bytes: LocalFileBytes(), objects: DioObjectStore()),
+    outboxFor: (api) => Outbox(api: api, store: SecureOutboxStore(), bytes: LocalFileBytes(), objects: DioObjectStore(), network: ConnectivityNetwork()),
     capture: DeviceCaptureSource(),
     hash: sha256OfFile,
   );
@@ -360,8 +360,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   leading: Icon(group.any((i) => i.state == OutboxState.failed) ? Icons.error_outline : Icons.cloud_upload_outlined),
                   title: Text(group.first.title),
                   subtitle: Text(
-                    group.length > 1 ? '${group.length} รูป · ${outboxLabel(groupState(group))}' : outboxLabel(group.first.state),
+                    [
+                      if (group.length > 1) '${group.length} รูป',
+                      group.any((i) => i.waitingForWifi) ? 'รอ Wi-Fi (ไฟล์ใหญ่)' : outboxLabel(groupState(group)),
+                    ].join(' · '),
                   ),
+                  trailing: group.any((i) => i.waitingForWifi)
+                      ? TextButton(
+                          key: Key('mobileData-${group.first.evidenceClientUuid}'),
+                          onPressed: () async {
+                            await _outbox.allowMobileData(group.first.evidenceClientUuid);
+                            await _sync();
+                          },
+                          child: const Text('ใช้เน็ตมือถือ'),
+                        )
+                      : null,
                 ),
           ],
         ),

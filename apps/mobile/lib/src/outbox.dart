@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -40,6 +41,7 @@ class OutboxItem {
     this.sessionGeneration = 0,
     this.state = OutboxState.queued,
     this.lastError,
+    this.allowMobileData = false,
   });
 
   final String clientUuid;
@@ -76,6 +78,12 @@ class OutboxItem {
   OutboxState state;
   String? lastError;
 
+  /// FR-008: the person chose to send this large file over mobile data.
+  bool allowMobileData;
+
+  /// Not stored: set by the last drain when this file was held for Wi-Fi.
+  bool waitingForWifi = false;
+
   Map<String, Object?> toJson() => {
     'client_uuid': clientUuid,
     'category_id': categoryId,
@@ -87,6 +95,7 @@ class OutboxItem {
     'path': path,
     'duration_ms': durationMs,
     'group_uuid': groupUuid,
+    'allow_mobile_data': allowMobileData,
     'kind': kind.name,
     'link_url': linkUrl,
     'note_text': noteText,
@@ -109,6 +118,7 @@ class OutboxItem {
     path: j['path']! as String,
     durationMs: j['duration_ms'] as int?,
     groupUuid: j['group_uuid'] as String?,
+    allowMobileData: (j['allow_mobile_data'] as bool?) ?? false,
     kind: j['kind'] == null ? EvidenceKind.file : EvidenceKind.values.byName(j['kind']! as String),
     linkUrl: j['link_url'] as String?,
     noteText: j['note_text'] as String?,
@@ -237,8 +247,44 @@ String newClientUuid([Random? random]) {
   return _uuidFrom(List<int>.generate(16, (_) => r.nextInt(256)));
 }
 
+/// FR-008: whether the connection costs the person money (mobile data).
+abstract class NetworkInfo {
+  Future<bool> isMetered();
+}
+
+/// Never metered — tests and platforms without a connectivity plugin.
+class UnmeteredNetwork implements NetworkInfo {
+  const UnmeteredNetwork();
+  @override
+  Future<bool> isMetered() async => false;
+}
+
+class ConnectivityNetwork implements NetworkInfo {
+  ConnectivityNetwork({Connectivity? connectivity}) : _c = connectivity ?? Connectivity();
+  final Connectivity _c;
+  @override
+  Future<bool> isMetered() async {
+    final r = await _c.checkConnectivity();
+    final free = r.contains(ConnectivityResult.wifi) || r.contains(ConnectivityResult.ethernet);
+    return !free && r.contains(ConnectivityResult.mobile);
+  }
+}
+
+/// FR-008 default: files above 50 MB go over Wi-Fi only unless the person says otherwise.
+const wifiOnlyAboveBytesDefault = 50 * 1000 * 1000;
+
 class Outbox {
-  Outbox({required this.api, required this.store, required this.bytes, required this.objects});
+  Outbox({
+    required this.api,
+    required this.store,
+    required this.bytes,
+    required this.objects,
+    this.network = const UnmeteredNetwork(),
+    this.wifiOnlyAboveBytes = wifiOnlyAboveBytesDefault,
+  });
+
+  final NetworkInfo network;
+  final int wifiOnlyAboveBytes;
 
   final SeipApi api;
   final OutboxStore store;
@@ -255,14 +301,46 @@ class Outbox {
     await _save([...items, item]);
   }
 
-  Future<List<OutboxItem>> items() => store.load();
+  /// Entries the last drain held for Wi-Fi (not stored: it depends on the network now).
+  final _heldForWifi = <String>{};
+
+  Future<List<OutboxItem>> items() async {
+    final items = await store.load();
+    for (final i in items) {
+      i.waitingForWifi = _heldForWifi.contains(i.clientUuid);
+    }
+    return items;
+  }
+
+  /// FR-008: send this file (or its whole group) over mobile data.
+  Future<void> allowMobileData(String evidenceClientUuid) async {
+    final items = await store.load();
+    for (final i in items.where((i) => i.evidenceClientUuid == evidenceClientUuid)) {
+      i.allowMobileData = true;
+    }
+    await _save(items);
+  }
 
   /// Sends what it can. Stops at the first network failure (offline) and leaves
   /// everything as it was; the next drain picks up exactly there.
   Future<void> drain() async {
     final items = await store.load();
+    final metered = await network.isMetered();
     for (final item in [...items]) {
       if (item.state == OutboxState.failed) continue;
+      // FR-008: a large file waits for Wi-Fi before any bytes move; checking
+      // a file the server already has costs nothing, so that still runs.
+      item.waitingForWifi = metered &&
+          item.kind == EvidenceKind.file &&
+          item.byteSize > wifiOnlyAboveBytes &&
+          !item.allowMobileData &&
+          item.state != OutboxState.verifying;
+      if (item.waitingForWifi) {
+        _heldForWifi.add(item.clientUuid);
+        onChanged?.call(items);
+        continue;
+      }
+      _heldForWifi.remove(item.clientUuid);
       try {
         final done = await _advance(item, items);
         if (done) {

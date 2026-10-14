@@ -185,4 +185,33 @@ void main() {
     expect(find.text('คลิปสอน'), findsOneWidget);
     expect(find.text('รอส่ง'), findsOneWidget);
   });
+
+  testWidgets('FR-008: a large video on mobile data shows รอ Wi-Fi and offers ใช้เน็ตมือถือ', (tester) async {
+    final session = SeipSession(dio: Dio()..httpClientAdapter = _OfflineApi(), baseUrl: 'https://api.test/api/v1');
+    final store = MemoryOutboxStore();
+    final services = AppServices(
+      outboxFor: (api) => Outbox(api: api, store: store, bytes: _NoBytes(), objects: _NoObjects(), network: _Metered(), wifiOnlyAboveBytes: 1000),
+      capture: _FakeCapture(),
+      hash: (_) async => 'd' * 64,
+    );
+    const me = CurrentUser(id: 'u', email: 'kru@seip.local', displayName: 'ครูสมศรี', memberships: []);
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(session: session, me: me, services: services)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('captureVideo'))); // the fake clip is 1234 bytes
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('save')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('รอ Wi-Fi (ไฟล์ใหญ่)'), findsOneWidget);
+    final uuid = (await store.load()).single.evidenceClientUuid;
+    await tester.tap(find.byKey(Key('mobileData-$uuid')));
+    await tester.pumpAndSettle();
+    expect((await store.load()).single.allowMobileData, isTrue);
+    expect(find.text('รอ Wi-Fi (ไฟล์ใหญ่)'), findsNothing);
+  });
+}
+
+class _Metered implements NetworkInfo {
+  @override
+  Future<bool> isMetered() async => true;
 }
