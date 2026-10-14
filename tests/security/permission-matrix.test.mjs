@@ -312,6 +312,8 @@ const OPERATIONS = () => ({
     ],
   } },
   getAssignment: { method: 'GET', url: `/api/v1/assignments/${assignmentId}` },
+  // FR-060 committee view: school roles and the seated evaluator get the list.
+  listAssignmentEvidence: { method: 'GET', url: `/api/v1/assignments/${assignmentId}/evidence` },
   // Round is deliberately left 'planned' (never opened) — a genuine committee
   // member (evaluator/director, both really seated) will fail SCORE-002, an
   // ACCEPTABLE non-permission outcome for this sweep's purposes (same philosophy

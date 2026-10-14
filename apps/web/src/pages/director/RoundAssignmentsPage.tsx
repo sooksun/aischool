@@ -80,6 +80,7 @@ export function RoundAssignmentsPage() {
           {assignments.map((a) => (
             <li key={a.id} className="evidence-card" style={{ marginBottom: 'var(--space-2)' }}>
               <div className="title">ผู้รับการประเมิน: {nameFor(a.evaluatee_personnel_id)}</div>
+              <Link to={`/assignments/${a.id}/evidence`} className="field-hint">ดูหลักฐานตามตัวชี้วัด →</Link>
               <span className="status-badge">
                 <span className="status-dot" data-state={a.status === 'completed' ? 'clean' : a.status === 'void' ? 'blocked' : 'pending'} aria-hidden="true" />
                 {assignmentStatusLabel(a.status)}

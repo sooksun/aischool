@@ -22,6 +22,7 @@ import { DevicesPage } from './pages/DevicesPage';
 import { BatchUploadPage } from './pages/BatchUploadPage';
 import { LinkNotePage } from './pages/LinkNotePage';
 import { CoveragePage } from './pages/CoveragePage';
+import { AssignmentEvidencePage } from './pages/evaluator/AssignmentEvidencePage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AgreementPage } from './pages/agreements/AgreementPage';
@@ -238,6 +239,9 @@ export function App() {
         } />
         <Route path="/evaluator/rounds/:roundId" element={
           <RequireCapability capability="scoreAsCommittee"><EvaluatorRoundPage /></RequireCapability>
+        } />
+        <Route path="/assignments/:assignmentId/evidence" element={
+          <RequireCapability capability="governMappings"><AssignmentEvidencePage /></RequireCapability>
         } />
         <Route path="/evaluator/assignments/:assignmentId" element={
           <RequireCapability capability="scoreAsCommittee"><AssignmentScorePage /></RequireCapability>

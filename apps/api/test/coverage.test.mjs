@@ -14,6 +14,8 @@ const prisma = createPrismaClient();
 let app, area, otherArea, school, otherSchool, fw, categoryId;
 const token = {};
 const person = {};
+const userId = {};
+const personnelId = {};
 
 async function userWith(key, role, sch, { personnel = true, areaScope = null } = {}) {
   const password = `cov-${key}-pass-1234`;
@@ -27,8 +29,9 @@ async function userWith(key, role, sch, { personnel = true, areaScope = null } =
     await prisma.schoolMembership.create({ data: { userId: user.id, schoolId: sch.id, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
   }
   if (personnel) {
-    await prisma.personnelProfile.create({ data: { schoolId: sch.id, userId: user.id, personId: user.personId, fullName: key, positionRole: 'teacher', rankLevelCode: 'cov_kru' } });
+    personnelId[key] = (await prisma.personnelProfile.create({ data: { schoolId: sch.id, userId: user.id, personId: user.personId, fullName: key, positionRole: 'teacher', rankLevelCode: 'cov_kru' } })).id;
   }
+  userId[key] = user.id;
   const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: user.email, password } });
   assert.equal(login.statusCode, 200, login.body);
   token[key] = login.json().access_token;
@@ -56,6 +59,8 @@ before(async () => {
   await userWith('stranger', 'teacher', otherSchool);
   await userWith('areaAdmin', 'area_admin', school, { personnel: false, areaScope: area.id });
   await userWith('otherAreaAdmin', 'area_admin', otherSchool, { personnel: false, areaScope: otherArea.id });
+  await userWith('evaluator', 'evaluator', otherSchool, { personnel: false }); // a committee member from another school
+  await userWith('offCommittee', 'evaluator', school, { personnel: false });
 
   // The teacher maps one note to T-1.2 and T-2.4; the director validates T-1.2.
   const ev = await app.inject({
@@ -119,4 +124,42 @@ test('the area admin sees their own area and its schools, never another area', a
   assert.equal(other.statusCode, 404);
   const teacherArea = await cov('teacher', 'area', area.id);
   assert.equal(teacherArea.statusCode, 403);
+});
+
+test('committee view: the seated evaluator (from another school) and the director see confirmed evidence per indicator, no AI fields', async () => {
+  const cycle = await prisma.evaluationCycle.create({
+    data: { schoolId: school.id, frameworkVersionId: fw.id, fiscalYear: 2569, evaluationKind: 'pa', title: 'c', startsOn: new Date('2026-01-01'), endsOn: new Date('2026-12-31') },
+  });
+  const round = await prisma.evaluationRound.create({
+    data: { cycleId: cycle.id, roundNumber: 1, purpose: 'x', periodStart: new Date('2026-01-01'), periodEnd: new Date('2026-06-30'), status: 'open' },
+  });
+  const a = await prisma.evaluationAssignment.create({ data: { schoolId: school.id, roundId: round.id, evaluateePersonnelId: personnelId.teacher } });
+  await prisma.committeeMember.create({ data: { assignmentId: a.id, evaluatorUserId: userId.evaluator, committeeRole: 'chair', seatNumber: 1 } });
+  const url = `/api/v1/assignments/${a.id}/evidence`;
+
+  const seated = await app.inject({ method: 'GET', url, headers: h('evaluator', otherSchool) });
+  assert.equal(seated.statusCode, 200, seated.body);
+  const items = seated.json().items;
+  assert.deepEqual(items.map((i) => fw.indicators.find((x) => x.id === i.indicator_id).code), ['T-1.2', 'T-2.4']);
+  assert.ok(items.every((i) => i.evidence.owner_person_id === person.teacher));
+  assert.ok(!JSON.stringify(items).includes('rationale') && !JSON.stringify(items).includes('calibrated'));
+
+  assert.equal((await app.inject({ method: 'GET', url, headers: h('director') })).statusCode, 200);
+  const filtered = await app.inject({ method: 'GET', url: `${url}?indicator_id=${items[1].indicator_id}`, headers: h('director') });
+  assert.equal(filtered.json().items.length, 1);
+
+  const off = await app.inject({ method: 'GET', url, headers: h('offCommittee') });
+  assert.equal(off.statusCode, 403);
+  assert.equal(off.json().code, 'PERM-003');
+  const stranger = await app.inject({ method: 'GET', url, headers: h('stranger', otherSchool) });
+  assert.equal(stranger.statusCode, 404);
+  const teacher = await app.inject({ method: 'GET', url, headers: h('teacher') });
+  assert.equal(teacher.statusCode, 403, 'the evaluatee has no grant on the committee view');
+
+  // FR-062b: once the round closes, the committee's access ends; the director's does not.
+  await prisma.evaluationRound.update({ where: { id: round.id }, data: { status: 'closed' } });
+  const closed = await app.inject({ method: 'GET', url, headers: h('evaluator', otherSchool) });
+  assert.equal(closed.statusCode, 403);
+  assert.equal(closed.json().code, 'PERM-003');
+  assert.equal((await app.inject({ method: 'GET', url, headers: h('director') })).statusCode, 200);
 });

@@ -77,3 +77,33 @@ export async function listActiveSchoolIdsOfPerson(personId: string): Promise<str
 export async function listSchoolIdsInArea(areaId: string): Promise<string[]> {
   return (await prisma.school.findMany({ where: { areaId }, select: { id: true } })).map((s) => s.id);
 }
+
+/**
+ * FR-060 committee view: an evaluatee's confirmed evidence per indicator for one
+ * framework version — owner_confirmed or validated mappings on accepted,
+ * undeleted items, ordered by indicator. Offset-paged (the cursor is the offset).
+ */
+export async function listCommitteeEvidence(input: {
+  personId: string; frameworkVersionId: string; indicatorId?: string; offset: number; limit: number;
+}) {
+  const rows = await prisma.evidenceIndicatorMapping.findMany({
+    where: {
+      frameworkVersionId: input.frameworkVersionId,
+      status: { in: ['owner_confirmed', 'validated'] },
+      ...(input.indicatorId ? { indicatorId: input.indicatorId } : {}),
+      evidence: { ownerPersonId: input.personId, deletedAt: null, ownerAcceptedAt: { not: null } },
+    },
+    include: {
+      indicator: { select: { code: true, sortOrder: true, domain: { select: { sortOrder: true } } } },
+      evidence: { include: { files: { where: { scanStatus: { in: ['clean', 'unscanned', 'sanitised'] } }, include: { duplicateOf: { select: { evidenceId: true } } } } } },
+    },
+    orderBy: [{ indicator: { domain: { sortOrder: 'asc' } } }, { indicator: { sortOrder: 'asc' } }, { ownerConfirmedAt: 'asc' }],
+    skip: input.offset,
+    take: input.limit + 1,
+  });
+  return { items: rows.slice(0, input.limit), more: rows.length > input.limit };
+}
+
+export async function getPersonIdOfPersonnel(personnelId: string): Promise<string | null> {
+  return (await prisma.personnelProfile.findUnique({ where: { id: personnelId }, select: { personId: true } }))?.personId ?? null;
+}

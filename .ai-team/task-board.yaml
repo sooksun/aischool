@@ -2115,3 +2115,33 @@ tasks:
       - "permission sweep covers getCoverage"                                                        # DONE — test:security
       - "web: teacher table, director school switch"                                                 # DONE — e2e coverage.spec
 
+  - id: SEIP-P4-002
+    title: "P4 — committee view: an evaluatee's confirmed evidence per indicator, no AI fields, ends when the round closes"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-001]
+    decisions: [ADR-0015]
+    primary_paths:
+      - apps/api/src/routes/committee.ts
+      - packages/database/src/repositories/coverage.ts
+      - apps/web/src/pages/evaluator/AssignmentEvidencePage.tsx
+      - apps/api/test/coverage.test.mjs
+    notes: >
+      No contract change: listAssignmentEvidence was in contract 4.0.0 and now leaves
+      phase-gated.ts. It returns owner_confirmed or validated mappings on the
+      evaluatee's accepted, undeleted items for the cycle's framework version, ordered
+      by indicator and offset-paged. Files exclude anything blocked or pending; a
+      video shows its 720p copy instead of the original. There is no AI confidence,
+      rationale or suggestion. The injection flag on the evidence still shows.
+      Grants: director or school admin of the assignment's school; a member of THIS
+      committee, even from another school, while the round is not closed (PERM-003
+      once closed, FR-062b). Staff without a grant get PERM-001; someone with no
+      foothold at the school gets RES-001. The web page "หลักฐานของผู้รับการประเมิน" is
+      linked from the evaluator's round list and the director's assignment list; items
+      open the evidence page, where validate and return already live. Not done: the
+      view_original / view_derivative grant scopes (no grant table yet), committee
+      comments per indicator (FR-064), and a mobile committee view (FR-065).
+    acceptance_criteria:
+      - "seated evaluator from another school + director see items per indicator; off-committee PERM-003; stranger RES-001; evaluatee 403; closed round ends committee access"  # DONE — coverage.test
+      - "permission sweep covers listAssignmentEvidence"  # DONE — test:security
+

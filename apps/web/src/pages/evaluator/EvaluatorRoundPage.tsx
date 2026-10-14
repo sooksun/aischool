@@ -69,6 +69,7 @@ export function EvaluatorRoundPage() {
                 <div className="title">ผู้รับการประเมิน: {nameFor(a.evaluatee_personnel_id)}</div>
                 <p className="field-hint">สถานะ: {a.status} · กรรมการ {a.committee.length}/3</p>
               </Link>
+              <Link to={`/assignments/${a.id}/evidence`} className="field-hint">ดูหลักฐานตามตัวชี้วัด →</Link>
             </li>
           ))}
         </ul>
