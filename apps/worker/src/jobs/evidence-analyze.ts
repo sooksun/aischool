@@ -7,7 +7,7 @@ import type { S3Client } from '@aws-sdk/client-s3';
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import {
-  getAnalysisInput, setAnalysisStage, completeAnalysis, failAnalysis, suggestFromSegments, redactPii,
+  getAnalysisInput, setAnalysisStage, completeAnalysis, failAnalysis, suggestFromSegments, redactPii, detectInjection,
   HEURISTIC_MODEL_LABEL, HEURISTIC_PROMPT_VERSION, type NewSegment, type NewSuggestion,
 } from '@seip/database';
 import { getObjectStream } from '../s3.js';
@@ -39,11 +39,13 @@ export async function processEvidenceAnalyze(env: Env, s3: S3Client, payload: Ev
   const { evidence, framework } = input;
 
   const segments: NewSegment[] = [];
+  let tinyTextChars = 0;
   for (const file of evidence.files) {
     if (file.contentType !== 'application/pdf' || Number(file.byteSize) > PDF_MAX_BYTES) continue;
     try {
       const bytes = await readAll((await getObjectStream(s3, env.S3_BUCKET, file.storageUri)) as Readable);
       for (const p of await pdfPageTexts(bytes)) {
+        tinyTextChars += p.tinyChars;
         if (!p.text) continue;
         segments.push({ evidenceFileId: file.id, kind: 'page_block', ordinal: segments.length, page: p.page, text: p.text });
       }
@@ -82,5 +84,8 @@ export async function processEvidenceAnalyze(env: Env, s3: S3Client, payload: Ev
     // The heuristic floor: ADR-0010 tier unavailable, so degraded + provisional.
     status: 'degraded', provisional: true, modelLabel: HEURISTIC_MODEL_LABEL, promptVersion: HEURISTIC_PROMPT_VERSION,
     inputSha256, segments, suggestions,
+    // FR-028: evidence is untrusted input; signs of steering the AI are flagged
+    // for a human, never acted on.
+    injectionReasons: detectInjection({ texts: [contextText, ...segments.map((s) => s.text)], tinyTextChars }),
   });
 }

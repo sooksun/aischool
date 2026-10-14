@@ -81,6 +81,12 @@ describe('capabilitiesFromMemberships', () => {
   // endMembership to school_admin ALONE — not director, despite director holding
   // nearly every other school-wide grant. Showing the nav entry to a director
   // would be a dead end at PERM-001, so this asymmetry is asserted, not assumed.
+  it('clearInjectionFlags: school_admin only (CCR-027)', () => {
+    expect(capabilitiesFromMemberships([m('school_admin')]).clearInjectionFlags).toBe(true);
+    expect(capabilitiesFromMemberships([m('director')]).clearInjectionFlags).toBe(false);
+    expect(capabilitiesFromMemberships([m('teacher')]).clearInjectionFlags).toBe(false);
+  });
+
   it('manageMembers: school_admin only — notably NOT director', () => {
     expect(capabilitiesFromMemberships([m('school_admin')]).manageMembers).toBe(true);
     for (const role of ['teacher', 'deputy', 'director', 'evaluator', 'area_admin'] as Role[]) {

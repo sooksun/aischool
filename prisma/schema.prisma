@@ -756,6 +756,14 @@ model Evidence {
   uploadedBy   UserAccount      @relation("EvidenceUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
   category     EvidenceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
+  /// FR-028 / CCR-027: hidden-instruction signs the latest analysis found, for the
+  /// content hashed as injectionInputSha256. Cleared by a school admin for that hash.
+  injectionReasons          String[]  @default([]) @map("injection_reasons")
+  injectionInputSha256      String?   @map("injection_input_sha256")
+  injectionClearedSha256    String?   @map("injection_cleared_sha256")
+  injectionClearedAt        DateTime? @map("injection_cleared_at")
+  injectionClearedByUserId  String?   @map("injection_cleared_by_user_id") @db.Uuid
+
   files          EvidenceFile[]
   mappings       EvidenceIndicatorMapping[]
   analyses       EvidenceAnalysis[]

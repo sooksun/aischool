@@ -17,6 +17,7 @@ export * from './repositories/reports.js';
 export * from './lib/local-heuristic-mapping.js';
 export * from './lib/heuristic-suggest.js';
 export * from './lib/pii-redact.js';
+export * from './lib/injection-detect.js';
 export * from './repositories/analysis.js';
 export * from './repositories/web-sessions.js';
 export * from './repositories/device-sessions.js';

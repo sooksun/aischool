@@ -255,6 +255,8 @@ const OPERATIONS = () => ({
   getEvidenceFileDownloadUrl: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/files/${randomUUID()}/download-url` },
   listEvidenceMappings: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/mappings` },
   acceptEvidence: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/accept` },
+  // CCR-027: not flagged → a granted school admin gets the item back unchanged.
+  clearInjectionFlag: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/injection-flag/clear` },
   createMapping: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, payload: { indicator_id: randomUUID() } }, // random indicator: VAL-002 for granted roles, never PERM-001
   listMappings: { method: 'GET', url: '/api/v1/mappings' },
 

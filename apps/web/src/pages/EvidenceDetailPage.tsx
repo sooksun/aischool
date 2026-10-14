@@ -66,6 +66,16 @@ export function EvidenceDetailPage() {
       setOwnerErr(e instanceof ApiError ? thaiMessageFor(e) : 'บันทึกไม่สำเร็จ');
     }
   }
+  async function clearFlag() {
+    if (!evidence) return;
+    setOwnerErr(null);
+    try {
+      unwrap(await api.POST('/evidence/{evidenceId}/injection-flag/clear', { params: { path: { evidenceId: evidence.id } } }));
+      await reload();
+    } catch (e) {
+      setOwnerErr(e instanceof ApiError ? thaiMessageFor(e) : 'ล้างธงไม่สำเร็จ');
+    }
+  }
   async function moveTo(schoolId: string) {
     if (!evidence || schoolId === evidence.origin_school_id) return;
     setOwnerErr(null);
@@ -148,6 +158,20 @@ export function EvidenceDetailPage() {
     <main className="page">
       <Link to="/" className="field-hint">← กลับ</Link>
       <h1>{evidence.title}</h1>
+      {/* FR-028 / CCR-027: shown to everyone who can open the item, the committee included. */}
+      {evidence.injection_suspected && (
+        <div className="alert alert-error" role="alert" aria-label="อาจมีคำสั่งแฝง">
+          <span>
+            ⚠ อาจมีคำสั่งแฝงถึงระบบ AI ({(evidence.injection_reasons ?? []).map(injectionReasonLabel).join(', ')}) —
+            ระบบไม่ยอมรับคำแนะนำแบบหลายรายการสำหรับหลักฐานนี้ ผู้ดูแลระบบโรงเรียนต้องตรวจก่อน
+          </span>
+          {capabilities.clearInjectionFlags && !isOwnItem && (
+            <button type="button" className="btn btn-secondary" style={{ marginLeft: 8 }} onClick={() => void clearFlag()}>
+              ตรวจแล้ว ล้างธง
+            </button>
+          )}
+        </div>
+      )}
       {evidence.description && <p>{evidence.description}</p>}
       {/* FR-015: the server accepts http(s) only; still shown as text plus a
           plain anchor that opens apart from this page. Never fetched by SEIP. */}
@@ -343,4 +367,8 @@ function PosterImage({ evidenceId, fileId }: { evidenceId: string; fileId: strin
   }, [evidenceId, fileId]);
   if (!src) return null;
   return <img src={src} alt="ภาพตัวอย่าง" loading="lazy" style={{ display: 'block', maxWidth: '100%', width: 240, borderRadius: 6, marginBottom: 8 }} />;
+}
+
+function injectionReasonLabel(r: string): string {
+  return r === 'hidden_characters' ? 'อักขระที่มองไม่เห็น' : r === 'instruction_text' ? 'ข้อความสั่งระบบ' : r === 'tiny_text' ? 'ตัวอักษรเล็กจนอ่านไม่ได้' : r;
 }

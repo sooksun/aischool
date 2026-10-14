@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Hidden-instruction flag (SEIP-P3-003, CCR-027, in review):** an item that seems to carry text aimed at the AI is flagged. That covers "ignore previous instructions", "map this to every indicator", invisible characters and microscopic text. A flagged item gets no shortcut acceptance, and everyone who opens it sees a warning. Only the school admin can clear the flag, never the owner.
+>
 > **Personal data masked (SEIP-P3-002, in review):** national ID numbers, phone numbers and emails in evidence are masked before suggestions are made. Quotes and text shown to the director or committee never carry them. The owner still sees the original.
 >
 > **P3 started — indicator suggestions (SEIP-P3-001, in review):** each item is analysed automatically. PDF text is read page by page and the system suggests matching indicators. Each suggestion quotes the page it found the words on, and the quote is checked against that page. The teacher presses "ใช่ ผูกตัวชี้วัดนี้" or "ไม่ใช่" with a reason. Nothing is mapped without the teacher. Until the in-country GPU exists, the suggestions come from simple word matching, and the page says so clearly.

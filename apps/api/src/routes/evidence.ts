@@ -14,7 +14,7 @@ import {
   getEvidenceCategoryById, writeAuditEvent, aggregateScanStatus, getSchoolAreaId, acceptEvidenceByOwner, findOwnerFilesByChecksum,
   listEvaluateePersonIdsForCommitteeMember, getPersonnelInSchoolByPerson,
   openUploadSession, getUploadSession, claimUploadForCompletion, releaseUploadClaim,
-  finishUpload, abortUploadSession, requestAnalysis,
+  finishUpload, abortUploadSession, requestAnalysis, isInjectionSuspected, clearInjectionFlag,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { requireCurrentSchool, type AuthedRequest } from '../plugins/auth.js';
@@ -38,8 +38,12 @@ export function serializeEvidence(e: {
   academicYearBe: number | null; semester: number | null; containsLearners: string;
   clientUuid: string | null; version: number; createdAt: Date; updatedAt: Date;
   ownerAcceptedAt?: Date | null;
+  injectionReasons?: string[]; injectionInputSha256?: string | null; injectionClearedSha256?: string | null;
   files?: { scanStatus: string; mediaState?: string }[];
 }) {
+  const flagged = isInjectionSuspected({
+    injectionReasons: e.injectionReasons ?? [], injectionInputSha256: e.injectionInputSha256 ?? null, injectionClearedSha256: e.injectionClearedSha256 ?? null,
+  });
   return {
     id: e.id,
     owner_person_id: e.ownerPersonId,
@@ -66,6 +70,8 @@ export function serializeEvidence(e: {
     updated_at: e.updatedAt.toISOString(),
     owner_accepted_at: e.ownerAcceptedAt ? e.ownerAcceptedAt.toISOString() : null,
     scan_status: aggregateScanStatus(e.files ?? []),
+    injection_suspected: flagged,
+    injection_reasons: (flagged ? e.injectionReasons ?? [] : []) as ('hidden_characters' | 'instruction_text' | 'tiny_text')[],
   };
 }
 
@@ -359,6 +365,27 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
   });
 
   // CCR-024: the owner accepts an item a school admin uploaded on their behalf.
+  // FR-028 / CCR-027: a school admin clears the hidden-instruction flag after
+  // looking at the item — never the owner, even one who is also school admin.
+  app.post('/evidence/:evidenceId/injection-flag/clear', { config: { operationId: 'clearInjectionFlag' } }, async (request) => {
+    const auth = request.auth!;
+    const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);
+    const existing = await getEvidenceDetail(evidenceId);
+    if (!existing) throw new ApiError('RES-001', 'Evidence not found');
+    const grant = await authorizeEvidence('clearInjectionFlag', auth, existing);
+    if (grant === 'area-r') throw forbiddenAreaWrite();
+    if (isOwner(auth, existing)) throw new ApiError('PERM-001', 'The owner cannot clear the flag on their own item');
+    const { row, changed } = await clearInjectionFlag(evidenceId, auth.userId);
+    if (changed) {
+      await writeAuditEvent({
+        schoolId: existing.originSchoolId, actorUserId: auth.userId, action: 'injection_flag_cleared', entityType: 'Evidence',
+        entityId: evidenceId, before: { injection_reasons: existing.injectionReasons }, after: { injection_cleared_sha256: row.injectionClearedSha256 },
+        requestId: request.id,
+      });
+    }
+    return serializeEvidence({ ...row, files: existing.files });
+  });
+
   app.post('/evidence/:evidenceId/accept', { config: { operationId: 'acceptEvidence' } }, async (request) => {
     const auth = request.auth!;
     const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);

@@ -1,4 +1,7 @@
 openapi: 3.1.0
+# version 4.9.0 — CCR-027 (additive): the "may contain hidden instructions" flag (FR-028).
+#   Evidence gains injection_suspected and injection_reasons; clearInjectionFlag lets a
+#   school admin clear it after review.
 # version 4.8.0 — CCR-026 (additive): same bytes in one person's portfolio (FR-012).
 #   findMyDuplicateFiles checks a SHA-256 before any bytes move; EvidenceFile gains
 #   duplicate_of_evidence_id, set once the server's own re-hash confirms the match.
@@ -31,7 +34,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.8.0
+  version: 4.9.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -1392,6 +1395,37 @@ paths:
       responses:
         '200':
           description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Evidence'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /evidence/{evidenceId}/injection-flag/clear:
+    post:
+      operationId: clearInjectionFlag
+      summary: A school admin clears the "may contain hidden instructions" flag (CCR-027, FR-028)
+      description: 'After looking at the item, a school admin of the item''s school clears
+        the flag for its current content. A later analysis of changed content can flag it
+        again. The owner cannot clear their own item. Idempotent; audited.
+
+        '
+      tags:
+      - evidence
+      parameters:
+      - name: evidenceId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Cleared (or was not flagged)
           content:
             application/json:
               schema:
@@ -4087,6 +4121,22 @@ components:
             owner uploads it; null for an item a school admin uploaded on their behalf
             until the owner accepts it (acceptEvidence). A null item cannot be mapped,
             so it does not count in the portfolio.'
+        injection_suspected:
+          type: boolean
+          description: 'FR-028 / CCR-027: the latest analysis found signs of hidden instructions
+            aimed at the AI (hidden or invisible text, instruction-like wording). While set, no
+            suggestion is batch-acceptable and the committee sees a badge. The owner cannot
+            clear it; a school admin can (clearInjectionFlag), with an audit row. Absent or
+            false when nothing was found or the flag was cleared for this content.'
+        injection_reasons:
+          type: array
+          items:
+            type: string
+            enum:
+            - hidden_characters
+            - instruction_text
+            - tiny_text
+          description: Why the item was flagged (CCR-027). Empty when not flagged.
         scan_status:
           description: 'Aggregate of attached files (CCR-009). null when there are no files.
 

@@ -27,7 +27,9 @@ export type UiCapability =
   /** listMembers / inviteMember / endMembership (CCR-014) */
   | 'manageMembers'
   /** listAreaSchools / createSchool / updateSchool / appointSchoolAdmin (CCR-021) */
-  | 'manageAreaSchools';
+  | 'manageAreaSchools'
+  /** clearInjectionFlag (CCR-027) */
+  | 'clearInjectionFlags';
 
 export type Capabilities = Record<UiCapability, boolean>;
 
@@ -59,6 +61,8 @@ export const CAPABILITY_ROLES: Record<UiCapability, readonly Role[]> = {
   // listAreaSchools, createSchool, updateSchool, appointSchoolAdmin — the only
   // writes an area-scoped role holds (permissions.yaml area_admin_writes).
   manageAreaSchools: ['area_admin'],
+  // clearInjectionFlag (CCR-027): school_admin of the item's school, never the owner.
+  clearInjectionFlags: ['school_admin'],
 };
 
 const FALSE_CAPS: Capabilities = {
@@ -70,6 +74,7 @@ const FALSE_CAPS: Capabilities = {
   submitEvidence: false,
   manageMembers: false,
   manageAreaSchools: false,
+  clearInjectionFlags: false,
 };
 
 /**

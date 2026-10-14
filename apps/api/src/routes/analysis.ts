@@ -16,7 +16,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   getEvidenceDetail, getLatestAnalysis, getAnalysisById, requestAnalysis, listSegments, listSuggestions,
-  getSuggestion, acceptSuggestionToMapping, rejectSuggestionWithReason, writeAuditEvent, ANALYSIS_RERUN_COOLDOWN_MS, redactPii,
+  getSuggestion, acceptSuggestionToMapping, rejectSuggestionWithReason, writeAuditEvent, ANALYSIS_RERUN_COOLDOWN_MS, redactPii, isInjectionSuspected,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import type { AuthedRequest } from '../plugins/auth.js';
@@ -50,12 +50,13 @@ export function serializeAnalysis(a: Analysis) {
  * (plan §3 step 5: precision ≥ 0.85 on ≥ 50 pilot items). No gate has been run
  * yet, so nothing is batch-acceptable; the gate table arrives with the pilot.
  */
-function batchAcceptable(s: Pick<Suggestion, 'band'>): boolean {
+function batchAcceptable(s: Pick<Suggestion, 'band'>, injectionSuspected: boolean): boolean {
   const gatePassed = false;
-  return s.band === 'clear' && gatePassed;
+  // FR-028: nothing on an item flagged for hidden instructions is batch-accepted.
+  return s.band === 'clear' && gatePassed && !injectionSuspected;
 }
 
-export function serializeSuggestion(s: Suggestion, owner: boolean) {
+export function serializeSuggestion(s: Suggestion, owner: boolean, injectionSuspected = false) {
   return {
     id: s.id,
     evidence_id: s.evidenceId,
@@ -64,7 +65,7 @@ export function serializeSuggestion(s: Suggestion, owner: boolean) {
     framework_version_id: s.frameworkVersionId,
     band: s.band,
     support: s.support,
-    batch_acceptable: batchAcceptable(s),
+    batch_acceptable: batchAcceptable(s, injectionSuspected),
     calibrated_p: owner ? s.calibratedP : null,
     rationale_th: owner ? s.rationaleTh : null,
     locators: (s.locators ?? []) as unknown[],
@@ -164,7 +165,8 @@ export const analysisRoutes: FastifyPluginAsync = async (app) => {
     await authorizeEvidence('listEvidenceSuggestions', auth, evidence);
     const owner = isOwner(auth, evidence);
     const [rows, latest] = await Promise.all([listSuggestions(evidenceId, q.status), getLatestAnalysis(evidenceId)]);
-    return { items: rows.map((s) => serializeSuggestion(s, owner)), analysis: latest ? serializeAnalysis(latest) : null };
+    const flagged = isInjectionSuspected(evidence);
+    return { items: rows.map((s) => serializeSuggestion(s, owner, flagged)), analysis: latest ? serializeAnalysis(latest) : null };
   });
 
   app.post('/suggestions/:suggestionId/accept', { config: { operationId: 'acceptSuggestion' } }, async (request, reply) => {
@@ -209,7 +211,7 @@ export const analysisRoutes: FastifyPluginAsync = async (app) => {
         }
         const { s, evidence } = found;
         if (s.status !== 'open') { skipped.push({ suggestion_id: id, code: 'AI-003' }); continue; }
-        if (!batchAcceptable(s) || !evidence.ownerAcceptedAt) { skipped.push({ suggestion_id: id, code: 'AI-004' }); continue; }
+        if (!batchAcceptable(s, isInjectionSuspected(evidence)) || !evidence.ownerAcceptedAt) { skipped.push({ suggestion_id: id, code: 'AI-004' }); continue; }
         const r = await acceptSuggestionToMapping({ suggestionId: s.id, ownerUserId: auth.userId, schoolId, requestId: request.id });
         if (r.ok) accepted.push(serializeMapping(r.row));
         else skipped.push({ suggestion_id: id, code: r.reason === 'not_open' ? 'AI-003' : 'MAP-001' });

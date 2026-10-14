@@ -681,6 +681,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evidence/{evidenceId}/injection-flag/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A school admin clears the "may contain hidden instructions" flag (CCR-027, FR-028)
+         * @description After looking at the item, a school admin of the item's school clears the flag for its current content. A later analysis of changed content can flag it again. The owner cannot clear their own item. Idempotent; audited.
+         */
+        post: operations["clearInjectionFlag"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/evidence/{evidenceId}/mappings": {
         parameters: {
             query?: never;
@@ -1934,6 +1954,10 @@ export interface components {
              * @description When the owner accepted the item (CCR-024). Set at creation when the owner uploads it; null for an item a school admin uploaded on their behalf until the owner accepts it (acceptEvidence). A null item cannot be mapped, so it does not count in the portfolio.
              */
             owner_accepted_at?: string | null;
+            /** @description FR-028 / CCR-027: the latest analysis found signs of hidden instructions aimed at the AI (hidden or invisible text, instruction-like wording). While set, no suggestion is batch-acceptable and the committee sees a badge. The owner cannot clear it; a school admin can (clearInjectionFlag), with an audit row. Absent or false when nothing was found or the flag was cleared for this content. */
+            injection_suspected?: boolean;
+            /** @description Why the item was flagged (CCR-027). Empty when not flagged. */
+            injection_reasons?: ("hidden_characters" | "instruction_text" | "tiny_text")[];
             /**
              * @description Aggregate of attached files (CCR-009). null when there are no files.
              *     Worst-of order: pending > blocked > unscanned > clean. Present on list and detail so
@@ -4083,6 +4107,31 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Evidence"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    clearInjectionFlag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evidenceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared (or was not flagged) */
             200: {
                 headers: {
                     [name: string]: unknown;

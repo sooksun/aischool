@@ -2024,3 +2024,36 @@ tasks:
       - "quotes carry no PII; owner sees original segment, director masked"          # DONE — worker + api tests
       - "≥ 200-document Thai recall benchmark"                                        # OPEN
 
+  - id: SEIP-P3-003
+    title: "P3 — FR-028 flag items that may carry hidden instructions for the AI; only a school admin clears it (CCR-027)"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001]
+    decisions: [ADR-0010, CCR-027]
+    primary_paths:
+      - packages/database/src/lib/injection-detect.ts
+      - apps/worker/src/pdf-text.ts
+      - apps/worker/src/jobs/evidence-analyze.ts
+      - apps/api/src/routes/evidence.ts
+      - apps/api/src/routes/analysis.ts
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+      - prisma/migrations/20261014000200_injection_flag/migration.sql
+      - docs/reviews/CCR-027-hidden-instruction-flag.md
+    notes: >
+      Additive, contract 4.9.0 / permissions 2.9.0. The rules-only detector (no model,
+      no network) checks three things: zero-width and bidi characters (≥ 3);
+      instruction wording addressed to an AI or asking for a score or blanket mapping,
+      in Thai and English, read after the hidden characters are stripped so they
+      cannot break up a phrase; and PDF text under 2 pt (≥ 20 characters, from pdf.js
+      text transforms). Ordinary uses ("นักเรียนใช้ AI", "ครูให้คะแนนตาม rubric") are
+      not flagged. The flag is stored on the evidence with the content hash it was
+      found for, and a clear applies to that hash only. While flagged, nothing is
+      batch-acceptable. The badge is shown to all readers. clearInjectionFlag is for
+      the school admin only, never the owner, and is audited. Not done: comparing the
+      text layer against an OCR of the rendered page (GPU tier); Office hidden
+      sheets, QR codes and link snapshots (extract service); and step-up on clearing.
+    acceptance_criteria:
+      - "Thai/English instruction text, hidden chars, tiny text flagged; ordinary text not"  # DONE — injection-detect.test, worker test
+      - "owner and director cannot clear; school admin clears with audit; same content stays cleared"  # DONE — api analysis.test
+      - "permission sweep covers clearInjectionFlag"                                         # DONE — test:security
+

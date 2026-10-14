@@ -45,7 +45,8 @@
 #   acknowledges a school administrator's agreement (ว10), and only that; school roles
 #   acknowledge teachers' agreements only. acknowledgeAgreement joins area_admin_writes.
 # version: 2.8.0 — CCR-026 (additive): findMyDuplicateFiles, self-scoped.
-version: 2.8.0
+# version: 2.9.0 — CCR-027 (additive): clearInjectionFlag, school_admin of the item's school.
+version: 2.9.0
 status: locked
 locked_at: 2026-07-17
 
@@ -199,6 +200,7 @@ matrix:
   listEvidenceMappings:    { teacher: own, director: school, deputy: own, evaluator: committee, school_admin: school, area_admin: area-r }
   createMapping:           { teacher: own, deputy: own, director: own }
   acceptEvidence:          { teacher: own, deputy: own, director: own, school_admin: own }   # the owner only (CCR-024)
+  clearInjectionFlag:      { school_admin: school }   # FR-028 / CCR-027: never the owner
   listMappings:            { director: school, school_admin: school, evaluator: committee, area_admin: area-r }
   actOnMapping:            # revoke (owner) | validate / return (director, committee — min_acr 2)
     teacher: own-revoke

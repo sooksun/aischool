@@ -171,6 +171,8 @@ export async function completeAnalysis(input: {
   analysisId: string; evidenceId: string; frameworkVersionId: string | null;
   status: 'succeeded' | 'degraded'; provisional: boolean; modelLabel: string; promptVersion: string; inputSha256: string | null;
   segments: NewSegment[]; suggestions: NewSuggestion[];
+  /** FR-028 / CCR-027 — stored on the evidence with the content hash it was found for. */
+  injectionReasons?: string[];
 }) {
   await prisma.$transaction(async (tx) => {
     const ids = new Map<number, string>();
@@ -193,6 +195,10 @@ export async function completeAnalysis(input: {
         });
       }
     }
+    await tx.evidence.update({
+      where: { id: input.evidenceId },
+      data: { injectionReasons: input.injectionReasons ?? [], injectionInputSha256: input.inputSha256 },
+    });
     await tx.evidenceAnalysis.update({
       where: { id: input.analysisId },
       data: { status: input.status, provisional: input.provisional, stage: null, finishedAt: new Date() },
@@ -203,4 +209,20 @@ export async function completeAnalysis(input: {
 /** A no-op when the analysis is gone with its deleted evidence (cascade). */
 export async function failAnalysis(analysisId: string, errorCode: string) {
   await prisma.evidenceAnalysis.updateMany({ where: { id: analysisId }, data: { status: 'failed', errorCode, finishedAt: new Date() } });
+}
+
+/** FR-028: flagged unless a school admin cleared it for this very content. */
+export function isInjectionSuspected(e: { injectionReasons: string[]; injectionInputSha256: string | null; injectionClearedSha256: string | null }): boolean {
+  return e.injectionReasons.length > 0 && e.injectionInputSha256 !== e.injectionClearedSha256;
+}
+
+/** CCR-027: a school admin clears the flag for the content it was raised on. */
+export async function clearInjectionFlag(evidenceId: string, userId: string) {
+  const e = await prisma.evidence.findUniqueOrThrow({ where: { id: evidenceId } });
+  if (!isInjectionSuspected(e)) return { row: e, changed: false };
+  const row = await prisma.evidence.update({
+    where: { id: evidenceId },
+    data: { injectionClearedSha256: e.injectionInputSha256, injectionClearedAt: new Date(), injectionClearedByUserId: userId },
+  });
+  return { row, changed: true };
 }
