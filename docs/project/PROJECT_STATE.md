@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Share to SEIP (SEIP-P2-013, in review, Android only, not yet run on a phone):** on Android, files and links shared from LINE, Drive or Photos go into SEIP as received. iOS still needs a Share Extension.
+>
 > **Document scan (SEIP-P2-012, in review, not yet run on a phone):** the app has a "สแกนเอกสาร" button. The phone's own scanner crops and straightens each page, and all the pages become one PDF. The PDF step is tested. The scanner itself still needs a real Android phone and iPhone.
 >
 > **Clip length warning (SEIP-P2-011, in review):** after a recording, the app shows its length and warns when it is longer than the chosen category allows. The limit comes from framework data. The warning does not stop the person from saving.

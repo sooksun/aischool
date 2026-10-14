@@ -1,5 +1,6 @@
 // FR-001/003/004/017: capture on the home screen goes into the offline outbox
 // and is listed with its status in Thai, even with no network.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -247,6 +248,55 @@ void main() {
     expect(formatClock(600000), '10:00');
     expect(formatClock(3725000), '1:02:05');
   });
+
+  testWidgets('FR-004: two photos shared from LINE become one item; a shared link opens the link form', (tester) async {
+    final session = SeipSession(dio: Dio()..httpClientAdapter = _OfflineApi(), baseUrl: 'https://api.test/api/v1');
+    final store = MemoryOutboxStore();
+    final shares = _FakeShares();
+    final services = AppServices(
+      outboxFor: (api) => Outbox(api: api, store: store, bytes: _NoBytes(), objects: _NoObjects()),
+      capture: _FakeCapture(),
+      hash: (_) async => 'f' * 64,
+      shares: shares,
+    );
+    const me = CurrentUser(id: 'u', email: 'kru@seip.local', displayName: 'ครูสมศรี', memberships: []);
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(session: session, me: me, services: services)));
+    await tester.pumpAndSettle();
+
+    shares.controller.add(const SharedIn(files: [
+      CapturedFile(path: '/private/outbox/l1.jpg', filename: 'l1.jpg', contentType: 'image/jpeg', byteSize: 10),
+      CapturedFile(path: '/private/outbox/l2.jpg', filename: 'l2.jpg', contentType: 'image/jpeg', byteSize: 11),
+    ]));
+    await tester.pumpAndSettle();
+    expect(find.text('ภาพกิจกรรม'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('save')));
+    await tester.pumpAndSettle();
+    final items = await store.load();
+    expect(items.length, 2);
+    expect(items.map((i) => i.groupUuid).toSet().single, isNotNull);
+
+    shares.controller.add(const SharedIn(link: 'https://youtu.be/abc'));
+    await tester.pumpAndSettle();
+    expect(find.text('https://youtu.be/abc'), findsOneWidget, reason: 'prefilled');
+    await tester.enterText(find.byKey(const Key('lnTitle')), 'คลิปจากไลน์');
+    await tester.tap(find.byKey(const Key('lnSave')));
+    await tester.pumpAndSettle();
+    expect((await store.load()).last.linkUrl, 'https://youtu.be/abc');
+  });
+
+  test('firstWebAddress finds the link in shared text', () {
+    expect(firstWebAddress('ดูคลิปนี้ https://youtu.be/abc ครับ'), 'https://youtu.be/abc');
+    expect(firstWebAddress('(https://drive.google.com/x).'), 'https://drive.google.com/x');
+    expect(firstWebAddress('ไม่มีลิงก์ javascript:alert(1)'), isNull);
+  });
+}
+
+class _FakeShares implements ShareInbox {
+  final controller = StreamController<SharedIn>.broadcast();
+  @override
+  Future<SharedIn?> initial() async => null;
+  @override
+  Stream<SharedIn> get incoming => controller.stream;
 }
 
 class _Metered implements NetworkInfo {

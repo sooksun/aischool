@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:cunning_document_scanner/cunning_document_scanner.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -110,4 +111,79 @@ class DeviceCaptureSource implements CaptureSource {
     }
     return CapturedFile(path: target, filename: name, contentType: type, byteSize: await File(target).length(), durationMs: durationMs);
   }
+}
+
+/// FR-004: what another app (LINE, Google Drive, Photos) shared to SEIP —
+/// files as received, already copied into the outbox directory, or a link.
+class SharedIn {
+  const SharedIn({this.files = const [], this.link});
+  final List<CapturedFile> files;
+  final String? link;
+  bool get isEmpty => files.isEmpty && link == null;
+}
+
+abstract class ShareInbox {
+  /// What launched the app, if a share did (read once, then cleared).
+  Future<SharedIn?> initial();
+
+  /// Shares that arrive while the app is open.
+  Stream<SharedIn> get incoming;
+}
+
+class NoShareInbox implements ShareInbox {
+  const NoShareInbox();
+  @override
+  Future<SharedIn?> initial() async => null;
+  @override
+  Stream<SharedIn> get incoming => const Stream.empty();
+}
+
+/// The first http(s) address in shared text ("ดูคลิปนี้ https://youtu.be/x").
+String? firstWebAddress(String text) {
+  for (final m in RegExp(r'https?://[^\s<>"]+', caseSensitive: false).allMatches(text)) {
+    final u = Uri.tryParse(m[0]!.replaceAll(RegExp(r'[).,;!?]+$'), ''));
+    if (u != null && u.host.isNotEmpty) return u.toString();
+  }
+  return null;
+}
+
+class DeviceShareInbox implements ShareInbox {
+  final _intent = ReceiveSharingIntent.instance;
+
+  Future<SharedIn> _convert(List<SharedMediaFile> shared) async {
+    final files = <CapturedFile>[];
+    String? link;
+    final dir = Directory('${(await getApplicationSupportDirectory()).path}/outbox');
+    await dir.create(recursive: true);
+    for (final m in shared) {
+      if (m.type == SharedMediaType.text || m.type == SharedMediaType.url) {
+        link ??= firstWebAddress(m.path);
+        continue;
+      }
+      // The plugin's copy sits in a temp cache; the outbox keeps its own.
+      final name = m.path.split('/').last;
+      final target = '${dir.path}/${DateTime.now().microsecondsSinceEpoch}-$name';
+      await File(m.path).copy(target);
+      files.add(CapturedFile(
+        path: target,
+        filename: name,
+        contentType: m.mimeType ?? contentTypeFor(name),
+        byteSize: await File(target).length(),
+        durationMs: m.duration,
+      ));
+    }
+    return SharedIn(files: files, link: link);
+  }
+
+  @override
+  Future<SharedIn?> initial() async {
+    final shared = await _intent.getInitialMedia();
+    if (shared.isEmpty) return null;
+    final result = await _convert(shared);
+    await _intent.reset();
+    return result;
+  }
+
+  @override
+  Stream<SharedIn> get incoming => _intent.getMediaStream().where((s) => s.isNotEmpty).asyncMap(_convert);
 }

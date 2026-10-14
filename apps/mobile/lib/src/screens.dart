@@ -131,17 +131,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
 /// What the home screen needs from the device. Tests pass fakes.
 class AppServices {
-  AppServices({required this.outboxFor, required this.capture, required this.hash});
+  AppServices({required this.outboxFor, required this.capture, required this.hash, this.shares = const NoShareInbox()});
 
   factory AppServices.device() => AppServices(
     outboxFor: (api) => Outbox(api: api, store: SecureOutboxStore(), bytes: LocalFileBytes(), objects: DioObjectStore(), network: ConnectivityNetwork()),
     capture: DeviceCaptureSource(),
     hash: sha256OfFile,
+    shares: DeviceShareInbox(),
   );
 
   final Outbox Function(SeipApi api) outboxFor;
   final CaptureSource capture;
   final Future<String> Function(String path) hash;
+
+  /// FR-004: files and links shared to SEIP from other apps.
+  final ShareInbox shares;
 }
 
 /// FR-017: the item's state in words a teacher reads at a glance.
@@ -168,11 +172,18 @@ class _HomeScreenState extends State<HomeScreen> {
   List<OutboxItem> _items = [];
   bool _syncing = false;
   Timer? _timer;
+  StreamSubscription<SharedIn>? _shares;
 
   @override
   void initState() {
     super.initState();
     _sync();
+    // FR-004: a share that launched the app, then any that arrive while open.
+    _shares = _services.shares.incoming.listen(_receive);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final first = await _services.shares.initial().catchError((_) => null);
+      if (first != null) await _receive(first);
+    });
     // While the screen is open, keep trying: a drain that finds no network
     // simply stops and leaves the queue as it was.
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => _sync());
@@ -181,6 +192,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _shares?.cancel();
     _outbox.onChanged = null;
     super.dispose();
   }
@@ -228,6 +240,14 @@ class _HomeScreenState extends State<HomeScreen> {
         if (next != null) files.add(next);
       }
     }
+    await _enqueueFiles(files);
+  }
+
+  /// Asks once for category and title, then queues the files as one item
+  /// (several files share a group, FR-001).
+  Future<void> _enqueueFiles(List<CapturedFile> files) async {
+    if (files.isEmpty || !mounted) return;
+    final first = files.first;
     List<EvidenceCategory> categories;
     try {
       categories = (await widget.session.api.taxonomy.listEvidenceCategories())
@@ -271,9 +291,19 @@ class _HomeScreenState extends State<HomeScreen> {
     await _sync();
   }
 
+  /// FR-004: a share from another app — files as received, or a link.
+  Future<void> _receive(SharedIn shared) async {
+    if (shared.isEmpty || !mounted) return;
+    if (shared.files.isNotEmpty) {
+      await _enqueueFiles(shared.files);
+    } else {
+      await _addLinkNote(link: shared.link);
+    }
+  }
+
   /// FR-015: a link or a typed note — no bytes; queued like a capture so it
   /// works offline and is created once.
-  Future<void> _addLinkNote() async {
+  Future<void> _addLinkNote({String? link}) async {
     List<EvidenceCategory> categories;
     try {
       categories = await widget.session.api.taxonomy.listEvidenceCategories();
@@ -285,7 +315,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('ยังไม่ได้เชื่อมต่อ — โหลดประเภทหลักฐานไม่ได้')));
       return;
     }
-    final item = await showDialog<OutboxItem>(context: context, builder: (_) => LinkNoteDialog(categories: categories));
+    final item = await showDialog<OutboxItem>(context: context, builder: (_) => LinkNoteDialog(categories: categories, link: link));
     if (item == null) return;
     await _outbox.add(item);
     await _sync();
@@ -352,7 +382,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 OutlinedButton.icon(
                   key: const Key('addLinkNote'),
-                  onPressed: _addLinkNote,
+                  onPressed: () => _addLinkNote(),
                   icon: const Icon(Icons.link),
                   label: const Text('ลิงก์/บันทึก'),
                 ),
@@ -472,8 +502,11 @@ bool isWebAddress(String value) {
 }
 
 class LinkNoteDialog extends StatefulWidget {
-  const LinkNoteDialog({super.key, required this.categories});
+  const LinkNoteDialog({super.key, required this.categories, this.link});
   final List<EvidenceCategory> categories;
+
+  /// Prefilled from a share (FR-004).
+  final String? link;
 
   @override
   State<LinkNoteDialog> createState() => _LinkNoteDialogState();
@@ -481,7 +514,7 @@ class LinkNoteDialog extends StatefulWidget {
 
 class _LinkNoteDialogState extends State<LinkNoteDialog> {
   final _title = TextEditingController();
-  final _body = TextEditingController();
+  late final _body = TextEditingController(text: widget.link ?? '');
   late EvidenceCategory _category = widget.categories.first;
   EvidenceKind _kind = EvidenceKind.link;
   String? _error;

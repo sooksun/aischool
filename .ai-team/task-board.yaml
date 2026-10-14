@@ -1898,3 +1898,31 @@ tasks:
       - "3 pages -> one PDF with 3 pages, landscape kept"  # DONE — scan_pdf_test
       - "scan on a real Android and iPhone"                 # OPEN — needs a device
 
+  - id: SEIP-P2-013
+    title: "P2 — FR-004 share to SEIP from other apps (Android); a shared link opens the link form"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-008, SEIP-P2-009]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/capture.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/capture_flow_test.dart
+      - apps/mobile/android/app/src/main/AndroidManifest.xml
+    notes: >
+      receive_sharing_intent sits behind ShareInbox. Android declares SEND and
+      SEND_MULTIPLE for */*. Shared files are taken as received, copied from the plugin's
+      temp cache into the private outbox directory, and queued through the same path as a
+      capture: one dialog, and several files become one item (FR-001 group). Shared text
+      yields its first http(s) address (firstWebAddress, unit-tested), which opens the
+      link form prefilled (FR-015). The home screen reads the launch share once (then
+      reset) and listens while open. A share made while signed out is picked up after
+      sign-in, because the plugin keeps it until read. NOT DONE: iOS. It needs a Share
+      Extension target and an App Group in Xcode, which cannot be created or built here.
+      NOT VERIFIED ON A DEVICE: the Android build and plugin are uncompiled in this
+      environment.
+    acceptance_criteria:
+      - "widget: 2 shared photos -> one grouped item; shared link -> prefilled link form"  # DONE
+      - "share from LINE / Drive / Photos on Android"                                      # OPEN — needs a device
+      - "iOS Share Extension"                                                              # OPEN
+
