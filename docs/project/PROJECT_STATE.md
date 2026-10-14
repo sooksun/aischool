@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Clip length warning (SEIP-P2-011, in review):** after a recording, the app shows its length and warns when it is longer than the chosen category allows. The limit comes from framework data. The warning does not stop the person from saving.
+>
 > **Wi-Fi for large files (SEIP-P2-010, in review):** in the app, a file over 50 MB waits for Wi-Fi when the phone is on mobile data. The person can tap "ใช้เน็ตมือถือ" to send that one anyway.
 >
 > **Links and notes (SEIP-P2-009, in review):** on the web and in the app (offline too), evidence can now be a link (YouTube, Drive) or a typed note. It maps to indicators like a file. Links must start with http(s).

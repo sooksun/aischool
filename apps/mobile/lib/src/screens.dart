@@ -244,7 +244,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final picked = await showDialog<(EvidenceCategory, String)>(
       context: context,
-      builder: (_) => _DetailsDialog(categories: categories, suggestedTitle: first.filename.replaceAll(RegExp(r'\.[^.]+$'), '')),
+      builder: (_) => _DetailsDialog(
+        categories: categories,
+        suggestedTitle: first.filename.replaceAll(RegExp(r'\.[^.]+$'), ''),
+        durationMs: first.durationMs,
+      ),
     );
     if (picked == null) return;
     final group = files.length > 1 ? newClientUuid() : null;
@@ -384,9 +388,12 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _DetailsDialog extends StatefulWidget {
-  const _DetailsDialog({required this.categories, required this.suggestedTitle});
+  const _DetailsDialog({required this.categories, required this.suggestedTitle, this.durationMs});
   final List<EvidenceCategory> categories;
   final String suggestedTitle;
+
+  /// A recording's measured length; null for photos and files.
+  final int? durationMs;
 
   @override
   State<_DetailsDialog> createState() => _DetailsDialogState();
@@ -415,6 +422,12 @@ class _DetailsDialogState extends State<_DetailsDialog> {
             controller: _title,
             decoration: const InputDecoration(labelText: 'ชื่อหลักฐาน'),
           ),
+          if (widget.durationMs != null) ...[
+            const SizedBox(height: 8),
+            Text('ความยาว ${formatClock(widget.durationMs!)}', key: const Key('duration')),
+            if (durationWarning(widget.durationMs!, _category) case final w?)
+              Text(w, key: const Key('durationWarning'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ],
         ],
       ),
       actions: [
@@ -427,6 +440,23 @@ class _DetailsDialogState extends State<_DetailsDialog> {
       ],
     );
   }
+}
+
+/// m:ss, or h:mm:ss from an hour up.
+String formatClock(int ms) {
+  final t = Duration(milliseconds: ms);
+  String two(int n) => n.toString().padLeft(2, '0');
+  final m = t.inMinutes.remainder(60), sec = t.inSeconds.remainder(60);
+  return t.inHours > 0 ? '${t.inHours}:${two(m)}:${two(sec)}' : '$m:${two(sec)}';
+}
+
+/// FR-003: a warning — never a stop — when a recording is longer than the
+/// category allows. The cap is framework data (max_duration_seconds), never a
+/// constant here. Null when it fits or the category has no cap.
+String? durationWarning(int durationMs, EvidenceCategory category) {
+  final cap = category.maxDurationSeconds;
+  if (cap == null || durationMs <= cap * 1000) return null;
+  return 'ยาวเกินที่ "${category.labelTh}" กำหนด (ไม่เกิน ${formatClock(cap * 1000)}) — ระบบจะไม่รับคลิปนี้ในประเภทนี้ ลองเลือกประเภทอื่นหรือตัดให้สั้นลง';
 }
 
 /// http(s) only — what the server accepts for a link.

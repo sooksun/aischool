@@ -33,6 +33,14 @@ class _OfflineApi implements HttpClientAdapter {
             'allowed_mime_types': ['image/jpeg'],
             'required_for_dpa': false,
           },
+          {
+            'id': 'cat-clip',
+            'code': 'problem_clip',
+            'label_th': 'คลิปสภาพปัญหา',
+            'allowed_mime_types': ['video/mp4'],
+            'max_duration_seconds': 30,
+            'required_for_dpa': false,
+          },
         ]),
         200,
         headers: {
@@ -208,6 +216,36 @@ void main() {
     await tester.pumpAndSettle();
     expect((await store.load()).single.allowMobileData, isTrue);
     expect(find.text('รอ Wi-Fi (ไฟล์ใหญ่)'), findsNothing);
+  });
+
+  testWidgets('FR-003: a clip longer than its category allows is warned about, not stopped', (tester) async {
+    final session = SeipSession(dio: Dio()..httpClientAdapter = _OfflineApi(), baseUrl: 'https://api.test/api/v1');
+    final store = MemoryOutboxStore();
+    final services = AppServices(
+      outboxFor: (api) => Outbox(api: api, store: store, bytes: _NoBytes(), objects: _NoObjects()),
+      capture: _FakeCapture(), // a 42 s clip
+      hash: (_) async => 'e' * 64,
+    );
+    const me = CurrentUser(id: 'u', email: 'kru@seip.local', displayName: 'ครูสมศรี', memberships: []);
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(session: session, me: me, services: services)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('captureVideo')));
+    await tester.pumpAndSettle();
+    expect(find.text('ความยาว 0:42'), findsOneWidget);
+    expect(find.byKey(const Key('durationWarning')), findsNothing, reason: 'วิดีโอการสอน has no cap in this data');
+
+    await tester.tap(find.byKey(const Key('category')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('คลิปสภาพปัญหา').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('durationWarning')), findsOneWidget);
+    expect(find.textContaining('ไม่เกิน 0:30'), findsOneWidget);
+  });
+
+  test('formatClock', () {
+    expect(formatClock(42000), '0:42');
+    expect(formatClock(600000), '10:00');
+    expect(formatClock(3725000), '1:02:05');
   });
 }
 

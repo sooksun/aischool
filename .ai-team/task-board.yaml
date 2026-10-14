@@ -1851,3 +1851,24 @@ tasks:
       - "allow_mobile_data survives a restart"              # DONE
       - "widget: รอ Wi-Fi + ใช้เน็ตมือถือ"                    # DONE — capture_flow_test
 
+  - id: SEIP-P2-011
+    title: "P2 — FR-003 the app shows a recording's length and warns (never stops) when it exceeds the category cap"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-004]
+    decisions: [ADR-0016, ADR-0003]
+    primary_paths:
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/capture_flow_test.dart
+    notes: >
+      After a recording, the details dialog shows "ความยาว m:ss". It warns in Thai when
+      that length exceeds the chosen category's max_duration_seconds. The cap is
+      framework data, never a constant. Changing the category re-checks it. The person
+      can still save: the server refuses at initiate (UPL-003) and on the measured
+      length (SEIP-P2-005). Not done: a live timer while recording. That needs an
+      in-app camera screen (the camera plugin) instead of the system camera through
+      image_picker. Also not done: the one_take / seam pre-flight warning, and the
+      shortest-cap fallback when no category is chosen.
+    acceptance_criteria:
+      - "length shown; warning only when over the category's cap"  # DONE — capture_flow_test
+
