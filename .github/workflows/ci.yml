@@ -457,7 +457,9 @@ jobs:
         run: scripts/ci/keycloak.sh wait
       - name: Start API and web
         run: |
-          NODE_ENV=production node apps/api/dist/index.js &
+          # The fixture teacher signs in once per spec (13+ per run) — above the
+          # production per-email cap of 12 per 15 min. Raised for this job only.
+          NODE_ENV=production LOGIN_RATE_MAX_PER_EMAIL=60 LOGIN_RATE_MAX_PER_IP=200 node apps/api/dist/index.js &
           echo $! > /tmp/seip-api.pid
           # The worker: scans, then P3 analysis (heuristic floor) the e2e
           # suggestion flow waits on. No ffmpeg in this job — media off.
