@@ -2082,3 +2082,36 @@ tasks:
     acceptance_criteria:
       - "list → item → accept removes it with a 'waiting for the director' note; reject sends the chosen reason"  # DONE — suggestions_test
 
+  - id: SEIP-P4-001
+    title: "P4 — getCoverage: per-indicator coverage for a person, school or area; web coverage page"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001]
+    decisions: [ADR-0015, ADR-0017]
+    primary_paths:
+      - packages/database/src/repositories/coverage.ts
+      - apps/api/src/routes/coverage.ts
+      - apps/api/test/coverage.test.mjs
+      - apps/web/src/pages/CoveragePage.tsx
+      - tests/e2e/coverage.spec.ts
+    notes: >
+      No contract change: getCoverage, its schemas and its permission row were in
+      contract 4.0.0, and it now leaves phase-gated.ts. For each indicator of the
+      framework version (workload-gate rows excluded) it counts live mappings by state
+      (owner_confirmed / validated / returned) and open suggestions. A person's
+      coverage counts by owner, over accepted, undeleted items. A school or area
+      counts by mapping school (the owner's school when confirmed, FR-051), with
+      people_count and never names. Grants: own (the caller's person); school
+      (director or school admin where the person is active staff); committee (a
+      seated evaluator over that person); area-r (the area admin's own area and its
+      schools). No route at all is RES-001; a role with no grant is PERM-001.
+      eligibility_warnings is [] until rules-as-data lands (ADR-0017). The web page
+      "ความครอบคลุม" lists every indicator with its counts and marks gaps; a director
+      or school admin can switch to the whole school. The security sweep checks the
+      fixture teacher's own coverage for every role. Not done: the area dashboard
+      page, the mobile summary (FR-053), and the next-deadline pin.
+    acceptance_criteria:
+      - "own / staff / school / area allowed; peer and stranger RES-001; teacher on school PERM-001"  # DONE — coverage.test
+      - "permission sweep covers getCoverage"                                                        # DONE — test:security
+      - "web: teacher table, director school switch"                                                 # DONE — e2e coverage.spec
+

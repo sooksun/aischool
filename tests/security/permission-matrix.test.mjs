@@ -265,6 +265,13 @@ const OPERATIONS = () => ({
   // outcome. The fixture suggestion's indicator is already mapped, so the
   // owner's accept is MAP-001; reject uses a fresh suggestion per call.
   requestEvidenceAnalysis: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/analysis` },
+  // Coverage of the fixture owner (the teacher): own for the teacher, school for
+  // director / school_admin, committee for the seated evaluator, area-r for the
+  // area admin. A deputy's own grant is not over someone else: RES-001.
+  getCoverage: { method: 'GET', urlFor: async () => {
+    const owner = await prisma.userAccount.findUniqueOrThrow({ where: { id: userIdFor.teacher }, select: { personId: true } });
+    return `/api/v1/coverage?subject_type=person&subject_id=${owner.personId}&framework_version_id=${frameworkId}`;
+  } },
   getEvidenceAnalysis: { method: 'GET', url: `/api/v1/analyses/${analysisId}` },
   listEvidenceSegments: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/segments` },
   listEvidenceSuggestions: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/suggestions` },

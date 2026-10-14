@@ -19,7 +19,6 @@ const GATED: [Method, string, string, string][] = [
   ['post', '/notifications/read', 'markNotificationsRead', 'P4'],
   ['get', '/notification-preferences', 'getNotificationPreferences', 'P4'],
   ['put', '/notification-preferences', 'updateNotificationPreferences', 'P4'],
-  ['get', '/coverage', 'getCoverage', 'P4'],
   ['get', '/assignments/:assignmentId/evidence', 'listAssignmentEvidence', 'P4'],
   // Exports — P5 (DPA pack, PA2 workbook, portability)
   ['get', '/dpa-slot-profiles', 'listDpaSlotProfiles', 'P5'],

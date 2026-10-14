@@ -21,6 +21,7 @@ import { AreaSchoolsPage } from './pages/area/AreaSchoolsPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { BatchUploadPage } from './pages/BatchUploadPage';
 import { LinkNotePage } from './pages/LinkNotePage';
+import { CoveragePage } from './pages/CoveragePage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AgreementPage } from './pages/agreements/AgreementPage';
@@ -123,6 +124,11 @@ function AppNav() {
           งานกรรมการ
         </Link>
       )}
+      {submitEvidence && (
+        <Link to="/coverage" className={location.pathname === '/coverage' ? 'active' : ''}>
+          ความครอบคลุม
+        </Link>
+      )}
       <Link to="/devices" className={location.pathname === '/devices' ? 'active' : ''}>
         อุปกรณ์
       </Link>
@@ -211,6 +217,7 @@ export function App() {
         } />
 
         <Route path="/devices" element={<RequireAuth><DevicesPage /></RequireAuth>} />
+        <Route path="/coverage" element={<RequireAuth><CoveragePage /></RequireAuth>} />
 
         <Route path="/area/schools" element={
           <RequireCapability capability="manageAreaSchools"><AreaSchoolsPage /></RequireCapability>
