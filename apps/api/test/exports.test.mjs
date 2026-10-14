@@ -56,7 +56,8 @@ before(async () => {
   await app.ready();
   s3 = new S3Client({
     region: env.S3_REGION, endpoint: env.S3_ENDPOINT, forcePathStyle: true,
-    credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY }, requestChecksumCalculation: 'WHEN_REQUIRED',
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY }, // gitleaks:allow — field name only; the value comes from the environment
   });
   school = created.add(await prisma.school.create({ data: { code: `exp-${randomUUID()}`, name: 'Export School' } }));
   await prisma.rankLevel.upsert({ where: { code: 'exp_kru' }, create: { code: 'exp_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 }, update: {} });
