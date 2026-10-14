@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Committee comments (SEIP-P4-006, CCR-028, in review):** the committee and the director can comment on, or ask for more about, each indicator, as text only with no score. The person evaluated reads the comments and replies. **Decision needed:** telling the evaluatee about a new comment needs a new notification type, which counts as a breaking contract change, so it waits for the owner's approval.
+>
 > **Readiness views (SEIP-P4-004/005, in review):** the area admin has a "ความพร้อมรายโรงเรียน" page with counts per school. The app's home screen shows how many indicators still have no evidence. Each app sign-in can now register its push token, but nothing is sent yet.
 >
 > **Notifications (SEIP-P4-003, in review):** the web now has a 🔔 inbox. Teachers are told when suggestions are ready, when a file was refused, and when a mapping is validated or returned, each exactly once. Settings let a person choose push, email and quiet hours. Push and email are not actually sent yet.

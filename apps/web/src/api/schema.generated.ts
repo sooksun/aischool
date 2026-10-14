@@ -1426,6 +1426,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assignments/{assignmentId}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Comments and requests for more information per indicator, with replies (CCR-028, FR-064)
+         * @description Text only — no score and no status change. The committee (while the round is open), the school's director and school admin, and the evaluatee read them.
+         */
+        get: operations["listAssignmentComments"];
+        put?: never;
+        /**
+         * A committee member or the director comments or asks for more; the evaluatee replies (CCR-028)
+         * @description The committee (while the round is open) and the director post `comment` or `request_info`, or reply to a reply. The evaluatee posts only `reply`, to a comment on their own assignment.
+         */
+        post: operations["createAssignmentComment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dpa-slot-profiles": {
         parameters: {
             query?: never;
@@ -2842,6 +2866,38 @@ export interface components {
             evidence: components["schemas"]["Evidence"];
             /** @description Review renditions the committee may open (grant scope view_derivative unless view_original was granted). */
             files: components["schemas"]["EvidenceFile"][];
+        };
+        /** @description CCR-028 (FR-064). Plain text; carries no score. */
+        AssignmentComment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            assignment_id: string;
+            /** Format: uuid */
+            indicator_id: string;
+            /** @enum {string} */
+            kind: "comment" | "request_info" | "reply";
+            body: string;
+            /** Format: uuid */
+            parent_id?: string | null;
+            /** Format: uuid */
+            author_user_id: string;
+            /** @enum {string} */
+            author_role: "committee" | "director" | "evaluatee";
+            /** Format: date-time */
+            created_at: string;
+        };
+        AssignmentCommentCreate: {
+            /** Format: uuid */
+            indicator_id: string;
+            /** @enum {string} */
+            kind: "comment" | "request_info" | "reply";
+            body: string;
+            /**
+             * Format: uuid
+             * @description Required for `reply`; the comment being answered (same indicator).
+             */
+            parent_id?: string | null;
         };
         AssignmentEvidencePage: {
             items: components["schemas"]["AssignmentEvidenceItem"][];
@@ -5402,6 +5458,64 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listAssignmentComments: {
+        parameters: {
+            query?: {
+                indicator_id?: string;
+            };
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentComment"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createAssignmentComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignmentCommentCreate"];
+            };
+        };
+        responses: {
+            /** @description Posted */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentComment"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     listDpaSlotProfiles: {

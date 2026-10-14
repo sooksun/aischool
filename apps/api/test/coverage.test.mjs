@@ -163,3 +163,48 @@ test('committee view: the seated evaluator (from another school) and the directo
   assert.equal(closed.json().code, 'PERM-003');
   assert.equal((await app.inject({ method: 'GET', url, headers: h('director') })).statusCode, 200);
 });
+
+test('CCR-028: the committee comments and asks for more per indicator; the evaluatee reads and replies; text only', async () => {
+  const cycle = await prisma.evaluationCycle.create({
+    data: { schoolId: school.id, frameworkVersionId: fw.id, fiscalYear: 2570, evaluationKind: 'pa', title: 'c2', startsOn: new Date('2027-01-01'), endsOn: new Date('2027-12-31') },
+  });
+  const round = await prisma.evaluationRound.create({
+    data: { cycleId: cycle.id, roundNumber: 1, purpose: 'x', periodStart: new Date('2027-01-01'), periodEnd: new Date('2027-06-30'), status: 'open' },
+  });
+  const a = await prisma.evaluationAssignment.create({ data: { schoolId: school.id, roundId: round.id, evaluateePersonnelId: personnelId.teacher } });
+  await prisma.committeeMember.create({ data: { assignmentId: a.id, evaluatorUserId: userId.evaluator, committeeRole: 'chair', seatNumber: 1 } });
+  const url = `/api/v1/assignments/${a.id}/comments`;
+  const ind = fw.indicators.find((i) => i.code === 'T-1.2').id;
+  const post = (key, payload, sch) => app.inject({ method: 'POST', url, headers: h(key, sch), payload });
+
+  const ask = await post('evaluator', { indicator_id: ind, kind: 'request_info', body: 'ขอดูแผนการสอนฉบับเต็มครับ' }, otherSchool);
+  assert.equal(ask.statusCode, 201, ask.body);
+  assert.equal(ask.json().author_role, 'committee');
+  const note = await post('director', { indicator_id: ind, kind: 'comment', body: 'หลักฐานชัดเจนดี' });
+  assert.equal(note.json().author_role, 'director');
+
+  // The evaluatee reads both and replies; they cannot open a thread themselves.
+  const mine = await app.inject({ method: 'GET', url, headers: h('teacher') });
+  assert.equal(mine.statusCode, 200);
+  assert.deepEqual(mine.json().map((c) => c.kind), ['request_info', 'comment']);
+  assert.equal((await post('teacher', { indicator_id: ind, kind: 'comment', body: 'x' })).json().code, 'VAL-002');
+  const reply = await post('teacher', { indicator_id: ind, kind: 'reply', body: 'แนบไว้ในหลักฐานแล้วครับ', parent_id: ask.json().id });
+  assert.equal(reply.statusCode, 201, reply.body);
+  assert.equal(reply.json().author_role, 'evaluatee');
+  assert.equal((await post('teacher', { indicator_id: ind, kind: 'reply', body: 'x' })).json().code, 'VAL-002', 'a reply needs its parent');
+  const other = fw.indicators.find((i) => i.code === 'T-1.3').id;
+  assert.equal((await post('teacher', { indicator_id: other, kind: 'reply', body: 'x', parent_id: ask.json().id })).json().code, 'VAL-002', 'same indicator as the parent');
+
+  // Others: a peer is denied, a stranger learns nothing, the off-committee evaluator is PERM-003, the school admin only reads.
+  assert.equal((await app.inject({ method: 'GET', url, headers: h('peer') })).statusCode, 403);
+  assert.equal((await app.inject({ method: 'GET', url, headers: h('stranger', otherSchool) })).statusCode, 404);
+  assert.equal((await app.inject({ method: 'GET', url, headers: h('offCommittee') })).json().code, 'PERM-003');
+  assert.ok(await prisma.outboxEvent.findFirst({ where: { eventType: 'assignment.comment.created', payload: { path: ['comment_id'], equals: reply.json().id } } }));
+  const ev = await prisma.outboxEvent.findFirst({ where: { eventType: 'assignment.comment.created', payload: { path: ['comment_id'], equals: ask.json().id } } });
+  assert.ok(!JSON.stringify(ev.payload).includes('แผนการสอน'), 'the body never goes into the event');
+
+  // FR-062b: the round closes — the committee can no longer comment or read; the evaluatee still reads.
+  await prisma.evaluationRound.update({ where: { id: round.id }, data: { status: 'closed' } });
+  assert.equal((await post('evaluator', { indicator_id: ind, kind: 'comment', body: 'x' }, otherSchool)).json().code, 'PERM-003');
+  assert.equal((await app.inject({ method: 'GET', url, headers: h('teacher') })).json().length, 3);
+});

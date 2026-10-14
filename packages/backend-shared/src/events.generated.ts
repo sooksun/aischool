@@ -3,7 +3,7 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const EVENTS_VERSION = '2.0.0';
+export const EVENTS_VERSION = '2.1.0';
 
 export type EventType =
   | 'evidence.created'
@@ -23,6 +23,7 @@ export type EventType =
   | 'round.closed'
   | 'report.generated'
   | 'ai.suggestion.created'
+  | 'assignment.comment.created'
   | 'report.approved';
 
 export interface Event_evidence_created {
@@ -138,6 +139,13 @@ export interface Event_ai_suggestion_created {
   suggestion_count: number;
 }
 
+export interface Event_assignment_comment_created {
+  assignment_id: string;
+  comment_id: string;
+  indicator_id: string;
+  kind: 'comment' | 'request_info' | 'reply';
+}
+
 export interface Event_report_approved {
   report_id: string;
   cycle_id: string;
@@ -164,6 +172,7 @@ export interface EventPayloadMap {
   'round.closed': Event_round_closed;
   'report.generated': Event_report_generated;
   'ai.suggestion.created': Event_ai_suggestion_created;
+  'assignment.comment.created': Event_assignment_comment_created;
   'report.approved': Event_report_approved;
 }
 

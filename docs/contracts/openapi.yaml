@@ -1,4 +1,8 @@
 openapi: 3.1.0
+# version 4.10.0 — CCR-028 (additive): committee comments per indicator (FR-064).
+#   listAssignmentComments / createAssignmentComment — text only, no score, no status
+#   change; the evaluatee reads and replies. (Notifying needs a new NotificationKind
+#   value — a response enum addition, breaking under contract-policy — so it waits.)
 # version 4.9.0 — CCR-027 (additive): the "may contain hidden instructions" flag (FR-028).
 #   Evidence gains injection_suspected and injection_reasons; clearInjectionFlag lets a
 #   school admin clear it after review.
@@ -34,7 +38,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.9.0
+  version: 4.10.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -2732,6 +2736,74 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /assignments/{assignmentId}/comments:
+    get:
+      operationId: listAssignmentComments
+      summary: Comments and requests for more information per indicator, with replies (CCR-028, FR-064)
+      description: 'Text only — no score and no status change. The committee (while the round
+        is open), the school''s director and school admin, and the evaluatee read them.
+
+        '
+      tags:
+      - scoring
+      parameters:
+      - $ref: '#/components/parameters/AssignmentId'
+      - name: indicator_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AssignmentComment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createAssignmentComment
+      summary: A committee member or the director comments or asks for more; the evaluatee replies (CCR-028)
+      description: 'The committee (while the round is open) and the director post `comment` or
+        `request_info`, or reply to a reply. The evaluatee posts only `reply`, to a comment on
+        their own assignment.
+
+        '
+      tags:
+      - scoring
+      parameters:
+      - $ref: '#/components/parameters/AssignmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignmentCommentCreate'
+      responses:
+        '201':
+          description: Posted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignmentComment'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /dpa-slot-profiles:
     get:
       operationId: listDpaSlotProfiles
@@ -6292,6 +6364,80 @@ components:
           description: Review renditions the committee may open (grant scope view_derivative unless view_original
             was granted).
       description: What a committee member sees per indicator. Carries no AI confidence or rationale (ADR-0015).
+    AssignmentComment:
+      type: object
+      description: CCR-028 (FR-064). Plain text; carries no score.
+      required:
+      - id
+      - assignment_id
+      - indicator_id
+      - kind
+      - body
+      - author_user_id
+      - author_role
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        assignment_id:
+          type: string
+          format: uuid
+        indicator_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - comment
+          - request_info
+          - reply
+        body:
+          type: string
+          maxLength: 2000
+        parent_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        author_user_id:
+          type: string
+          format: uuid
+        author_role:
+          type: string
+          enum:
+          - committee
+          - director
+          - evaluatee
+        created_at:
+          type: string
+          format: date-time
+    AssignmentCommentCreate:
+      type: object
+      required:
+      - indicator_id
+      - kind
+      - body
+      properties:
+        indicator_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - comment
+          - request_info
+          - reply
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        parent_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: Required for `reply`; the comment being answered (same indicator).
     AssignmentEvidencePage:
       type: object
       required:

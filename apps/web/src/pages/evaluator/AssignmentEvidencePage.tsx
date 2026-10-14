@@ -7,6 +7,7 @@ import { Link, useParams } from 'react-router-dom';
 import { api, unwrap } from '../../api/client';
 import { ApiError, thaiMessageFor } from '../../api/errors';
 import type { components } from '../../api/schema.generated';
+import { AssignmentComments } from '../../components/AssignmentComments';
 
 type Item = components['schemas']['AssignmentEvidenceItem'];
 
@@ -66,6 +67,7 @@ export function AssignmentEvidencePage() {
               </li>
             ))}
           </ul>
+          {assignmentId && <AssignmentComments assignmentId={assignmentId} indicatorId={indicatorId} canOpen />}
         </section>
       ))}
     </main>

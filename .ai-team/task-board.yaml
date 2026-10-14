@@ -2228,3 +2228,32 @@ tasks:
       - "app card counts gaps / waiting / open suggestions; hidden without a person"  # DONE — coverage_test
       - "area page per school"                                                         # DONE — typecheck/lint; API covered by coverage.test
 
+  - id: SEIP-P4-006
+    title: "P4 — FR-064 committee comments / requests per indicator; the evaluatee replies (CCR-028)"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-002]
+    decisions: [CCR-028]
+    primary_paths:
+      - apps/api/src/routes/committee.ts
+      - packages/database/src/repositories/comments.ts
+      - prisma/migrations/20261014000500_assignment_comment/migration.sql
+      - apps/web/src/components/AssignmentComments.tsx
+      - apps/web/src/pages/AssignmentCommentsPage.tsx
+      - docs/reviews/CCR-028-committee-comments-per-indicator.md
+    notes: >
+      Additive: openapi 4.10.0, permissions 2.10.0, events 2.1.0. Plain text: no score,
+      no status change. The committee (while the round is open, and only for a role
+      the matrix grants committee — a seat alone is not a grant) and the director
+      post comment or request_info. The evaluatee replies only, to a comment on the
+      same indicator. The school admin reads. The event carries no body. Not done:
+      notifying the evaluatee. It needs a NotificationKind enum value, which
+      oasdiff rates as breaking (response-property-enum-value-added), so it awaits
+      the owner's decision (see the CCR). Also not done: a "my assignments" entry
+      for the evaluatee (they reach /assignments/{id}/comments by link), and an
+      e2e for the pages.
+    acceptance_criteria:
+      - "committee/director post; evaluatee reads and replies only; peer 403, stranger 404, off-committee PERM-003; closed round PERM-003; no body in the event"  # DONE — coverage.test
+      - "permission sweep covers both ops"     # DONE — test:security
+      - "notification to the evaluatee"        # BLOCKED — owner decision on NotificationKind (breaking)
+

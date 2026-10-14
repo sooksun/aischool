@@ -25,6 +25,7 @@ import { CoveragePage } from './pages/CoveragePage';
 import { AreaCoveragePage } from './pages/area/AreaCoveragePage';
 import { NotificationsPage, useUnreadNotifications } from './pages/NotificationsPage';
 import { AssignmentEvidencePage } from './pages/evaluator/AssignmentEvidencePage';
+import { AssignmentCommentsPage } from './pages/AssignmentCommentsPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AgreementPage } from './pages/agreements/AgreementPage';
@@ -255,6 +256,7 @@ export function App() {
         <Route path="/evaluator/rounds/:roundId" element={
           <RequireCapability capability="scoreAsCommittee"><EvaluatorRoundPage /></RequireCapability>
         } />
+        <Route path="/assignments/:assignmentId/comments" element={<RequireAuth><AssignmentCommentsPage /></RequireAuth>} />
         <Route path="/assignments/:assignmentId/evidence" element={
           <RequireCapability capability="governMappings"><AssignmentEvidencePage /></RequireCapability>
         } />

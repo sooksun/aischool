@@ -314,6 +314,9 @@ const OPERATIONS = () => ({
   getAssignment: { method: 'GET', url: `/api/v1/assignments/${assignmentId}` },
   // FR-060 committee view: school roles and the seated evaluator get the list.
   listAssignmentEvidence: { method: 'GET', url: `/api/v1/assignments/${assignmentId}/evidence` },
+  // CCR-028: a random indicator → VAL-002 for a granted author (never PERM-001).
+  listAssignmentComments: { method: 'GET', url: `/api/v1/assignments/${assignmentId}/comments` },
+  createAssignmentComment: { method: 'POST', url: `/api/v1/assignments/${assignmentId}/comments`, payload: { indicator_id: randomUUID(), kind: 'comment', body: 'sweep' } },
   // Round is deliberately left 'planned' (never opened) — a genuine committee
   // member (evaluator/director, both really seated) will fail SCORE-002, an
   // ACCEPTABLE non-permission outcome for this sweep's purposes (same philosophy
@@ -381,6 +384,8 @@ const OWN_SENSITIVE_OPS = new Set([
   // not author). listAgreements deliberately NOT: a list with an `own` grant
   // FILTERS rows rather than denying.
   'getAgreement', 'createAgreement', 'updateAgreement', 'submitAgreement',
+  // CCR-028: only the evaluatee of THIS assignment holds the own route.
+  'listAssignmentComments', 'createAssignmentComment',
 ]);
 
 test('every implemented operation x every role matches its permissions.yaml disposition', async () => {

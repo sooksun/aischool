@@ -987,6 +987,8 @@ model EvaluationAssignment {
   @@unique([roundId, evaluateePersonnelId])
   @@index([schoolId, status])
   @@map("evaluation_assignment")
+
+  comments AssignmentComment[] // CCR-028
 }
 
 /// Exactly 3 per assignment (ว9 p.74 / ว10): ผอ.สถานศึกษา as chair + 2 qualified members.
@@ -1334,4 +1336,39 @@ model NotificationPreference {
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("notification_preference")
+}
+
+// ── CCR-028 (FR-064): committee comments per indicator, with the evaluatee's replies.
+// Plain text; no score, no status change.
+
+enum AssignmentCommentKind {
+  comment
+  request_info
+  reply
+}
+
+enum AssignmentCommentAuthorRole {
+  committee
+  director
+  evaluatee
+}
+
+model AssignmentComment {
+  id           String                      @id @default(uuid()) @db.Uuid
+  assignmentId String                      @map("assignment_id") @db.Uuid
+  schoolId     String                      @map("school_id") @db.Uuid // the assignment's school (RLS)
+  indicatorId  String                      @map("indicator_id") @db.Uuid
+  kind         AssignmentCommentKind
+  body         String                      @db.Text
+  parentId     String?                     @map("parent_id") @db.Uuid
+  authorUserId String                      @map("author_user_id") @db.Uuid
+  authorRole   AssignmentCommentAuthorRole @map("author_role")
+  createdAt    DateTime                    @default(now()) @map("created_at")
+
+  assignment EvaluationAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "assignment_comment_assignment_fk")
+  parent     AssignmentComment?   @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "assignment_comment_parent_fk")
+  replies    AssignmentComment[]  @relation("CommentReplies")
+
+  @@index([assignmentId, indicatorId, createdAt])
+  @@map("assignment_comment")
 }
