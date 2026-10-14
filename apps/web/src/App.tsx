@@ -22,6 +22,7 @@ import { DevicesPage } from './pages/DevicesPage';
 import { BatchUploadPage } from './pages/BatchUploadPage';
 import { LinkNotePage } from './pages/LinkNotePage';
 import { CoveragePage } from './pages/CoveragePage';
+import { AreaCoveragePage } from './pages/area/AreaCoveragePage';
 import { NotificationsPage, useUnreadNotifications } from './pages/NotificationsPage';
 import { AssignmentEvidencePage } from './pages/evaluator/AssignmentEvidencePage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
@@ -118,8 +119,13 @@ function AppNav() {
         </Link>
       )}
       {manageAreaSchools && (
-        <Link to="/area/schools" className={location.pathname.startsWith('/area') ? 'active' : ''}>
+        <Link to="/area/schools" className={location.pathname === '/area/schools' ? 'active' : ''}>
           โรงเรียนในเขต
+        </Link>
+      )}
+      {manageAreaSchools && (
+        <Link to="/area/coverage" className={location.pathname === '/area/coverage' ? 'active' : ''}>
+          ความพร้อมรายโรงเรียน
         </Link>
       )}
       {scoreAsCommittee && (
@@ -226,6 +232,9 @@ export function App() {
         <Route path="/coverage" element={<RequireAuth><CoveragePage /></RequireAuth>} />
         <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
 
+        <Route path="/area/coverage" element={
+          <RequireCapability capability="manageAreaSchools"><AreaCoveragePage /></RequireCapability>
+        } />
         <Route path="/area/schools" element={
           <RequireCapability capability="manageAreaSchools"><AreaSchoolsPage /></RequireCapability>
         } />

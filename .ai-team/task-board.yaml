@@ -2205,3 +2205,26 @@ tasks:
     acceptance_criteria:
       - "app session binds, lists has_push, deletes; password token VAL-001; revoke clears"  # DONE — devices.test (real Keycloak)
 
+  - id: SEIP-P4-005
+    title: "P4 — readiness views: the area admin's per-school page (FR-057) and the app's coverage card (FR-053)"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-001]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/web/src/pages/area/AreaCoveragePage.tsx
+      - apps/mobile/lib/src/coverage.dart
+      - apps/mobile/test/coverage_test.dart
+    notes: >
+      No API or contract change; both read getCoverage. On the web, "ความพร้อมรายโรงเรียน"
+      (area admin) shows the area total and a row per active school: staff count,
+      indicators with no evidence, waiting, validated. There is a ว9 / ว10 switch and
+      counts only. In the app, a card on the home screen shows indicators without
+      evidence, mappings waiting for the director, and open suggestions; offline or
+      without a person it stays hidden. Not done: an e2e for the area page (the e2e
+      fixtures have no area admin yet), and the next-deadline pin on the card (needs
+      cycle dates in the app).
+    acceptance_criteria:
+      - "app card counts gaps / waiting / open suggestions; hidden without a person"  # DONE — coverage_test
+      - "area page per school"                                                         # DONE — typecheck/lint; API covered by coverage.test
+

@@ -9,6 +9,7 @@ import 'background.dart';
 import 'capture.dart';
 import 'outbox.dart';
 import 'suggestions.dart';
+import 'coverage.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.session, this.services});
@@ -373,6 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Text(me.displayName, key: const Key('displayName'), style: Theme.of(context).textTheme.titleLarge),
             Text(me.email),
+            CoverageCard(api: widget.session.api, me: me),
             const Divider(),
             Wrap(
               spacing: 8,
