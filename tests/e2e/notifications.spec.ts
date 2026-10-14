@@ -18,13 +18,15 @@ test('a note with suggestions notifies its owner; the notification opens the ite
   await page.getByRole('button', { name: 'บันทึก', exact: true }).click();
   await expect(page.getByRole('heading', { name: title })).toBeVisible();
   const itemUrl = page.url();
+  const itemPath = new URL(itemUrl).pathname;
 
   // The worker analyses, then dispatches the event into the inbox.
   await expect(async () => {
     await page.goto('/notifications');
-    await expect(page.getByRole('list', { name: 'รายการแจ้งเตือน' }).getByText('มีตัวชี้วัดที่ระบบแนะนำสำหรับหลักฐานของคุณ').first()).toBeVisible({ timeout: 2_000 });
+    await expect(page.locator(`a[href="${itemPath}"]`, { hasText: 'มีตัวชี้วัดที่ระบบแนะนำสำหรับหลักฐานของคุณ' })).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 45_000 });
 
-  await page.getByRole('list', { name: 'รายการแจ้งเตือน' }).getByRole('button').first().click();
+  // Other tests' items are analysed meanwhile: pick this item's notification by its link.
+  await page.locator(`a[href="${itemPath}"]`, { hasText: 'มีตัวชี้วัดที่ระบบแนะนำ' }).first().click();
   await expect(page).toHaveURL(itemUrl);
 });

@@ -347,6 +347,18 @@ export default async function globalSetup() {
       }
       assignmentId = assignment.id;
 
+      // CCR-028: one standing request from the director (the committee chair) on
+      // T-1.1, so the evaluatee's comments page has something to reply to.
+      const t11 = await prisma.indicator.findFirst({ where: { frameworkVersionId: fw.id, code: 'T-1.1' } });
+      if (t11 && !(await prisma.assignmentComment.findFirst({ where: { assignmentId, authorUserId: director.user.id, kind: 'request_info' } }))) {
+        await prisma.assignmentComment.create({
+          data: {
+            assignmentId, schoolId: school.id, indicatorId: t11.id, kind: 'request_info',
+            body: 'ขอดูแผนการจัดการเรียนรู้ฉบับเต็มของหน่วยนี้ครับ', authorUserId: director.user.id, authorRole: 'committee',
+          },
+        });
+      }
+
       // Ready report for PDF download without worker (cleanup L2).
       let report = await prisma.report.findFirst({
         where: { schoolId: school.id, templateCode: 'PA2_s', subjectPersonnelId: teacher.personnelId },

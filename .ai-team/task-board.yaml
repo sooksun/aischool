@@ -2249,11 +2249,15 @@ tasks:
       same indicator. The school admin reads. The event carries no body. Not done:
       notifying the evaluatee. It needs a NotificationKind enum value, which
       oasdiff rates as breaking (response-property-enum-value-added), so it awaits
-      the owner's decision (see the CCR). Also not done: a "my assignments" entry
-      for the evaluatee (they reach /assignments/{id}/comments by link), and an
-      e2e for the pages.
+      the owner's decision (see the CCR). Same day: "การประเมินของฉัน" lists the
+      evaluatee's own assignments (cycles → rounds → listAssignments, filtered to
+      their personnel) and links to the comments page. e2e comments.spec: the
+      evaluatee replies to the director's seeded request; the director reads it in
+      a separate browser. Notification items became real links (href = in-app
+      route), which also fixed notifications.spec picking another test's item.
     acceptance_criteria:
       - "committee/director post; evaluatee reads and replies only; peer 403, stranger 404, off-committee PERM-003; closed round PERM-003; no body in the event"  # DONE — coverage.test
       - "permission sweep covers both ops"     # DONE — test:security
+      - "evaluatee finds and replies in the web; director sees it"  # DONE — e2e comments.spec
       - "notification to the evaluatee"        # BLOCKED — owner decision on NotificationKind (breaking)
 

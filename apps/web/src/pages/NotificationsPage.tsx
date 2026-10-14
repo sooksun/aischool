@@ -28,8 +28,7 @@ export function NotificationsPage() {
   async function open(n: Notification) {
     if (!n.read_at) await api.POST('/notifications/read', { body: { all: false, ids: [n.id] } }).catch(() => {});
     window.dispatchEvent(new Event('seip:notifications'));
-    // Only in-app paths are followed — never a URL from elsewhere.
-    if (n.route?.startsWith('/') && !n.route.startsWith('//')) navigate(n.route);
+    if (inApp(n.route)) navigate(n.route);
     else void load();
   }
 
@@ -59,11 +58,18 @@ export function NotificationsPage() {
       <ul style={{ listStyle: 'none', padding: 0 }} aria-label="รายการแจ้งเตือน">
         {(items ?? []).map((n) => (
           <li key={n.id}>
-            <button type="button" className="evidence-card" style={{ width: '100%', textAlign: 'left', fontWeight: n.read_at ? 'normal' : 'bold' }} onClick={() => void open(n)}>
+            {/* A real link to its in-app route (so it can be opened in a new tab and
+                is announced as a link); clicking also marks it read. */}
+            <a
+              href={inApp(n.route) ? n.route : '#'}
+              className="evidence-card"
+              style={{ display: 'block', fontWeight: n.read_at ? 'normal' : 'bold' }}
+              onClick={(e) => { e.preventDefault(); void open(n); }}
+            >
               <div className="title">{n.read_at ? '' : '● '}{n.title_th}</div>
               {n.body_th && <p className="field-hint">{n.body_th}</p>}
               <p className="field-hint">{new Date(n.created_at).toLocaleString('th-TH')}</p>
-            </button>
+            </a>
           </li>
         ))}
       </ul>
@@ -94,4 +100,9 @@ export function useUnreadNotifications(enabled: boolean): number {
     return () => { live = false; clearInterval(t); window.removeEventListener('seip:notifications', tick); };
   }, [enabled]);
   return count;
+}
+
+/** Only in-app paths are followed — never a URL from elsewhere. */
+function inApp(route: string | null | undefined): route is string {
+  return !!route && route.startsWith('/') && !route.startsWith('//');
 }

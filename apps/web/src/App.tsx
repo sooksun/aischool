@@ -26,6 +26,7 @@ import { AreaCoveragePage } from './pages/area/AreaCoveragePage';
 import { NotificationsPage, useUnreadNotifications } from './pages/NotificationsPage';
 import { AssignmentEvidencePage } from './pages/evaluator/AssignmentEvidencePage';
 import { AssignmentCommentsPage } from './pages/AssignmentCommentsPage';
+import { MyAssessmentsPage } from './pages/MyAssessmentsPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
 import { AgreementPage } from './pages/agreements/AgreementPage';
@@ -132,6 +133,11 @@ function AppNav() {
       {scoreAsCommittee && (
         <Link to="/evaluator" className={location.pathname.startsWith('/evaluator') ? 'active' : ''}>
           งานกรรมการ
+        </Link>
+      )}
+      {submitEvidence && user.personnel && (
+        <Link to="/my-assessments" className={location.pathname === '/my-assessments' ? 'active' : ''}>
+          การประเมินของฉัน
         </Link>
       )}
       {submitEvidence && (
@@ -257,6 +263,7 @@ export function App() {
           <RequireCapability capability="scoreAsCommittee"><EvaluatorRoundPage /></RequireCapability>
         } />
         <Route path="/assignments/:assignmentId/comments" element={<RequireAuth><AssignmentCommentsPage /></RequireAuth>} />
+        <Route path="/my-assessments" element={<RequireAuth><MyAssessmentsPage /></RequireAuth>} />
         <Route path="/assignments/:assignmentId/evidence" element={
           <RequireCapability capability="governMappings"><AssignmentEvidencePage /></RequireCapability>
         } />
