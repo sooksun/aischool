@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:seip_api/seip_api.dart';
 
 import 'api.dart';
+import 'background.dart';
 import 'capture.dart';
 import 'outbox.dart';
 
@@ -131,13 +132,20 @@ class _LoginScreenState extends State<LoginScreen> {
 
 /// What the home screen needs from the device. Tests pass fakes.
 class AppServices {
-  AppServices({required this.outboxFor, required this.capture, required this.hash, this.shares = const NoShareInbox()});
+  AppServices({
+    required this.outboxFor,
+    required this.capture,
+    required this.hash,
+    this.shares = const NoShareInbox(),
+    ForegroundMark? foreground,
+  }) : foreground = foreground ?? MemoryForegroundMark();
 
   factory AppServices.device() => AppServices(
     outboxFor: (api) => Outbox(api: api, store: SecureOutboxStore(), bytes: LocalFileBytes(), objects: DioObjectStore(), network: ConnectivityNetwork()),
     capture: DeviceCaptureSource(),
     hash: sha256OfFile,
     shares: DeviceShareInbox(),
+    foreground: SecureForegroundMark(),
   );
 
   final Outbox Function(SeipApi api) outboxFor;
@@ -146,6 +154,9 @@ class AppServices {
 
   /// FR-004: files and links shared to SEIP from other apps.
   final ShareInbox shares;
+
+  /// FR-006: tells the background drain the app is open (see background.dart).
+  final ForegroundMark foreground;
 }
 
 /// FR-017: the item's state in words a teacher reads at a glance.
@@ -205,6 +216,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_syncing) return;
     _syncing = true;
     try {
+      await _services.foreground.touch(DateTime.now());
       _show(await _outbox.items());
       await _outbox.drain();
       _show(await _outbox.items());

@@ -132,7 +132,10 @@ class SeipSession {
   }
 
   Future<bool> _renew() async {
-    final refresh = _refreshToken;
+    // The background drain may have rotated the token since this session read
+    // it; reusing the old one would trip Keycloak's reuse detection.
+    final stored = await _store.read();
+    final refresh = stored ?? _refreshToken;
     final client = oidc;
     if (refresh == null || client == null) return false;
     final tokens = await client.refresh(refresh);

@@ -2,11 +2,16 @@ import 'package:flutter/material.dart';
 
 import 'src/api.dart';
 import 'src/auth.dart';
+import 'src/background.dart';
 import 'src/screens.dart';
 
-void main() => runApp(SeipApp(
-      session: SeipSession(oidc: AppAuthOidcClient(), store: SecureTokenStore()),
-    ));
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  scheduleBackgroundDrain(); // FR-006: keep sending while the app is closed
+  runApp(SeipApp(
+    session: SeipSession(oidc: AppAuthOidcClient(), store: SecureTokenStore()),
+  ));
+}
 
 class SeipApp extends StatelessWidget {
   const SeipApp({super.key, required this.session, this.services});

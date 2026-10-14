@@ -1926,3 +1926,31 @@ tasks:
       - "share from LINE / Drive / Photos on Android"                                      # OPEN — needs a device
       - "iOS Share Extension"                                                              # OPEN
 
+  - id: SEIP-P2-014
+    title: "P2 — FR-006 the outbox drains in the background (WorkManager) without racing the open app's token rotation"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-002, SEIP-P1-006]
+    decisions: [ADR-0016, ADR-0014]
+    primary_paths:
+      - apps/mobile/lib/src/background.dart
+      - apps/mobile/lib/src/api.dart
+      - apps/mobile/lib/main.dart
+      - apps/mobile/test/background_test.dart
+    notes: >
+      main() registers a periodic workmanager task: every 15 min, network connected, keep
+      policy. The task restores the SEIP ID session from the keystore and drains the same
+      SecureOutboxStore queue as the app (with the FR-008 Wi-Fi rule). Refresh tokens
+      rotate with reuse detection (realm revokeRefreshToken, max reuse 0), so two
+      guards apply. (1) The open app touches a foreground mark on every 30 s sync, and
+      the task stands down for 2 min after it. (2) SeipSession._renew uses the token in
+      the store rather than its in-memory copy, so a rotation made by the task is picked
+      up. Signed out means the queue waits. The task never throws. drainInBackground is
+      unit-tested (4 cases, including the rotation hand-over). NOT DONE: iOS
+      registration (BGTaskSchedulerPermittedIdentifiers and the AppDelegate hook), and a
+      device check that Android actually runs it; this environment cannot build the app.
+    acceptance_criteria:
+      - "closed app + signed in -> drained; app open -> stands down; signed out -> kept"  # DONE — background_test
+      - "app renews with the rotated token from the store"                                # DONE
+      - "runs on a real Android device; iOS BGTask registration"                          # OPEN
+
