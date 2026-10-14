@@ -1872,3 +1872,29 @@ tasks:
     acceptance_criteria:
       - "length shown; warning only when over the category's cap"  # DONE — capture_flow_test
 
+  - id: SEIP-P2-012
+    title: "P2 — FR-002 scan a multi-page paper document in the app into one PDF per item"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-004]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/capture.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/scan_pdf_test.dart
+      - apps/mobile/android/app/src/main/AndroidManifest.xml
+    notes: >
+      A "สแกนเอกสาร" button opens the platform scanner through cunning_document_scanner
+      (ML Kit on Android, VisionKit on iOS). The scanner does edge detection, cropping
+      and perspective correction. pagesToPdf (package pdf, pure Dart, unit-tested) turns
+      the pages into one PDF, one page per scan sized to its image. The PDF is written to
+      the app's private outbox directory, the scanner's temp images are deleted, and it
+      then rides the outbox like any capture. Android declares CAMERA; iOS already has
+      NSCameraUsageDescription. NOT VERIFIED ON A DEVICE: there is no Android/iOS SDK in
+      this environment and CI does not build the app, so the plugin and manifest are
+      uncompiled. The first device build must confirm them (minSdk 24 matches the
+      plugin's).
+    acceptance_criteria:
+      - "3 pages -> one PDF with 3 pages, landscape kept"  # DONE — scan_pdf_test
+      - "scan on a real Android and iPhone"                 # OPEN — needs a device
+

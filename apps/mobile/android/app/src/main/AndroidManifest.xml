@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- FR-002 document scanner (the photo/video capture uses the system camera app). -->
+    <uses-permission android:name="android.permission.CAMERA"/>
     <application
         android:label="seip_mobile"
         android:name="${applicationName}"

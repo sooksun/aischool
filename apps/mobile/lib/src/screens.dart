@@ -338,6 +338,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: const Icon(Icons.videocam_outlined),
                   label: const Text('อัดวิดีโอ'),
                 ),
+                FilledButton.icon(
+                  key: const Key('captureScan'),
+                  onPressed: () => _capture(CaptureKind.scan),
+                  icon: const Icon(Icons.document_scanner_outlined),
+                  label: const Text('สแกนเอกสาร'),
+                ),
                 OutlinedButton.icon(
                   key: const Key('captureGallery'),
                   onPressed: () => _capture(CaptureKind.gallery),
