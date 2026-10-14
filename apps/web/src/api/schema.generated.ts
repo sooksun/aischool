@@ -2774,8 +2774,11 @@ export interface components {
             next_cursor: string;
             has_more: boolean;
         };
-        /** @enum {string} */
-        NotificationKind: "suggestions_ready" | "processing_failed" | "mapping_returned" | "mapping_validated" | "deadline" | "export_ready" | "transfer_approved";
+        /**
+         * @description Open enum (CCR-028 owner decision A, 2026-10-14): the server may add a kind in a minor version. Clients must accept a kind they do not know and show the notification by its title_th / route.
+         * @enum {string}
+         */
+        NotificationKind: "suggestions_ready" | "processing_failed" | "mapping_returned" | "mapping_validated" | "deadline" | "export_ready" | "transfer_approved" | "committee_comment";
         Notification: {
             /** Format: uuid */
             id: string;

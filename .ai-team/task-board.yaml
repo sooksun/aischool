@@ -2259,7 +2259,7 @@ tasks:
       - "committee/director post; evaluatee reads and replies only; peer 403, stranger 404, off-committee PERM-003; closed round PERM-003; no body in the event"  # DONE — coverage.test
       - "permission sweep covers both ops"     # DONE — test:security
       - "evaluatee finds and replies in the web; director sees it"  # DONE — e2e comments.spec
-      - "notification to the evaluatee"        # BLOCKED — owner decision on NotificationKind (breaking)
+      - "notification to the evaluatee"        # DONE — owner decision A 2026-10-14: open enum, 4.11.0 / events 2.2.0; coverage.test (evaluatee ×2, the asker on reply, nobody else, idempotent)
 
 
   - id: SEIP-P5-001

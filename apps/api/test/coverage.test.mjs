@@ -203,6 +203,22 @@ test('CCR-028: the committee comments and asks for more per indicator; the evalu
   const ev = await prisma.outboxEvent.findFirst({ where: { eventType: 'assignment.comment.created', payload: { path: ['comment_id'], equals: ask.json().id } } });
   assert.ok(!JSON.stringify(ev.payload).includes('แผนการสอน'), 'the body never goes into the event');
 
+  // CCR-028 decision A: the request and the comment notify the evaluatee; the
+  // reply notifies the evaluator who asked — never the actor, never the body.
+  const { notifyFromEvent } = await import('@seip/database');
+  const events = await prisma.outboxEvent.findMany({ where: { eventType: 'assignment.comment.created', payload: { path: ['assignment_id'], equals: a.id } } });
+  for (const e of events) { await notifyFromEvent(e); await notifyFromEvent(e); } // idempotent
+  const notes = await prisma.notification.findMany({ where: { kind: 'committee_comment', entityId: a.id }, orderBy: { createdAt: 'asc' } });
+  const to = (key) => notes.filter((n) => n.userId === userId[key]);
+  assert.equal(to('teacher').length, 2);
+  assert.ok(to('teacher').every((n) => n.route === `/assignments/${a.id}/comments`));
+  assert.equal(to('evaluator').length, 1);
+  assert.equal(to('evaluator')[0].route, `/assignments/${a.id}/evidence`);
+  assert.equal(to('director').length, 0, 'nobody else');
+  assert.ok(notes.every((n) => !`${n.titleTh} ${n.bodyTh ?? ''}`.includes('แผนการสอน')));
+  const listed = await app.inject({ method: 'GET', url: '/api/v1/notifications', headers: h('teacher') });
+  assert.ok(listed.json().items.some((n) => n.kind === 'committee_comment'));
+
   // FR-062b: the round closes — the committee can no longer comment or read; the evaluatee still reads.
   await prisma.evaluationRound.update({ where: { id: round.id }, data: { status: 'closed' } });
   assert.equal((await post('evaluator', { indicator_id: ind, kind: 'comment', body: 'x' }, otherSchool)).json().code, 'PERM-003');

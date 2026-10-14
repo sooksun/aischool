@@ -3,7 +3,7 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const EVENTS_VERSION = '2.1.0';
+export const EVENTS_VERSION = '2.2.0';
 
 export type EventType =
   | 'evidence.created'

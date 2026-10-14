@@ -5,7 +5,7 @@
 import type { NotificationKind, Prisma } from '@prisma/client';
 import { prisma } from '../client.js';
 
-export interface OutboxLike { id: string; eventType: string; payload: unknown }
+export interface OutboxLike { id: string; eventType: string; payload: unknown; actorUserId?: string | null }
 
 interface Draft { kind: NotificationKind; titleTh: string; bodyTh: string | null; entityType: string; entityId: string; route: string }
 
@@ -48,9 +48,59 @@ function draftFor(eventType: string, p: Record<string, unknown>): Draft | null {
   }
 }
 
+/**
+ * CCR-028 (owner decision A): a comment or request tells the evaluatee; a reply
+ * tells the author of the comment it answers. The text never carries the body.
+ */
+async function commentNotice(p: Record<string, unknown>, actorUserId: string | null): Promise<{ draft: Draft; userIds: string[] } | null> {
+  if (typeof p.comment_id !== 'string' || typeof p.assignment_id !== 'string') return null;
+  const c = await prisma.assignmentComment.findUnique({
+    where: { id: p.comment_id },
+    select: {
+      kind: true, assignmentId: true,
+      parent: { select: { authorUserId: true } },
+      assignment: { select: { evaluatee: { select: { userId: true, personId: true } } } },
+    },
+  });
+  if (!c) return null;
+  const base = { kind: 'committee_comment' as NotificationKind, entityType: 'EvaluationAssignment', entityId: c.assignmentId };
+  let out: { draft: Draft; userIds: string[] };
+  if (c.kind === 'reply') {
+    if (!c.parent) return null;
+    out = {
+      draft: { ...base, titleTh: 'ผู้รับการประเมินตอบความเห็นของคุณแล้ว', bodyTh: null, route: `/assignments/${c.assignmentId}/evidence` },
+      userIds: [c.parent.authorUserId],
+    };
+  } else {
+    const ev = c.assignment.evaluatee;
+    const ids = ev.personId ? await personUserIds(ev.personId) : [];
+    if (ids.length === 0 && ev.userId) ids.push(ev.userId);
+    out = {
+      draft: {
+        ...base,
+        titleTh: c.kind === 'request_info' ? 'กรรมการขอข้อมูลเพิ่มเติมในการประเมินของคุณ' : 'มีความเห็นใหม่จากกรรมการในการประเมินของคุณ',
+        bodyTh: 'เปิดอ่านและตอบได้ที่หน้าความเห็นจากกรรมการ',
+        route: `/assignments/${c.assignmentId}/comments`,
+      },
+      userIds: ids,
+    };
+  }
+  out.userIds = out.userIds.filter((id) => id !== actorUserId);
+  return out;
+}
+
 /** Consumer side of the outbox (events.yaml `consumers: [notification]`). Returns rows created. */
 export async function notifyFromEvent(ev: OutboxLike): Promise<number> {
   const p = (ev.payload ?? {}) as Record<string, unknown>;
+  if (ev.eventType === 'assignment.comment.created') {
+    const n = await commentNotice(p, ev.actorUserId ?? null);
+    if (!n || n.userIds.length === 0) return 0;
+    const r = await prisma.notification.createMany({
+      data: n.userIds.map((userId) => ({ ...n.draft, userId, sourceEventId: ev.id })),
+      skipDuplicates: true,
+    });
+    return r.count;
+  }
   const draft = draftFor(ev.eventType, p);
   if (!draft) return 0;
   const userIds = draft.entityType === 'ExportPackage'

@@ -21,11 +21,13 @@ Task: `SEIP-P4-006` · Requirement: FR-064 · Shipped: openapi **4.10.0**, permi
 - Table `assignment_comment` with CHECKs (body length; reply ⇔ parent), FKs and an RLS backstop policy by school.
 - On the web, every indicator on the committee page gets a thread with a "ความเห็น / ขอข้อมูลเพิ่ม" form. The evaluatee's page `/assignments/{id}/comments` shows each indicator with a reply box.
 
-## Deliberately not included: notifying about comments
+## Notifying about comments
 
-FR-064 also asks that the evaluatee be notified. That needs a new `NotificationKind` value. Adding an enum value to a response is **breaking** under contract-policy: `oasdiff` reports `response-property-enum-value-added`, and the compatibility gate fails it without a major bump. So it is left out of this additive change.
+FR-064 also asks that the evaluatee be notified. That needs a new `NotificationKind` value. Adding an enum value to a response is **breaking** under contract-policy: `oasdiff` reports `response-property-enum-value-added`, and the compatibility gate fails it without a major bump. So it was left out of the 4.10.0 change.
 
-**Decision needed from the owner:** approve adding `committee_comment` to `NotificationKind`, as a major bump to 5.0.0, or as an agreed exception to the enum rule. Once that is approved, the notification consumer joins `assignment.comment.created`: a comment or request notifies the evaluatee, and a reply notifies the comment's author.
+**Decided by the owner, 2026-10-14: option A.** `NotificationKind` becomes an open enum (`x-seip-open-enum: true`) and gains `committee_comment` in **4.11.0** (events 2.2.0), with no major bump. The compatibility gate excuses only a new value whose oasdiff source line falls inside an open-enum schema, and a value added to any other enum still fails (checked by hand against ExportPackage.status). The rule is in contract-policy.md. The two other options were B, a major bump to 5.0.0, and C, no notification.
+
+Applied the same day: the notification consumer joins `assignment.comment.created`. A comment or request notifies the evaluatee, routed to `/assignments/{id}/comments`. A reply notifies the author of its parent, routed to `/assignments/{id}/evidence`. The actor is never notified, and the text never carries the body. Neither the web nor the app branches on `kind`, and the generated Dart client already has `$unknown`.
 
 ## Verified
 

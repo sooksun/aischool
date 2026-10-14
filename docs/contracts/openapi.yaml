@@ -38,7 +38,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.10.0
+  version: 4.11.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -6118,6 +6118,9 @@ components:
       description: Ordered by (updated_at, id). On conflict the server wins.
     NotificationKind:
       type: string
+      x-seip-open-enum: true
+      description: 'Open enum (CCR-028 owner decision A, 2026-10-14): the server may add a kind in a minor
+        version. Clients must accept a kind they do not know and show the notification by its title_th / route.'
       enum:
       - suggestions_ready
       - processing_failed
@@ -6126,6 +6129,7 @@ components:
       - deadline
       - export_ready
       - transfer_approved
+      - committee_comment
     Notification:
       type: object
       required:

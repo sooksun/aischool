@@ -11,7 +11,11 @@
  *   - No breaking changes reported by oasdiff              -> PASS
  *   - Breaking changes reported AND head's major version    -> PASS (logged as
  *     is greater than base's major version                    an accepted break)
- *   - Breaking changes reported AND major version unchanged -> FAIL
+ *   - Breaking changes reported AND major version unchanged -> FAIL, except:
+ *   - A new value in a response enum whose schema is marked `x-seip-open-enum:
+ *     true` (CCR-028, owner decision A): the contract tells clients to accept
+ *     unknown values there, so it is additive. oasdiff's revisionSource line
+ *     must fall inside that schema's block in head — any other break still fails.
  *
  * Usage: node check-contract-compatibility.mjs <base.yaml> <head.yaml>
  * Requires oasdiff on PATH or via `docker run tufin/oasdiff` (same fallback
@@ -96,6 +100,32 @@ try {
   console.error(result.stderr);
   process.exit(1);
 }
+
+// CCR-028: open enums. The line ranges of schemas marked x-seip-open-enum in head.
+const OPEN_ENUM_IDS = new Set(['response-property-enum-value-added', 'response-body-enum-value-added']);
+function openEnumRanges(file) {
+  const doc = yaml.load(readSpec(file).toString('utf8'));
+  const names = Object.entries(doc?.components?.schemas ?? {}).filter(([, s]) => s?.['x-seip-open-enum'] === true).map(([n]) => n);
+  const lines = readSpec(file).toString('utf8').split('\n');
+  const ranges = [];
+  for (const name of names) {
+    const start = lines.findIndex((l) => l === `    ${name}:`);
+    if (start < 0) continue;
+    let end = start + 1;
+    while (end < lines.length && (lines[end].startsWith('     ') || lines[end].trim() === '')) end++;
+    ranges.push({ name, from: start + 1, to: end }); // 1-based, inclusive
+  }
+  return ranges;
+}
+const ranges = openEnumRanges(headFile);
+const excused = [];
+breaking = breaking.filter((b) => {
+  const line = b.revisionSource?.line;
+  const hit = OPEN_ENUM_IDS.has(b.id) && typeof line === 'number' && ranges.find((r) => line >= r.from && line <= r.to);
+  if (hit) excused.push(`${b.text} (open enum ${hit.name})`);
+  return !hit;
+});
+for (const e of excused) console.log(`    open-enum value added (additive, CCR-028): ${e}`);
 
 if (breaking.length === 0) {
   console.log(`OK  no breaking changes (${base.raw} -> ${head.raw})`);

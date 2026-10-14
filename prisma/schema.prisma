@@ -1307,6 +1307,7 @@ enum NotificationKind {
   deadline
   export_ready
   transfer_approved
+  committee_comment
 }
 
 model Notification {

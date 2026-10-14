@@ -28,7 +28,8 @@
 #   evidence.file.verified, analysis.completed/failed, mapping.owner_confirmed/validated/returned,
 #   export.ready. evidence.created carries owner_person_id.
 # version: 2.1.0 — CCR-028 (additive): assignment.comment.created.
-version: 2.1.0
+# version: 2.2.0 — CCR-028 decision A: the notification consumer joins assignment.comment.created.
+version: 2.2.0
 status: locked
 locked_at: 2026-07-17
 
@@ -128,10 +129,11 @@ events:
 
   assignment.comment.created:
     payload: { assignment_id: uuid, comment_id: uuid, indicator_id: uuid, kind: 'enum[comment, request_info, reply]' }
-    consumers: [audit-projection]
+    consumers: [notification, audit-projection]
     note: >-
-      CCR-028. The body is never copied into the event. The notification consumer joins
-      once NotificationKind gains a value for it (a breaking change awaiting approval).
+      CCR-028. The body is never copied into the event. Notification (owner decision A,
+      2026-10-14; NotificationKind committee_comment): a comment or request_info notifies
+      the evaluatee, a reply notifies the author of its parent; never the actor.
 
   report.approved:
     payload: { report_id: uuid, cycle_id: uuid, subject_personnel_id: uuid, approver_user_id: uuid, step_code: string }
