@@ -16,7 +16,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   getEvidenceDetail, getLatestAnalysis, getAnalysisById, requestAnalysis, listSegments, listSuggestions,
-  getSuggestion, acceptSuggestionToMapping, rejectSuggestionWithReason, writeAuditEvent, ANALYSIS_RERUN_COOLDOWN_MS,
+  getSuggestion, acceptSuggestionToMapping, rejectSuggestionWithReason, writeAuditEvent, ANALYSIS_RERUN_COOLDOWN_MS, redactPii,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import type { AuthedRequest } from '../plugins/auth.js';
@@ -82,9 +82,9 @@ function serializeSegment(g: Segment, owner: boolean) {
     evidence_file_id: g.evidenceFileId,
     kind: g.kind,
     confidence: g.confidence,
-    // Redaction (PII-flagged spans) arrives with the extract service; until
-    // then only the owner gets the text at all.
-    text: owner ? g.text : null,
+    // FR-023a: the owner reads their own text; everyone else (director,
+    // committee) gets it with national ids, phones and emails masked.
+    text: owner || g.text === null ? g.text : redactPii(g.text).text,
     locator: {
       segment_id: g.id,
       kind: g.tStartMs !== null ? 'time' : 'page',

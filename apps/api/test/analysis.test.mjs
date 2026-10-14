@@ -167,3 +167,23 @@ test('reject records the reason; batch accept refuses until the gate passes (AI-
   assert.equal(await prisma.aiSuggestion.count({ where: { id: items[1].id, status: 'superseded' } }), 1);
   assert.equal(await prisma.aiSuggestion.count({ where: { id: items[0].id, status: 'rejected' } }), 1, 'a decision is never overwritten');
 });
+
+test('FR-023a: segment text — the owner reads the original, the director reads it masked', async () => {
+  const ev = await noteEvidence('ประสานความร่วมมือกับผู้ปกครอง');
+  await worker();
+  const analysis = await prisma.evidenceAnalysis.findFirstOrThrow({ where: { evidenceId: ev.id }, orderBy: { createdAt: 'desc' } });
+  const file = await prisma.evidenceFile.create({
+    data: {
+      evidenceId: ev.id, storageProvider: 's3_compatible', storageUri: `x/${randomUUID()}`, contentType: 'application/pdf',
+      byteSize: 1n, checksumSha256: 'a'.repeat(64), scanStatus: 'clean', originalFilename: 'contact.pdf',
+    },
+  });
+  await prisma.contentSegment.create({
+    data: { evidenceId: ev.id, evidenceFileId: file.id, analysisId: analysis.id, kind: 'page_block', ordinal: 0, page: 1, text: 'ผู้ปกครอง โทร 081-234-5678 เลขบัตร 1101700203451' },
+  });
+
+  const mine = (await app.inject({ method: 'GET', url: `/api/v1/evidence/${ev.id}/segments`, headers: h('teacher') })).json();
+  assert.equal(mine.items[0].text, 'ผู้ปกครอง โทร 081-234-5678 เลขบัตร 1101700203451');
+  const theirs = (await app.inject({ method: 'GET', url: `/api/v1/evidence/${ev.id}/segments`, headers: h('director') })).json();
+  assert.equal(theirs.items[0].text, 'ผู้ปกครอง โทร [เบอร์โทร] เลขบัตร [เลขบัตรประชาชน]');
+});

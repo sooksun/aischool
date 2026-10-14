@@ -686,3 +686,21 @@ test('P3: an analysis whose item was deleted meanwhile finishes its job instead 
   assert.equal(after.status, 'done');
   assert.equal(after.attempts <= 1, true);
 });
+
+test('FR-023a: the mapper sees masked text — a quote never carries a phone or national id; the owner\'s segment keeps it', async () => {
+  const { file, evidence } = await fixture('contact.pdf');
+  const bytes = await thaiPdf(['ประสานความร่วมมือกับผู้ปกครอง ภาคีเครือข่าย โทร ๐๘๑๒๓๔๕๖๗๘ เลขบัตร ๑๑๐๑๗๐๐๒๐๓๔๕๑']); // Thai digits: the fixture font has no Latin ones
+  await putObject(file.storageUri, bytes, 'application/pdf');
+  await prisma.evidenceFile.update({
+    where: { id: file.id },
+    data: { byteSize: BigInt(bytes.length), checksumSha256: createHash('sha256').update(bytes).digest('hex') },
+  });
+  await runOnce(env, s3, { scheduleGc: false });
+  await runOnce(env, s3, { scheduleGc: false });
+  const seg = await prisma.contentSegment.findFirstOrThrow({ where: { evidenceId: evidence.id } });
+  assert.match(seg.text, /๐๘๑๒๓๔๕๖๗๘/, 'the stored segment is the original, for the owner');
+  const s = await prisma.aiSuggestion.findFirst({ where: { evidenceId: evidence.id, status: 'open' }, include: { indicator: true } });
+  assert.ok(s, 'a suggestion exists');
+  const quotes = s.locators.map((l) => l.quote).join(' ');
+  assert.ok(!/๐๘๑๒๓๔๕๖๗๘|๑๑๐๑๗๐๐๒๐๓๔๕๑/.test(quotes), `no PII in quotes: ${quotes}`);
+});

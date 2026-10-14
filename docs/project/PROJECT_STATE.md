@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Personal data masked (SEIP-P3-002, in review):** national ID numbers, phone numbers and emails in evidence are masked before suggestions are made. Quotes and text shown to the director or committee never carry them. The owner still sees the original.
+>
 > **P3 started — indicator suggestions (SEIP-P3-001, in review):** each item is analysed automatically. PDF text is read page by page and the system suggests matching indicators. Each suggestion quotes the page it found the words on, and the quote is checked against that page. The teacher presses "ใช่ ผูกตัวชี้วัดนี้" or "ไม่ใช่" with a reason. Nothing is mapped without the teacher. Until the in-country GPU exists, the suggestions come from simple word matching, and the page says so clearly.
 >
 > **Background sending (SEIP-P2-014, in review, not yet run on a phone):** the app keeps sending queued evidence about every 15 minutes while it is closed. It holds off while the app is open, so the two never refresh the sign-in at the same moment. iOS still needs registering.

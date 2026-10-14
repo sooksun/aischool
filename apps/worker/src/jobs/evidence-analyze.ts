@@ -7,7 +7,7 @@ import type { S3Client } from '@aws-sdk/client-s3';
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import {
-  getAnalysisInput, setAnalysisStage, completeAnalysis, failAnalysis, suggestFromSegments,
+  getAnalysisInput, setAnalysisStage, completeAnalysis, failAnalysis, suggestFromSegments, redactPii,
   HEURISTIC_MODEL_LABEL, HEURISTIC_PROMPT_VERSION, type NewSegment, type NewSuggestion,
 } from '@seip/database';
 import { getObjectStream } from '../s3.js';
@@ -55,10 +55,13 @@ export async function processEvidenceAnalyze(env: Env, s3: S3Client, payload: Ev
 
   await setAnalysisStage(payload.analysis_id, 'mapping', HEURISTIC_PROMPT_VERSION);
   const contextText = [evidence.title, evidence.description, evidence.noteText].filter(Boolean).join('\n');
+  // FR-023a: the mapper — and so every quote it produces, which the director
+  // and committee read — sees text with national ids, phones and emails masked.
+  // The stored segment keeps the original for the owner.
   const found = framework
     ? suggestFromSegments({
-      contextText,
-      segments: segments.map((s) => ({ id: String(s.ordinal), page: s.page, text: s.text })),
+      contextText: redactPii(contextText).text,
+      segments: segments.map((s) => ({ id: String(s.ordinal), page: s.page, text: redactPii(s.text).text })),
       indicators: framework.indicators,
     })
     : [];

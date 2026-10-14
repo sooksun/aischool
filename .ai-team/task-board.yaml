@@ -1997,3 +1997,30 @@ tasks:
       - "permission sweep covers all seven ops"                                               # DONE — test:security
       - "web: teacher accepts a suggestion for a note"                                       # DONE — e2e suggestions.spec
 
+  - id: SEIP-P3-002
+    title: "P3 — FR-023a mask national ids, phone numbers and emails before the mapper, in quotes, and in segments others read"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001]
+    decisions: [ADR-0010]
+    primary_paths:
+      - packages/database/src/lib/pii-redact.ts
+      - packages/database/test/pii-redact.test.mjs
+      - apps/worker/src/jobs/evidence-analyze.ts
+      - apps/api/src/routes/analysis.ts
+    notes: >
+      No contract change. redactPii is rules only, with no model and no network. It
+      masks 13-digit national ids, plain or grouped with space, dash or dot; Thai
+      mobile and landline numbers, including +66; and emails. Thai digits count, and
+      ids are matched before phones. Ordinary numbers stay: years, scores, times, and
+      class sizes. The mapper gets masked text, so every quote, which the director
+      and committee read, is masked. The stored segment keeps the original:
+      listEvidenceSegments gives the owner the original and everyone else the masked
+      text (before this, they got null). Not done: learner names, which need an
+      in-country NER model; the ≥ 200-document recall benchmark the PRD asks for; and
+      masking in the model input of the future GPU tier, which will reuse redactPii.
+    acceptance_criteria:
+      - "ids / phones / emails in every common shape masked; ordinary numbers kept"  # DONE — pii-redact.test
+      - "quotes carry no PII; owner sees original segment, director masked"          # DONE — worker + api tests
+      - "≥ 200-document Thai recall benchmark"                                        # OPEN
+
