@@ -14,7 +14,7 @@ import {
   getEvidenceCategoryById, writeAuditEvent, aggregateScanStatus, getSchoolAreaId, acceptEvidenceByOwner, findOwnerFilesByChecksum,
   listEvaluateePersonIdsForCommitteeMember, getPersonnelInSchoolByPerson,
   openUploadSession, getUploadSession, claimUploadForCompletion, releaseUploadClaim,
-  finishUpload, abortUploadSession,
+  finishUpload, abortUploadSession, requestAnalysis,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { requireCurrentSchool, type AuthedRequest } from '../plugins/auth.js';
@@ -269,6 +269,8 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
         clientUuid: body.client_uuid,
       });
       if (!replayed) {
+        // P3: a link or note has nothing to scan, so its analysis starts now.
+        if (row.kind !== 'file') await requestAnalysis(row.id, null);
         await writeAuditEvent({
           schoolId, actorUserId: auth.userId, action: 'created', entityType: 'Evidence',
           entityId: row.id, after: row, requestId: request.id,

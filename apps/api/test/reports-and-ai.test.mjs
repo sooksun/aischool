@@ -1,4 +1,4 @@
-// Integration: createReport + report.generate worker over VALIDATED mappings; AI analysis phase-gated (P3).
+// Integration: createReport + report.generate worker over VALIDATED mappings. AI analysis: analysis.test.mjs.
 process.env.NODE_ENV = 'test';
 
 import { test, before, after } from 'node:test';
@@ -191,16 +191,6 @@ after(async () => {
   await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
-});
-
-test('AI analysis is phase-gated (SYS-003) until the in-country pipeline lands (P3)', async () => {
-  const res = await app.inject({
-    method: 'POST',
-    url: `/api/v1/evidence/${evidenceId}/analysis`,
-    headers: { authorization: `Bearer ${teacherToken}`, 'x-school-id': school.id },
-  });
-  assert.equal(res.statusCode, 501, res.body);
-  assert.equal(res.json().code, 'SYS-003');
 });
 
 test('only VALIDATED mappings reach the report: owner confirms, director validates', async () => {

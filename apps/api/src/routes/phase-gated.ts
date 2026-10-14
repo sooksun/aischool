@@ -9,14 +9,6 @@ import { ApiError } from '@seip/backend-shared';
 
 type Method = 'get' | 'post' | 'put' | 'delete';
 const GATED: [Method, string, string, string][] = [
-  // AI analysis and suggestions — P3 (in-country AI v0, ADR-0010)
-  ['post', '/evidence/:evidenceId/analysis', 'requestEvidenceAnalysis', 'P3'],
-  ['get', '/analyses/:analysisId', 'getEvidenceAnalysis', 'P3'],
-  ['get', '/evidence/:evidenceId/segments', 'listEvidenceSegments', 'P3'],
-  ['get', '/evidence/:evidenceId/suggestions', 'listEvidenceSuggestions', 'P3'],
-  ['post', '/suggestions/:suggestionId/accept', 'acceptSuggestion', 'P3'],
-  ['post', '/suggestions/accept-batch', 'acceptSuggestions', 'P3'],
-  ['post', '/suggestions/:suggestionId/reject', 'rejectSuggestion', 'P3'],
   // Offline sync and push tokens — P2 (capture once, offline outbox). The device
   // list and revocation are served since SEIP-P1-012 (routes/devices.ts).
   ['get', '/sync/changes', 'getChanges', 'P2'],

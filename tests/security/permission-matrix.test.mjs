@@ -33,7 +33,7 @@ const tokenFor = {};
 const userIdFor = {};
 let secondEvaluatorUserId;
 let school, area, evidenceId, indicatorId, mappingId, frameworkId, categoryId, uploadId;
-let cycleId, roundId, assignmentId, teacherPersonnelId, agreementId;
+let cycleId, roundId, assignmentId, teacherPersonnelId, agreementId, analysisId, suggestionId;
 
 before(async () => {
   ({ app } = await buildServer());
@@ -110,9 +110,16 @@ before(async () => {
   const indicator = await prisma.indicator.create({ data: { domainId: domain.id, frameworkVersionId: fw.id, code: `I-${randomUUID()}`, nameTh: 'i', sortOrder: 1, isScored: true, indicatorKind: 'standard' } });
   indicatorId = indicator.id;
 
+  // P3: an analysis and an open suggestion on the teacher's evidence, so the
+  // suggestion ops reach their ownership check on a real row.
+  const analysis = await prisma.evidenceAnalysis.create({ data: { evidenceId, status: 'degraded', finishedAt: new Date() } });
+  analysisId = analysis.id;
   const mapping = await app.inject({ method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, headers: { authorization: `Bearer ${tokenFor.teacher}`, 'idempotency-key': randomUUID() }, payload: { indicator_id: indicatorId } });
   assert.equal(mapping.statusCode, 201, `setup: mapping fixture — ${mapping.body}`);
   mappingId = mapping.json().id;
+  suggestionId = (await prisma.aiSuggestion.create({
+    data: { evidenceId, analysisId, indicatorId, frameworkVersionId: fw.id, band: 'possible', locators: [] },
+  })).id;
 
   // evaluator holds 'committee' grants on getEvidence/listEvidenceMappings — like
   // 'own', necessary but not sufficient: a real committee seat is required, not
@@ -250,6 +257,21 @@ const OPERATIONS = () => ({
   acceptEvidence: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/accept` },
   createMapping: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`, payload: { indicator_id: randomUUID() } }, // random indicator: VAL-002 for granted roles, never PERM-001
   listMappings: { method: 'GET', url: '/api/v1/mappings' },
+
+  // P3 analysis + suggestions. The owner's first re-run is accepted; later
+  // granted calls meet the 10-minute throttle (AI-002) — not a permission
+  // outcome. The fixture suggestion's indicator is already mapped, so the
+  // owner's accept is MAP-001; reject uses a fresh suggestion per call.
+  requestEvidenceAnalysis: { method: 'POST', url: `/api/v1/evidence/${evidenceId}/analysis` },
+  getEvidenceAnalysis: { method: 'GET', url: `/api/v1/analyses/${analysisId}` },
+  listEvidenceSegments: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/segments` },
+  listEvidenceSuggestions: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/suggestions` },
+  acceptSuggestion: { method: 'POST', url: `/api/v1/suggestions/${suggestionId}/accept` },
+  acceptSuggestions: { method: 'POST', url: '/api/v1/suggestions/accept-batch', payload: { suggestion_ids: [randomUUID()] } },
+  rejectSuggestion: { method: 'POST', urlFor: async () => {
+    const s = await prisma.aiSuggestion.create({ data: { evidenceId, analysisId, indicatorId, frameworkVersionId: frameworkId, band: 'possible', locators: [], status: 'needs_review' } });
+    return `/api/v1/suggestions/${s.id}/reject`;
+  }, payload: { reason_code: 'not_relevant' } },
   // Role-conditional action: an own-revoke grant permits only revoke, and a
   // validator grant (school / committee) only validate / return. No If-Match, so
   // a granted caller stops at 428 RES-005 after authorization and the fixture
@@ -335,6 +357,8 @@ const EVIDENCE_OWN_OPS = new Set([
   'getEvidence', 'updateEvidence', 'deleteEvidence', 'getEvidenceFileDownloadUrl',
   'createUpload', 'getUpload', 'signUploadParts', 'completeUpload', 'abortUpload',
   'listEvidenceMappings', 'createMapping', 'actOnMapping', 'acceptEvidence',
+  'requestEvidenceAnalysis', 'getEvidenceAnalysis', 'listEvidenceSegments', 'listEvidenceSuggestions',
+  'acceptSuggestion', 'rejectSuggestion',
 ]);
 // School-owned resources keyed on personnel: a non-owner holding the `own` grant
 // type is denied PERM-001 — the ownership boundary working, not a matrix gap.
@@ -505,7 +529,7 @@ test('X-School-Id header behavior: single membership ignores it safely; multi-me
 
 test('every phase-gated operation answers 501 SYS-003 to an authenticated caller (CCR-017)', async () => {
   const { PHASE_GATED_ROUTES } = await import('../../apps/api/dist/routes/phase-gated.js');
-  assert.ok(PHASE_GATED_OPERATIONS.length >= 20);
+  assert.ok(PHASE_GATED_OPERATIONS.length >= 10);
   for (const [method, path, operationId] of PHASE_GATED_ROUTES) {
     const url = '/api/v1' + path.replace(/:[A-Za-z]+/g, randomUUID());
     const res = await app.inject({ method: method.toUpperCase(), url, headers: { authorization: `Bearer ${tokenFor.teacher}` }, payload: method === 'get' || method === 'delete' ? undefined : {} });
