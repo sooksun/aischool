@@ -22,6 +22,7 @@ export * from './repositories/analysis.js';
 export * from './repositories/coverage.js';
 export * from './repositories/notifications.js';
 export * from './repositories/comments.js';
+export * from './repositories/exports.js';
 export * from './repositories/web-sessions.js';
 export * from './repositories/device-sessions.js';
 export * from './repositories/password-resets.js';

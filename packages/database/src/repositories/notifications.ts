@@ -9,6 +9,11 @@ export interface OutboxLike { id: string; eventType: string; payload: unknown }
 
 interface Draft { kind: NotificationKind; titleTh: string; bodyTh: string | null; entityType: string; entityId: string; route: string }
 
+async function personUserIds(personId: string | null): Promise<string[]> {
+  if (!personId) return [];
+  return (await prisma.userAccount.findMany({ where: { personId, status: 'active' }, select: { id: true } })).map((u) => u.id);
+}
+
 /** Every account of the evidence owner (ADR-0015: evidence belongs to a person). */
 async function ownerUserIds(evidenceId: string): Promise<string[]> {
   const ev = await prisma.evidence.findUnique({ where: { id: evidenceId }, select: { ownerPersonId: true } });
@@ -18,6 +23,9 @@ async function ownerUserIds(evidenceId: string): Promise<string[]> {
 }
 
 function draftFor(eventType: string, p: Record<string, unknown>): Draft | null {
+  if (eventType === 'export.ready' && typeof p.export_id === 'string') {
+    return { kind: 'export_ready', titleTh: 'ชุดส่งออกข้อมูลพร้อมดาวน์โหลดแล้ว', bodyTh: 'ดาวน์โหลดได้ภายใน 7 วัน', entityType: 'ExportPackage', entityId: p.export_id, route: '/exports' };
+  }
   const evidenceId = typeof p.evidence_id === 'string' ? p.evidence_id : null;
   if (!evidenceId) return null;
   const at = (kind: NotificationKind, titleTh: string, bodyTh: string | null) =>
@@ -45,7 +53,9 @@ export async function notifyFromEvent(ev: OutboxLike): Promise<number> {
   const p = (ev.payload ?? {}) as Record<string, unknown>;
   const draft = draftFor(ev.eventType, p);
   if (!draft) return 0;
-  const userIds = await ownerUserIds(draft.entityId);
+  const userIds = draft.entityType === 'ExportPackage'
+    ? await personUserIds(typeof p.person_id === 'string' ? p.person_id : null)
+    : await ownerUserIds(draft.entityId);
   if (userIds.length === 0) return 0;
   const r = await prisma.notification.createMany({
     data: userIds.map((userId) => ({ ...draft, userId, sourceEventId: ev.id })),

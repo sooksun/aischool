@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **P5 started — portfolio export (SEIP-P5-001, in review):** a new "ส่งออก" page lets a person export their whole checked portfolio as one ZIP file. The file holds the original files and a manifest.json listing items, indicator mappings, dates and SHA-256 hashes. A notification arrives when it is ready, and the file is deleted after 7 days. A school admin can export someone else's portfolio only with step-up, and it is audited. The DPA pack and the PA2 workbook still wait for verified rules data.
+
 > **Committee comments (SEIP-P4-006, CCR-028, in review):** the committee and the director can comment on, or ask for more about, each indicator, as text only with no score. The person evaluated reads the comments and replies. **Decision needed:** telling the evaluatee about a new comment needs a new notification type, which counts as a breaking contract change, so it waits for the owner's approval.
 >
 > **Readiness views (SEIP-P4-004/005, in review):** the area admin has a "ความพร้อมรายโรงเรียน" page with counts per school. The app's home screen shows how many indicators still have no evidence. Each app sign-in can now register its push token, but nothing is sent yet.

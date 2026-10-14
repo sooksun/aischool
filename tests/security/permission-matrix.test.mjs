@@ -273,6 +273,14 @@ const OPERATIONS = () => ({
     return `/api/v1/coverage?subject_type=person&subject_id=${owner.personId}&framework_version_id=${frameworkId}`;
   } },
   getEvidenceAnalysis: { method: 'GET', url: `/api/v1/analyses/${analysisId}` },
+  // P5 exports. The fixture export is the teacher's: a deputy's own grant is not
+  // over it (RES-001); director / school_admin reach it through the school grant
+  // (not ready yet: EXP-002 on download). createExport with no person_id is the
+  // caller's own portfolio — accepted for every granted role.
+  listExports: { method: 'GET', url: '/api/v1/exports' },
+  createExport: { method: 'POST', url: '/api/v1/exports', payload: { kind: 'portfolio_portable' } },
+  getExport: { method: 'GET', urlFor: async () => `/api/v1/exports/${await sweepExportId()}` },
+  getExportDownloadUrl: { method: 'GET', urlFor: async () => `/api/v1/exports/${await sweepExportId()}/download-url` },
   listEvidenceSegments: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/segments` },
   listEvidenceSuggestions: { method: 'GET', url: `/api/v1/evidence/${evidenceId}/suggestions` },
   acceptSuggestion: { method: 'POST', url: `/api/v1/suggestions/${suggestionId}/accept` },
@@ -364,6 +372,14 @@ const OPERATIONS = () => ({
 // grants but isn't OWNER_ROLE, denial is the CORRECT outcome (proves the
 // ownership boundary), not a matrix mismatch.
 const OWNER_ROLE = 'teacher';
+let exportIdCache;
+async function sweepExportId() {
+  if (!exportIdCache) {
+    const owner = await prisma.userAccount.findUniqueOrThrow({ where: { id: userIdFor.teacher }, select: { personId: true } });
+    exportIdCache = (await prisma.exportPackage.create({ data: { kind: 'portfolio_portable', personId: owner.personId, schoolId: school.id, requestedByUserId: userIdFor.teacher, status: 'queued' } })).id;
+  }
+  return exportIdCache;
+}
 // Person-owned evidence (ADR-0015): a non-owner whose only route is an `own`
 // grant has NO route to the item at all, and gets RES-001 — the same answer as a
 // missing id, so the item's existence never leaks (apps/api/src/lib/evidence-access.ts).
@@ -545,7 +561,7 @@ test('X-School-Id header behavior: single membership ignores it safely; multi-me
 
 test('every phase-gated operation answers 501 SYS-003 to an authenticated caller (CCR-017)', async () => {
   const { PHASE_GATED_ROUTES } = await import('../../apps/api/dist/routes/phase-gated.js');
-  assert.ok(PHASE_GATED_OPERATIONS.length >= 5);
+  assert.ok(PHASE_GATED_OPERATIONS.length >= 1);
   for (const [method, path, operationId] of PHASE_GATED_ROUTES) {
     const url = '/api/v1' + path.replace(/:[A-Za-z]+/g, randomUUID());
     const res = await app.inject({ method: method.toUpperCase(), url, headers: { authorization: `Bearer ${tokenFor.teacher}` }, payload: method === 'get' || method === 'delete' ? undefined : {} });

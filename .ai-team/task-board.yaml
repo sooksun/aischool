@@ -2261,3 +2261,36 @@ tasks:
       - "evaluatee finds and replies in the web; director sees it"  # DONE — e2e comments.spec
       - "notification to the evaluatee"        # BLOCKED — owner decision on NotificationKind (breaking)
 
+
+  - id: SEIP-P5-001
+    title: "P5 — FR-117 (portability) portable portfolio export (portfolio_portable): zip of accepted originals + manifest"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0017]
+    primary_paths:
+      - prisma/migrations/20261014000600_export_package/migration.sql
+      - packages/database/src/repositories/exports.ts
+      - apps/worker/src/jobs/export-build.ts
+      - apps/api/src/routes/exports.ts
+      - apps/web/src/pages/ExportsPage.tsx
+    notes: >
+      No contract change: createExport / listExports / getExport / getExportDownloadUrl
+      were already in openapi 4.x and leave phase-gated.ts. export_package carries RLS
+      (person in scope or school in scope). The worker job export.build zips every
+      accepted, unblocked item's scanned files (evidence/NNN title/…) plus manifest.json
+      (schema seip.portfolio_portable v1, sha256 per file) and a Thai README. It
+      uploads to exports/<person>/<id>.zip and emits export.ready, which notifies the
+      person (kind export_ready, route /exports). Packages expire after 7 days, and
+      storage GC deletes their object. A download link is given only while the
+      package is ready. Someone else's export needs a school grant at a school where
+      the person is staff, plus step-up (min_acr other_person: 2), and is audited
+      (export_requested / export_downloaded). dpa_pack and pa2_workbook answer
+      VAL-002 until their rules data (DpaSlotProfile, the ก.ค.ศ. workbook layout) is
+      verified. listDpaSlotProfiles and getChanges stay phase-gated.
+    acceptance_criteria:
+      - "owner's zip has originals + manifest + README; blocked items excluded; peer RES-001; admin download audited; export_ready notification"  # DONE — exports.test
+      - "expired → EXP-002 and GC removes the object"            # DONE — exports.test
+      - "permission sweep covers the 4 ops; step-up on other_person"  # DONE — test:security, step-up.test
+      - "web page: create, poll, download"                      # DONE — e2e exports.spec
+      - "dpa_pack / pa2_workbook"                               # NOT STARTED — rules data unverified

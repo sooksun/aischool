@@ -12,6 +12,7 @@ import { analysisRoutes } from './routes/analysis.js';
 import { coverageRoutes } from './routes/coverage.js';
 import { committeeRoutes, commentRoutes } from './routes/committee.js';
 import { notificationRoutes } from './routes/notifications.js';
+import { exportRoutes } from './routes/exports.js';
 import { cycleRoutes } from './routes/cycles.js';
 import { scoringRoutes } from './routes/scoring.js';
 import { reportRoutes } from './routes/reports.js';
@@ -62,6 +63,7 @@ export async function buildServer() {
     await v1.register(committeeRoutes);
     await v1.register(commentRoutes);
     await v1.register(notificationRoutes);
+    await v1.register(exportRoutes, { env });
     await v1.register(cycleRoutes);
     // v2 (x-seip-feature: v2, ADR-0017) — frozen, served only behind the flag.
     // listAssignments/createAssignment/getAssignment/listAssignmentEvidence are

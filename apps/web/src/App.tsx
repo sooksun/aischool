@@ -24,6 +24,7 @@ import { LinkNotePage } from './pages/LinkNotePage';
 import { CoveragePage } from './pages/CoveragePage';
 import { AreaCoveragePage } from './pages/area/AreaCoveragePage';
 import { NotificationsPage, useUnreadNotifications } from './pages/NotificationsPage';
+import { ExportsPage } from './pages/ExportsPage';
 import { AssignmentEvidencePage } from './pages/evaluator/AssignmentEvidencePage';
 import { AssignmentCommentsPage } from './pages/AssignmentCommentsPage';
 import { MyAssessmentsPage } from './pages/MyAssessmentsPage';
@@ -145,6 +146,11 @@ function AppNav() {
           ความครอบคลุม
         </Link>
       )}
+      {submitEvidence && (
+        <Link to="/exports" className={location.pathname === '/exports' ? 'active' : ''}>
+          ส่งออก
+        </Link>
+      )}
       <Link to="/notifications" className={location.pathname === '/notifications' ? 'active' : ''} aria-label={`การแจ้งเตือน ยังไม่อ่าน ${unread}`}>
         🔔{unread > 0 ? ` ${unread}` : ''}
       </Link>
@@ -238,6 +244,7 @@ export function App() {
         <Route path="/devices" element={<RequireAuth><DevicesPage /></RequireAuth>} />
         <Route path="/coverage" element={<RequireAuth><CoveragePage /></RequireAuth>} />
         <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
+        <Route path="/exports" element={<RequireAuth><ExportsPage /></RequireAuth>} />
 
         <Route path="/area/coverage" element={
           <RequireCapability capability="manageAreaSchools"><AreaCoveragePage /></RequireCapability>

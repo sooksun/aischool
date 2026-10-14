@@ -15,10 +15,6 @@ const GATED: [Method, string, string, string][] = [
   // Notifications, coverage, committee evidence view — P4
   // Exports — P5 (DPA pack, PA2 workbook, portability)
   ['get', '/dpa-slot-profiles', 'listDpaSlotProfiles', 'P5'],
-  ['get', '/exports', 'listExports', 'P5'],
-  ['post', '/exports', 'createExport', 'P5'],
-  ['get', '/exports/:exportId', 'getExport', 'P5'],
-  ['get', '/exports/:exportId/download-url', 'getExportDownloadUrl', 'P5'],
 ];
 
 export const PHASE_GATED_OPERATIONS = GATED.map(([, , op]) => op);

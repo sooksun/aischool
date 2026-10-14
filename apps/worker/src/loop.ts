@@ -12,6 +12,7 @@ import { processStorageGc } from './jobs/storage-gc.js';
 import { processReportGenerate, type ReportGeneratePayload } from './jobs/report-generate.js';
 import { dispatchOutboxBatch } from './jobs/outbox-dispatch.js';
 import { processEvidenceAnalyze, type EvidenceAnalyzePayload } from './jobs/evidence-analyze.js';
+import { processExportBuild, type ExportBuildPayload } from './jobs/export-build.js';
 
 let gcScheduled = false;
 
@@ -56,6 +57,8 @@ export async function runOnce(
           payload: {},
           availableAt: new Date(Date.now() + 60 * 60 * 1000),
         });
+      } else if (job.jobType === 'export.build') {
+        await processExportBuild(env, s3, job.payload as unknown as ExportBuildPayload);
       } else if (job.jobType === 'evidence.analyze') {
         await processEvidenceAnalyze(env, s3, job.payload as unknown as EvidenceAnalyzePayload);
       } else if (job.jobType === 'report.generate') {

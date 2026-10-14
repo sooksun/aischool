@@ -162,6 +162,16 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-14, local — SEIP-P5-001, portfolio export)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `test:unit` · `test:backend` | pass |
+| `gate:contracts` · `gate:ownership` · `gate:dep-audit` · `gate:secret-scan` | pass (no contract change; yauzl 3.4.0 dev-only) |
+| api integration · security · step-up | 156 · 12 · 11 — all pass (+3 exports; sweep +4 ops; createExport other_person step-up) |
+| worker integration | 34; one flaky run of the "does not invent a duration" test, which passed on rerun |
+| `test:e2e` (subset) | exports · coverage · notifications — 4/4 (new: exports.spec, worker running) |
+
 ## Verified runs (2026-10-13, local — SEIP-P2-006, 720p rendition)
 
 | Command | Result |

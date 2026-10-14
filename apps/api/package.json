@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "SEIP HTTP API \u2014 evidence-workflow slice of openapi.yaml (module-boundaries.md).",
+  "description": "SEIP HTTP API — evidence-workflow slice of openapi.yaml (module-boundaries.md).",
   "scripts": {
     "dev": "node --env-file=../../.env --watch dist/index.js",
     "build": "tsc -p tsconfig.json",
@@ -27,6 +27,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/pdfkit": "^0.17.6",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "yauzl": "3.4.0"
   }
 }

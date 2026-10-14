@@ -1372,3 +1372,43 @@ model AssignmentComment {
   @@index([assignmentId, indicatorId, createdAt])
   @@map("assignment_comment")
 }
+
+// ── P5 exports (ADR-0017; contract 4.0.0 "exports") ──
+// A package is built by the worker into object storage, held for a short time,
+// then removed. person_id is whose data it is; requested_by may differ (an
+// admin exporting a staff member's portfolio needs step-up, permissions min_acr).
+
+enum ExportKind {
+  dpa_pack
+  pa2_workbook
+  portfolio_portable
+}
+
+enum ExportStatus {
+  queued
+  preflight_failed
+  building
+  ready
+  failed
+  expired
+}
+
+model ExportPackage {
+  id                String       @id @default(uuid()) @db.Uuid
+  kind              ExportKind
+  personId          String       @map("person_id") @db.Uuid
+  schoolId          String       @map("school_id") @db.Uuid // the school it was requested at (admin listing, RLS)
+  requestedByUserId String       @map("requested_by_user_id") @db.Uuid
+  status            ExportStatus @default(queued)
+  preflight         Json         @default("[]")
+  storageUri        String?      @map("storage_uri")
+  byteSize          BigInt?      @map("byte_size")
+  sha256            String?
+  expiresAt         DateTime?    @map("expires_at")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  finishedAt        DateTime?    @map("finished_at")
+
+  @@index([personId, createdAt])
+  @@index([schoolId, createdAt])
+  @@map("export_package")
+}

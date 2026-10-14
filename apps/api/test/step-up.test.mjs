@@ -204,10 +204,24 @@ test('every operation-level min_acr operation is gated', { skip }, async () => {
   }
 });
 
+test('createExport: one\'s own portfolio needs no step-up; another person\'s does (other_person: 2)', { skip }, async () => {
+  const create = (token, body) => enforced.inject({
+    method: 'POST', url: '/api/v1/exports', headers: { ...bearer(token), 'idempotency-key': randomUUID() }, payload: body,
+  });
+  const own = await create(people.teacher.pwd, { kind: 'portfolio_portable' });
+  assert.equal(own.statusCode, 202, own.body);
+  const theirs = { kind: 'portfolio_portable', person_id: people.teacher.user.personId };
+  const low = await create(people.admin.pwd, theirs);
+  assert.equal(low.json().code, 'AUTH-006', low.body);
+  const high = await create(people.admin.mfa, theirs);
+  assert.equal(high.statusCode, 202, high.body);
+  assert.ok(await prisma.auditEvent.findFirst({ where: { entityId: high.json().id, action: 'export_requested' } }));
+});
+
 test('coverage: every min_acr entry in permissions.yaml is exercised here or phase-gated', () => {
   const doc = yaml.load(readFileSync(new URL('../../../docs/contracts/permissions.yaml', import.meta.url), 'utf8'));
-  const phaseGated = new Set(['createExport']); // P5, 501 SYS-003 (routes/phase-gated.ts)
-  const actionLevel = new Set(['actOnMapping']); // validate / return tests above
+  const phaseGated = new Set([]); // routes/phase-gated.ts holds no min_acr operation now
+  const actionLevel = new Set(['actOnMapping', 'createExport']); // validate / return, and other_person, tested above
   for (const op of Object.keys(doc.min_acr)) {
     assert.ok(op in OPERATION_LEVEL || actionLevel.has(op) || phaseGated.has(op), `min_acr ${op} has no step-up test`);
   }
