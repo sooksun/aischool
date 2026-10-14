@@ -2181,3 +2181,27 @@ tasks:
       - "preferences default, replace, quiet-hours validation"                                                     # DONE
       - "web: note → notification → opens the item"                                                                # DONE — e2e notifications.spec
 
+  - id: SEIP-P4-004
+    title: "P4 — FR-100 push token per app sign-in (registerPushToken / removePushToken); sending comes later"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-012, SEIP-P4-003]
+    decisions: [ADR-0016]
+    primary_paths:
+      - prisma/migrations/20261014000400_device_push_token/migration.sql
+      - apps/api/src/routes/devices.ts
+      - packages/database/src/repositories/device-sessions.ts
+      - apps/api/test/devices.test.mjs
+    notes: >
+      No contract change: both operations and their self-scoped rows were in contract
+      4.0.0 and now leave phase-gated.ts. device_session gains push_provider, CHECKed
+      to fcm or apns, and push_token. PUT binds the token to the caller's own live app
+      sign-in (the session the token came through). A browser or password-token
+      request has no app session and gets VAL-001, the 400 the contract lists.
+      DELETE clears the token. Revoking a session clears it too, and listDeviceSessions
+      reports has_push. Not done: sending the ping (FCM/APNs credentials; the ping
+      carries no content, FR-101) and the app's call to register (firebase_messaging
+      needs native setup and a device).
+    acceptance_criteria:
+      - "app session binds, lists has_push, deletes; password token VAL-001; revoke clears"  # DONE — devices.test (real Keycloak)
+

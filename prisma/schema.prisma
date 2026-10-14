@@ -401,6 +401,9 @@ model DeviceSession {
   createdAt   DateTime  @default(now()) @map("created_at")
   lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
   revokedAt   DateTime? @map("revoked_at")
+  /// FR-100: where this app install receives its content-free push ping. Cleared on revoke.
+  pushProvider String?  @map("push_provider")
+  pushToken    String?  @map("push_token")
 
   user UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
 

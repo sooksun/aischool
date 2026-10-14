@@ -47,5 +47,14 @@ export async function findOwnSession(userId: string, id: string) {
 }
 
 export async function revokeDeviceSessionRow(id: string, now = new Date()) {
-  await prisma.deviceSession.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: now } });
+  await prisma.deviceSession.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: now, pushProvider: null, pushToken: null } });
+}
+
+/** FR-100: bind (or replace) the push token of the caller's own, live app session. False if it is not one. */
+export async function setDevicePushToken(userId: string, sessionId: string, value: { provider: 'fcm' | 'apns'; token: string } | null) {
+  const r = await prisma.deviceSession.updateMany({
+    where: { id: sessionId, userId, revokedAt: null },
+    data: { pushProvider: value?.provider ?? null, pushToken: value?.token ?? null },
+  });
+  return r.count > 0;
 }

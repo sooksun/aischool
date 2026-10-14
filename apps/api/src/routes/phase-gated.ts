@@ -12,8 +12,6 @@ const GATED: [Method, string, string, string][] = [
   // Offline sync and push tokens — P2 (capture once, offline outbox). The device
   // list and revocation are served since SEIP-P1-012 (routes/devices.ts).
   ['get', '/sync/changes', 'getChanges', 'P2'],
-  ['put', '/devices/current/push-token', 'registerPushToken', 'P2'],
-  ['delete', '/devices/current/push-token', 'removePushToken', 'P2'],
   // Notifications, coverage, committee evidence view — P4
   // Exports — P5 (DPA pack, PA2 workbook, portability)
   ['get', '/dpa-slot-profiles', 'listDpaSlotProfiles', 'P5'],

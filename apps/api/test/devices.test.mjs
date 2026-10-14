@@ -96,3 +96,32 @@ test("another person's session is RES-001, like a missing one", { skip }, async 
   assert.equal((await call(bPhone.access_token, 'DELETE', `/devices/${randomUUID()}`)).json().code, 'RES-001');
   assert.equal((await call(aPhone.access_token, 'GET', '/auth/me')).statusCode, 200);
 });
+
+test('FR-100: the app binds its push token to its own sign-in; revoking the session drops it; a password token has no app session', { skip }, async () => {
+  const p = await person();
+  const phone = await mobileSignIn(p.kc);
+  const put = (token, body) => app.inject({
+    method: 'PUT', url: '/api/v1/devices/current/push-token', payload: body,
+    headers: { authorization: `Bearer ${token}`, 'user-agent': 'SEIP-Mobile/1.4.0 (android)' },
+  });
+  assert.equal((await put(phone.access_token, { provider: 'fcm', token: 'fcm-token-1' })).statusCode, 204);
+  const listed = (await call(phone.access_token, 'GET', '/devices')).json();
+  assert.equal(listed[0].has_push, true);
+  const row = await prisma.deviceSession.findUniqueOrThrow({ where: { id: listed[0].id } });
+  assert.deepEqual([row.pushProvider, row.pushToken], ['fcm', 'fcm-token-1']);
+
+  assert.equal((await put(phone.access_token, { provider: 'gcm', token: 'x' })).statusCode, 400, 'fcm or apns only');
+
+  const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: p.user.email, password: p.password } });
+  const viaPassword = await put(login.json().access_token, { provider: 'fcm', token: 'y' });
+  assert.equal(viaPassword.statusCode, 400);
+  assert.equal(viaPassword.json().code, 'VAL-001');
+
+  assert.equal((await call(phone.access_token, 'DELETE', '/devices/current/push-token')).statusCode, 204);
+  assert.equal((await prisma.deviceSession.findUniqueOrThrow({ where: { id: listed[0].id } })).pushToken, null);
+
+  await put(phone.access_token, { provider: 'fcm', token: 'fcm-token-2' });
+  const other = await mobileSignIn(p.kc);
+  await call(other.access_token, 'DELETE', `/devices/${listed[0].id}`);
+  assert.equal((await prisma.deviceSession.findUniqueOrThrow({ where: { id: listed[0].id } })).pushToken, null, 'revoked session keeps no token');
+});
