@@ -10,6 +10,7 @@ import { api, unwrap } from '../api/client';
 import { ApiError, thaiMessageFor } from '../api/errors';
 import type { components } from '../api/schema.generated';
 import { useAuth } from '../hooks/useAuth';
+import { SuggestionsPanel } from '../components/SuggestionsPanel';
 
 type EvidenceDetail = components['schemas']['Evidence'] & {
   files: components['schemas']['EvidenceFile'][];
@@ -239,6 +240,8 @@ export function EvidenceDetailPage() {
       {downloadErr && (
         <div className="alert alert-error" role="alert">{downloadErr}</div>
       )}
+
+      {isOwnItem && evidence.owner_accepted_at && <SuggestionsPanel evidenceId={evidence.id} onMapped={() => void reload()} />}
 
       <h2>ตัวชี้วัดที่ผูก</h2>
       {evidence.mappings.length === 0 && <p className="field-hint">ยังไม่ได้ผูกตัวชี้วัด</p>}

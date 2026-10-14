@@ -448,6 +448,7 @@ jobs:
           node prisma/seed.mjs
           npm run build:libs
           npm run build --workspace apps/api
+          npm run build --workspace apps/worker
           npm run build --workspace apps/web
           node scripts/ci/ensure-bucket.mjs
       - name: Install Playwright Chromium
@@ -458,6 +459,10 @@ jobs:
         run: |
           NODE_ENV=production node apps/api/dist/index.js &
           echo $! > /tmp/seip-api.pid
+          # The worker: scans, then P3 analysis (heuristic floor) the e2e
+          # suggestion flow waits on. No ffmpeg in this job — media off.
+          MEDIA_PROBE=none MEDIA_RENDITIONS=off WORKER_POLL_MS=500 node apps/worker/dist/index.js &
+          echo $! > /tmp/seip-worker.pid
           npm run dev --workspace apps/web -- --host 127.0.0.1 --port 5173 &
           echo $! > /tmp/seip-web.pid
           for i in $(seq 1 40); do

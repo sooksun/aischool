@@ -673,3 +673,16 @@ test('P3 v0: a verified PDF is analysed on the heuristic floor — page segments
   assert.equal(open, 1);
   assert.equal(await prisma.aiSuggestion.count({ where: { id: plan.id, status: 'superseded' } }), 1);
 });
+
+test('P3: an analysis whose item was deleted meanwhile finishes its job instead of retrying', async () => {
+  const { evidence } = await fixture('gone.pdf');
+  const { requestAnalysis } = await import('@seip/database');
+  const { analysis } = await requestAnalysis(evidence.id, null);
+  const job = await prisma.workerJob.findFirstOrThrow({ where: { jobType: 'evidence.analyze', payload: { path: ['analysis_id'], equals: analysis.id } } });
+  await prisma.evidence.delete({ where: { id: evidence.id } }); // cascades the analysis
+  await runOnce(env, s3, { scheduleGc: false });
+  await runOnce(env, s3, { scheduleGc: false });
+  const after = await prisma.workerJob.findUniqueOrThrow({ where: { id: job.id } });
+  assert.equal(after.status, 'done');
+  assert.equal(after.attempts <= 1, true);
+});

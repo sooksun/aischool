@@ -1954,3 +1954,46 @@ tasks:
       - "app renews with the rotated token from the store"                                # DONE
       - "runs on a real Android device; iOS BGTask registration"                          # OPEN
 
+  - id: SEIP-P3-001
+    title: "P3 v0 — analysis → suggestions → owner accepts, end to end on the local_heuristic floor (no GPU yet)"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001, SEIP-P2-009]
+    decisions: [ADR-0010, ADR-0015, ADR-0019]
+    primary_paths:
+      - prisma/migrations/20261014000100_ai_suggestions/migration.sql
+      - packages/database/src/lib/heuristic-suggest.ts
+      - packages/database/src/repositories/analysis.ts
+      - apps/worker/src/jobs/evidence-analyze.ts
+      - apps/worker/src/pdf-text.ts
+      - apps/api/src/routes/analysis.ts
+      - apps/web/src/components/SuggestionsPanel.tsx
+      - tests/e2e/suggestions.spec.ts
+    notes: >
+      No contract change: the seven "analysis" operations, AI-002/003/004 and their
+      permissions rows were already in contract 4.0.0, and now leave phase-gated.ts. New
+      tables evidence_analysis, content_segment, ai_suggestion and suggestion_feedback
+      each have an RLS backstop policy. A partial unique index allows one open
+      suggestion per (evidence, indicator, framework version). A verified, scanned
+      original queues evidence.analyze, and so does a new link or note. The worker
+      extracts the PDF text layer page by page (pdf.js 6.3.289: no rendering, no fonts,
+      no document scripts; control characters stripped). It ranks the owner's ว9/ว10
+      indicators by the share of their content words found (a Thai stop-word list keeps
+      ที่/และ/ผู้ from matching). Each suggestion gets a page locator whose quote
+      validateQuote checks verbatim against the stored segment. The run finishes
+      degraded + provisional, band never clear, calibrated_p null. Batch accept checks
+      the role, then skips every item with AI-004 because no pre-tick gate has passed.
+      calibrated_p, rationale_th and segment text are owner-only. Accept creates an
+      owner_confirmed, ai_accepted mapping with locator_snapshot, which the director
+      then validates as usual. Reject stores a reason. Re-runs are limited to once per
+      10 min (AI-002, Retry-After). A deleted item's queued analysis finishes quietly.
+      The e2e CI job now starts the worker (media off). NOT DONE: the GPU tier, its
+      model, OCR and ASR (AQ-05). Also not done: the extract service (Office, images,
+      video), PII redaction before the model (FR-023a), hidden-text and injection checks
+      (FR-028), the calibration and gold set, and the suggestion inbox in the app.
+    acceptance_criteria:
+      - "Thai PDF → page segments, verbatim quote on the right page, degraded+provisional"  # DONE — worker file-process.test
+      - "owner-only confidence/rationale; stranger RES-001; accept → ai_accepted mapping; AI-003; AI-004; AI-002"  # DONE — api analysis.test
+      - "permission sweep covers all seven ops"                                               # DONE — test:security
+      - "web: teacher accepts a suggestion for a note"                                       # DONE — e2e suggestions.spec
+

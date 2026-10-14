@@ -123,8 +123,10 @@ export async function rejectSuggestionWithReason(input: {
 
 // ── worker side ──
 
-export async function setAnalysisStage(analysisId: string, status: (typeof RUNNING)[number], stage: string) {
-  await prisma.evidenceAnalysis.update({ where: { id: analysisId }, data: { status, stage } });
+/** False when the analysis no longer exists (its evidence was deleted): stop quietly. */
+export async function setAnalysisStage(analysisId: string, status: (typeof RUNNING)[number], stage: string): Promise<boolean> {
+  const r = await prisma.evidenceAnalysis.updateMany({ where: { id: analysisId }, data: { status, stage } });
+  return r.count > 0;
 }
 
 /** What the worker needs: the item, its scanned originals, and the owner's framework. */
@@ -198,6 +200,7 @@ export async function completeAnalysis(input: {
   });
 }
 
+/** A no-op when the analysis is gone with its deleted evidence (cascade). */
 export async function failAnalysis(analysisId: string, errorCode: string) {
-  await prisma.evidenceAnalysis.update({ where: { id: analysisId }, data: { status: 'failed', errorCode, finishedAt: new Date() } });
+  await prisma.evidenceAnalysis.updateMany({ where: { id: analysisId }, data: { status: 'failed', errorCode, finishedAt: new Date() } });
 }

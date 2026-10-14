@@ -28,6 +28,9 @@ async function readAll(body: Readable): Promise<Uint8Array> {
 }
 
 export async function processEvidenceAnalyze(env: Env, s3: S3Client, payload: EvidenceAnalyzePayload): Promise<void> {
+  // The item (and with it the analysis) may have been deleted since the job
+  // was queued: finish the job rather than retry it into the dead-letter pile.
+  if (!(await setAnalysisStage(payload.analysis_id, 'extracting', 'text_layer'))) return;
   const input = await getAnalysisInput(payload.evidence_id);
   if (!input) {
     await failAnalysis(payload.analysis_id, 'RES-001');
@@ -35,7 +38,6 @@ export async function processEvidenceAnalyze(env: Env, s3: S3Client, payload: Ev
   }
   const { evidence, framework } = input;
 
-  await setAnalysisStage(payload.analysis_id, 'extracting', 'text_layer');
   const segments: NewSegment[] = [];
   for (const file of evidence.files) {
     if (file.contentType !== 'application/pdf' || Number(file.byteSize) > PDF_MAX_BYTES) continue;

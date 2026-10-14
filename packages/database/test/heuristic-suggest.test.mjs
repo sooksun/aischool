@@ -56,3 +56,12 @@ test('quoteAround returns a span that indexes the normalised text', () => {
   const t = normalizeText(PAGES[2].text);
   assert.equal(t.slice(q.span[0], q.span[1]), q.quote);
 });
+
+test('function words do not make a match (ที่ / และ / ผู้ alone never suggest an indicator)', () => {
+  const indicators = [
+    { id: 'i-climate', code: 'T-1.7', nameTh: 'จัดบรรยากาศที่ส่งเสริมและพัฒนาผู้เรียน', indicatorKind: 'standard' },
+    { id: 'i-parents', code: 'T-2.4', nameTh: 'ประสานความร่วมมือกับผู้ปกครอง ภาคีเครือข่าย และหรือสถานประกอบการ', indicatorKind: 'standard' },
+  ];
+  const out = suggestFromSegments({ contextText: 'ประชุมผู้ปกครองและภาคีเครือข่าย สร้างความร่วมมือที่บ้าน', segments: [], indicators });
+  assert.deepEqual(out.map((s) => s.indicatorId), ['i-parents']);
+});

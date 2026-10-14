@@ -32,6 +32,19 @@ export const HEURISTIC_MODEL_LABEL = 'SEIP local_heuristic';
 export const HEURISTIC_PROMPT_VERSION = 'heuristic-v1';
 const QUOTE_MAX = 200;
 
+/**
+ * Thai function words and very common fragments. They appear in almost every
+ * indicator name and almost every item, so matching on them is noise (a note
+ * about a parents' meeting "matched" T-1.7 on ที่/และ/ผู้). Content words only.
+ */
+const STOPWORDS = new Set([
+  'และ', 'หรือ', 'ที่', 'ของ', 'ใน', 'การ', 'ความ', 'ผู้', 'ให้', 'กับ', 'เพื่อ', 'มี', 'ได้', 'เป็น', 'จาก', 'โดย',
+  'แก่', 'แห่ง', 'อื่น', 'ๆ', 'งาน', 'ทาง', 'ตาม', 'ไป', 'มา', 'นำ', 'ใช้', 'อย่าง', 'ต่อ', 'ด้าน', 'สร้าง', 'พัฒนา',
+  'the', 'and', 'of', 'to', 'in', 'for',
+]);
+
+const contentWords = (text: string) => tokenize(text).filter((w) => !STOPWORDS.has(w));
+
 /** NFC + collapsed whitespace — how Thai text is compared everywhere here. */
 export function normalizeText(s: string): string {
   return s.normalize('NFC').replace(/\s+/g, ' ').trim();
@@ -82,14 +95,14 @@ export function suggestFromSegments(
 ): HeuristicSuggestion[] {
   const max = opts.max ?? 5;
   const minScore = opts.minScore ?? 0.34;
-  const segTokens = input.segments.map((s) => ({ seg: s, tokens: new Set(tokenize(s.text)) }));
-  const all = new Set([...tokenize(input.contextText), ...segTokens.flatMap((s) => [...s.tokens])]);
+  const segTokens = input.segments.map((s) => ({ seg: s, tokens: new Set(contentWords(s.text)) }));
+  const all = new Set([...contentWords(input.contextText), ...segTokens.flatMap((s) => [...s.tokens])]);
   if (all.size === 0) return [];
 
   const out: HeuristicSuggestion[] = [];
   for (const ind of input.indicators) {
     if (ind.indicatorKind === 'workload_gate') continue;
-    const words = [...new Set(tokenize(ind.nameTh))];
+    const words = [...new Set(contentWords(ind.nameTh))];
     if (words.length === 0) continue;
     const matched = words.filter((w) => all.has(w));
     const score = matched.length / words.length;
