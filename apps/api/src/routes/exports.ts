@@ -15,7 +15,7 @@ import { ApiError } from '@seip/backend-shared';
 import type { Env } from '../env.js';
 import type { AuthedRequest } from '../plugins/auth.js';
 import { requireCurrentSchool } from '../plugins/auth.js';
-import { resolveGrant, requireAcr } from '../lib/permission-guard.js';
+import { resolveGrant, requireAcr, requireAnyGrant } from '../lib/permission-guard.js';
 import { ownGrant } from '../lib/evidence-access.js';
 import { idempotent } from '../lib/concurrency.js';
 import { createS3Client, presignDownload } from '../lib/s3.js';
@@ -49,7 +49,7 @@ async function schoolGrantAt(op: string, auth: AuthedRequest, schoolId: string):
 async function exportFor(op: string, auth: AuthedRequest, id: string): Promise<ExportRow> {
   // A role with no grant at all is PERM-001 before any lookup; past that, every
   // miss is RES-001 so another person's export never shows it exists.
-  if (!ownGrant(op, auth)) await resolveGrant(op, auth, requireCurrentSchool(auth));
+  if (!ownGrant(op, auth)) requireAnyGrant(op, auth);
   const e = await getExportById(id);
   if (e && ((auth.personId === e.personId && ownGrant(op, auth)) || (await schoolGrantAt(op, auth, e.schoolId)))) return e;
   throw new ApiError('RES-001', 'Export not found');
@@ -107,7 +107,7 @@ export const exportRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env 
     const schoolIds: string[] = [];
     for (const sid of auth.tenancy.schoolRoles.keys()) if (await schoolGrantAt('listExports', auth, sid)) schoolIds.push(sid);
     const own = ownGrant('listExports', auth) ? auth.personId : null;
-    if (!own && schoolIds.length === 0) await resolveGrant('listExports', auth, requireCurrentSchool(auth)); // PERM-001
+    if (!own && schoolIds.length === 0) requireAnyGrant('listExports', auth); // PERM-001 with no grant anywhere
     const offset = q.cursor ? Number(q.cursor) : 0;
     const page = await listExportsFor(own, schoolIds, { offset, limit: q.limit });
     return { items: page.items.map(serialize), next_cursor: page.more ? String(offset + q.limit) : null };

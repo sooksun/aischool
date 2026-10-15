@@ -33,7 +33,9 @@ async function userWith(key, role, { personnel = true } = {}) {
   user[key] = u;
 }
 const h = (key, extra = {}) => ({ authorization: `Bearer ${token[key]}`, 'x-school-id': school.id, ...extra });
-const worker = () => runOnce(env, s3, { scheduleGc: false });
+// A few passes: one pass claims only the 10 oldest due jobs, and a local queue
+// may hold unrelated retries ahead of ours.
+const worker = async () => { for (let i = 0; i < 3; i++) await runOnce(env, s3, { scheduleGc: false }); };
 
 function unzip(buf) {
   return new Promise((resolve, reject) => {

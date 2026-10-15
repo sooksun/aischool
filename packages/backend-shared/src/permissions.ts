@@ -27,7 +27,7 @@ const doc = yaml.load(
   readFileSync(resolve(repoRoot, 'docs/contracts/permissions.yaml'), 'utf8'),
 ) as PermissionsDoc;
 
-export type Role = 'teacher' | 'director' | 'deputy' | 'evaluator' | 'school_admin' | 'area_admin';
+export type Role = 'teacher' | 'director' | 'deputy' | 'evaluator' | 'school_admin' | 'area_admin' | 'dpo';
 type Grant = string; // 'own' | 'school' | 'area-r' | 'committee' | 'own-revoke' | 'committee-or-own'...
 
 interface PermissionsDoc {

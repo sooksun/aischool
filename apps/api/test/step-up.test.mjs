@@ -33,7 +33,7 @@ let enforced, relaxed, noKeycloak;
 let school, roundId, categoryId, indicatorIds = [];
 const people = {};
 const areaUserIds = [];
-let area;
+let area, subjectRequestId;
 
 async function serverWith(env) {
   const saved = {};
@@ -66,11 +66,11 @@ async function person(role, { personnel = false } = {}) {
     });
   }
   await prisma.schoolMembership.create({
-    data: role === 'area_admin'
+    data: role === 'area_admin' || role === 'dpo'
       ? { userId: user.id, areaId: area.id, role, membershipScope: 'area', effectiveFrom: new Date('2020-01-01'), status: 'active' }
       : { userId: user.id, schoolId: school.id, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
   });
-  if (role === 'area_admin') areaUserIds.push(user.id);
+  if (role === 'area_admin' || role === 'dpo') areaUserIds.push(user.id);
   const kc = await createUser(user.id);
   kcUsers.push(kc);
   const own = (await enforced.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: user.email, password } })).json().access_token;
@@ -114,6 +114,10 @@ before(async () => {
   people.director = await person('director');
   people.admin = await person('school_admin');
   people.areaAdmin = await person('area_admin');
+  people.dpo = await person('dpo');
+  subjectRequestId = (await prisma.subjectRequest.create({
+    data: { personId: people.teacher.user.personId, requestedByUserId: people.teacher.user.id, schoolId: school.id, areaId: area.id, requestType: 'correction', dueAt: new Date(Date.now() + 86400000) },
+  })).id;
 });
 
 after(async () => {
@@ -190,9 +194,12 @@ const OPERATION_LEVEL = {
   updateSchool: (token) => ({ method: 'PATCH', url: `/api/v1/schools/${school.id}`, headers: bearer(token), payload: {} }),
   appointSchoolAdmin: (token) => ({ method: 'POST', url: `/api/v1/schools/${school.id}/admins`, headers: bearer(token), payload: {} }),
   createAssignment: (token) => ({ method: 'POST', url: `/api/v1/rounds/${roundId}/assignments`, headers: bearer(token), payload: {} }),
+  appointDpo: (token) => ({ method: 'POST', url: `/api/v1/areas/${area.id}/dpos`, headers: bearer(token), payload: {} }),
+  decideSubjectRequest: (token) => ({ method: 'POST', url: `/api/v1/subject-requests/${subjectRequestId}/decision`, headers: bearer(token), payload: {} }),
 };
 const WHO = { inviteMember: 'admin', importMembers: 'admin', endMembership: 'admin', createAssignment: 'director',
-  updatePersonnel: 'admin', issuePasswordReset: 'admin', createSchool: 'areaAdmin', updateSchool: 'areaAdmin', appointSchoolAdmin: 'areaAdmin' };
+  updatePersonnel: 'admin', issuePasswordReset: 'admin', createSchool: 'areaAdmin', updateSchool: 'areaAdmin', appointSchoolAdmin: 'areaAdmin',
+  appointDpo: 'areaAdmin', decideSubjectRequest: 'dpo' };
 
 test('every operation-level min_acr operation is gated', { skip }, async () => {
   for (const [op, request] of Object.entries(OPERATION_LEVEL)) {

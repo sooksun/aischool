@@ -42,7 +42,7 @@ export const committeeRoutes: FastifyPluginAsync = async (app) => {
       // staff there whose role has no grant get the usual PERM-001.
       if (!membership) {
         const areaId = await getSchoolAreaId(assignment.schoolId);
-        const foothold = auth.tenancy.schoolRoles.has(assignment.schoolId) || (!!areaId && !!auth.tenancy.areaRoles.get(areaId)?.has('area_admin'));
+        const foothold = auth.tenancy.schoolRoles.has(assignment.schoolId) || (!!areaId && auth.tenancy.areaRoles.has(areaId)); // any area role (CCR-029)
         throw e instanceof ApiError && e.code === 'PERM-001' && !foothold ? new ApiError('RES-001', 'Assignment not found') : e;
       }
       grant = 'committee';
@@ -104,7 +104,7 @@ async function actorOn(op: string, auth: AuthedRequest, a: Assignment): Promise<
     }
     if (e instanceof ApiError && e.code === 'PERM-001') {
       const areaId = await getSchoolAreaId(a.schoolId);
-      const foothold = auth.tenancy.schoolRoles.has(a.schoolId) || (!!areaId && !!auth.tenancy.areaRoles.get(areaId)?.has('area_admin'));
+      const foothold = auth.tenancy.schoolRoles.has(a.schoolId) || (!!areaId && auth.tenancy.areaRoles.has(areaId)); // any area role (CCR-029)
       if (!foothold) throw new ApiError('RES-001', 'Assignment not found');
     }
     throw e;

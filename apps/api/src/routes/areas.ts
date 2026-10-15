@@ -6,7 +6,9 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   getAreaById, getSchoolRecord, listMembersForSchool, listSchoolsInArea, createSchoolInArea, updateSchoolRecord,
+  listAreaDpos, appointAreaDpo,
 } from '@seip/database';
+import { generateInviteToken, hashInviteToken, inviteTokenExpiryDate } from '@seip/auth';
 import { ApiError, forbiddenRole } from '@seip/backend-shared';
 import type { AuthedRequest } from '../plugins/auth.js';
 import { requireAcr } from '../lib/permission-guard.js';
@@ -27,6 +29,13 @@ async function requireManagedSchool(auth: AuthedRequest, schoolId: string) {
   const school = await getSchoolRecord(schoolId);
   requireAreaAdmin(auth, school?.areaId ?? null);
   return school!;
+}
+
+function serializeDpo(m: Awaited<ReturnType<typeof listAreaDpos>>[number]) {
+  return {
+    membership_id: m.id, user_id: m.user.id, email: m.user.email, display_name: m.user.displayName,
+    user_status: m.user.status, effective_from: m.effectiveFrom.toISOString().slice(0, 10),
+  };
 }
 
 const Uuid = z.string().uuid();
@@ -62,6 +71,35 @@ export const areaRoutes: FastifyPluginAsync = async (app) => {
     requireAcr(auth, 'updateSchool');
     const body = PatchBody.parse(request.body);
     return serializeSchool(await updateSchoolRecord(schoolId, body, auth.userId, request.id));
+  });
+
+  // CCR-029: the area's DPO — an area-scoped membership whose only grants are the
+  // data-subject request register. Listed and appointed by the area admin.
+  app.get('/areas/:areaId/dpos', { config: { operationId: 'listAreaDpos' } }, async (request) => {
+    const { areaId } = z.object({ areaId: Uuid }).parse(request.params);
+    requireAreaAdmin(request.auth!, (await getAreaById(areaId))?.id ?? null);
+    return (await listAreaDpos(areaId)).map(serializeDpo);
+  });
+
+  app.post('/areas/:areaId/dpos', { config: { operationId: 'appointDpo' } }, async (request, reply) => {
+    const auth = request.auth!;
+    const { areaId } = z.object({ areaId: Uuid }).parse(request.params);
+    requireAreaAdmin(auth, (await getAreaById(areaId))?.id ?? null);
+    requireAcr(auth, 'appointDpo');
+    const body = AppointBody.parse(request.body);
+    const rawToken = generateInviteToken();
+    const expiresAt = inviteTokenExpiryDate();
+    const r = await appointAreaDpo({
+      areaId, email: body.email, displayName: body.display_name, actorUserId: auth.userId,
+      inviteTokenHash: hashInviteToken(rawToken), inviteExpiresAt: expiresAt, requestId: request.id,
+    });
+    if (!r.ok) throw new ApiError('RES-003', 'That account is already a DPO of this area');
+    const dpo = (await listAreaDpos(areaId)).find((m) => m.id === r.membershipId)!;
+    return reply.code(201).send({
+      dpo: serializeDpo(dpo),
+      invite_token: r.issuedInvite ? rawToken : null,
+      invite_expires_at: r.issuedInvite ? expiresAt.toISOString() : null,
+    });
   });
 
   app.post('/schools/:schoolId/admins', { config: { operationId: 'appointSchoolAdmin' } }, async (request, reply) => {

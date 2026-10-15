@@ -119,8 +119,19 @@ describe('capabilitiesFromMemberships', () => {
     expect(off.governMappings).toBe(true);
   });
 
+  it('CCR-029: a dpo handles requests only — no evidence, no school data, cannot file', () => {
+    const caps = capabilitiesFromMemberships([
+      { school_id: null, area_id: 'a1', role: 'dpo', membership_scope: 'area' } as never,
+    ]);
+    expect(caps.handleSubjectRequests).toBe(true);
+    expect(caps.fileSubjectRequests).toBe(false);
+    expect(caps.submitEvidence).toBe(false);
+    expect(caps.manageAreaSchools).toBe(false);
+    expect(caps.appointDpos).toBe(false);
+  });
+
   it('CAPABILITY_ROLES lists only known Role values', () => {
-    const known: Role[] = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin'];
+    const known: Role[] = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin', 'dpo'];
     for (const roles of Object.values(CAPABILITY_ROLES)) {
       for (const r of roles) {
         expect(known).toContain(r);

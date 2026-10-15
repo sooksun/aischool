@@ -25,6 +25,8 @@ import { CoveragePage } from './pages/CoveragePage';
 import { AreaCoveragePage } from './pages/area/AreaCoveragePage';
 import { NotificationsPage, useUnreadNotifications } from './pages/NotificationsPage';
 import { ExportsPage } from './pages/ExportsPage';
+import { PrivacyRequestsPage } from './pages/privacy/PrivacyRequestsPage';
+import { DpoRequestsPage } from './pages/privacy/DpoRequestsPage';
 import { AssignmentEvidencePage } from './pages/evaluator/AssignmentEvidencePage';
 import { AssignmentCommentsPage } from './pages/AssignmentCommentsPage';
 import { MyAssessmentsPage } from './pages/MyAssessmentsPage';
@@ -63,6 +65,15 @@ function RequireCapability({
  * the pick is remembered per account. Until they pick, writes would be ambiguous
  * (the API answers PERM-002), so the page says so plainly.
  */
+/** "/" — the evidence list, except for a DPO-only account (CCR-029), which has none. */
+function HomePage() {
+  const { capabilities } = useAuth();
+  if (capabilities.handleSubjectRequests && !capabilities.fileSubjectRequests && !capabilities.manageAreaSchools) {
+    return <Navigate to="/dpo/requests" replace />;
+  }
+  return <EvidenceListPage />;
+}
+
 function SchoolPicker() {
   const { user, schools, schoolId, selectSchool } = useAuth();
   if (!user || schools.length < 2) return null;
@@ -83,12 +94,19 @@ function AppNav() {
   const unread = useUnreadNotifications(!!user && location.pathname !== '/login');
   if (!user || location.pathname === '/login') return null;
 
-  const { manageCycles, scoreAsCommittee, viewReports, submitEvidence, manageMembers, manageAreaSchools } = capabilities;
-  if (!manageCycles && !scoreAsCommittee && !viewReports && !submitEvidence && !manageMembers && !manageAreaSchools) return null;
+  const { manageCycles, scoreAsCommittee, viewReports, submitEvidence, manageMembers, manageAreaSchools, fileSubjectRequests, handleSubjectRequests } = capabilities;
+  if (!manageCycles && !scoreAsCommittee && !viewReports && !submitEvidence && !manageMembers && !manageAreaSchools && !handleSubjectRequests) return null;
+  // CCR-029: a DPO-only account holds no school data — no evidence, no PA1.
+  const dpoOnly = handleSubjectRequests && !fileSubjectRequests && !manageAreaSchools;
 
   return (
     <nav className="app-nav" aria-label="เมนูหลัก">
-      <Link to="/" className={location.pathname === '/' ? 'active' : ''}>หลักฐานของฉัน</Link>
+      {!dpoOnly && <Link to="/" className={location.pathname === '/' ? 'active' : ''}>หลักฐานของฉัน</Link>}
+      {handleSubjectRequests && (
+        <Link to="/dpo/requests" className={location.pathname === '/dpo/requests' ? 'active' : ''}>
+          คำขอใช้สิทธิ (DPO)
+        </Link>
+      )}
       {/* The only other way in is the floating '+' on the evidence list, whose
           label lives in aria-label — visible to a screen reader, invisible to
           everyone else. A teacher who was never shown that button cannot find
@@ -113,9 +131,11 @@ function AppNav() {
           จัดการรอบการประเมิน
         </Link>
       )}
-      <Link to="/agreements" className={location.pathname.startsWith('/agreements') ? 'active' : ''}>
-        ข้อตกลง PA
-      </Link>
+      {!dpoOnly && (
+        <Link to="/agreements" className={location.pathname.startsWith('/agreements') ? 'active' : ''}>
+          ข้อตกลง PA
+        </Link>
+      )}
       {manageMembers && (
         <Link to="/admin/members" className={location.pathname.startsWith('/admin') ? 'active' : ''}>
           บุคลากร
@@ -149,6 +169,11 @@ function AppNav() {
       {submitEvidence && (
         <Link to="/exports" className={location.pathname === '/exports' ? 'active' : ''}>
           ส่งออก
+        </Link>
+      )}
+      {fileSubjectRequests && (
+        <Link to="/privacy-requests" className={location.pathname === '/privacy-requests' ? 'active' : ''}>
+          ข้อมูลส่วนบุคคล
         </Link>
       )}
       <Link to="/notifications" className={location.pathname === '/notifications' ? 'active' : ''} aria-label={`การแจ้งเตือน ยังไม่อ่าน ${unread}`}>
@@ -207,7 +232,7 @@ export function App() {
             `unauthenticated: acceptInvite`. */}
         <Route path="/accept-invite" element={<AcceptInvitePage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
-        <Route path="/" element={<RequireAuth><EvidenceListPage /></RequireAuth>} />
+        <Route path="/" element={<RequireAuth><HomePage /></RequireAuth>} />
         {/* Gated, unlike before: an evaluator typing this URL used to get the
             full 5-step form and only discovered the dead end at POST /evidence. */}
         <Route path="/evidence/new" element={
@@ -245,6 +270,12 @@ export function App() {
         <Route path="/coverage" element={<RequireAuth><CoveragePage /></RequireAuth>} />
         <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
         <Route path="/exports" element={<RequireAuth><ExportsPage /></RequireAuth>} />
+        <Route path="/privacy-requests" element={
+          <RequireCapability capability="fileSubjectRequests"><PrivacyRequestsPage /></RequireCapability>
+        } />
+        <Route path="/dpo/requests" element={
+          <RequireCapability capability="handleSubjectRequests"><DpoRequestsPage /></RequireCapability>
+        } />
 
         <Route path="/area/coverage" element={
           <RequireCapability capability="manageAreaSchools"><AreaCoveragePage /></RequireCapability>

@@ -10,6 +10,8 @@ export type E2eCreds = {
   director: { email: string; password: string };
   /** CCR-014: the bootstrap admin, the one identity created outside the API. */
   admin: { email: string; password: string };
+  /** CCR-029: the DPO of the e2e school's area. */
+  dpo: { email: string; password: string };
   schoolId: string;
   teacherPersonnelId: string | null;
   cycleId: string | null;

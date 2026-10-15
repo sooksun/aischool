@@ -95,6 +95,8 @@ export async function cleanupSchools(prisma, schoolIds, extraUserIds = [], frame
     await prisma.personnelProfile.deleteMany({ where });  // Restrict -> User
     await prisma.schoolMembership.deleteMany({ where });
     await prisma.outboxEvent.deleteMany({ where });
+    await prisma.subjectRequest.deleteMany({ where });    // FR-117 (no FK; filed-from school)
+    await prisma.exportPackage.deleteMany({ where });     // P5 (no FK; requested-at school)
     await prisma.school.deleteMany({ where: { id: { in: ids } } });
 
     // Only users this suite left with nothing. A user shared with a sibling

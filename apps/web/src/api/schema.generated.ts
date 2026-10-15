@@ -1467,6 +1467,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/subject-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data-subject requests — the caller's own, or (for a DPO) their area's
+         * @description A person sees only their own requests. A DPO sees the requests of every area where they hold the `dpo` role, oldest due first. Never evidence content.
+         */
+        get: operations["listSubjectRequests"];
+        put?: never;
+        /**
+         * File a data-subject request about the caller's own data (FR-117)
+         * @description The request belongs to the caller's person and goes to the DPO of the current school's area. `due_at` is 30 days after receipt by default (NFR-PDPA-05, unverified — a warning, never a block). A school with no area has no DPO to receive it: VAL-002.
+         */
+        post: operations["createSubjectRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subject-requests/{requestId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One data-subject request */
+        get: operations["getSubjectRequest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subject-requests/{requestId}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The DPO approves, rejects or completes a request (FR-117)
+         * @description `approve` on `access` / `portability` queues the person's portfolio export (portfolio_portable) and moves the request to `fulfilling`; it becomes `completed` by itself when the export is ready. The export is the person's: the DPO cannot download it. `approve` on any other type moves it to `approved` — the change is made by hand, then `complete` closes it with a note. `reject` needs a reason (`note`). A transition from the wrong status is VAL-002. Audited.
+         */
+        post: operations["decideSubjectRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/areas/{areaId}/dpos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The DPOs of one of the caller's areas (CCR-029) */
+        get: operations["listAreaDpos"];
+        put?: never;
+        /**
+         * Appoint the DPO of one of the caller's areas (CCR-029)
+         * @description An area-scoped `dpo` membership, invited like appointSchoolAdmin — the same one-time invite token, null when the account already has a password. The DPO's grants are the subject-request register only. Another area is RES-001.
+         */
+        post: operations["appointDpo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/exports": {
         parameters: {
             query?: never;
@@ -1536,8 +1618,11 @@ export interface components {
         };
         /** @enum {string} */
         RoleFamily: "teacher" | "administrator";
-        /** @enum {string} */
-        Role: "teacher" | "director" | "deputy" | "evaluator" | "school_admin" | "area_admin";
+        /**
+         * @description Open enum (CCR-029, owner decision 2026-10-15): the server may add a role in a minor version. Clients must accept a role they do not know and offer it no affordances. `dpo` (area-scoped) handles data-subject requests only.
+         * @enum {string}
+         */
+        Role: "teacher" | "director" | "deputy" | "evaluator" | "school_admin" | "area_admin" | "dpo";
         /**
          * @description `invited` — created but has never set a password; cannot authenticate
          *     (SEC-AUTH-3). `disabled` — deactivated; also cannot authenticate.
@@ -2775,10 +2860,83 @@ export interface components {
             has_more: boolean;
         };
         /**
+         * @description PDPA rights (REG-28, unverified). `access` = a copy; `portability` = a machine-readable copy.
+         * @enum {string}
+         */
+        SubjectRequestType: "access" | "portability" | "correction" | "erasure" | "restriction" | "objection";
+        /** @enum {string} */
+        SubjectRequestStatus: "received" | "fulfilling" | "approved" | "completed" | "rejected";
+        SubjectRequestCreate: {
+            request_type: components["schemas"]["SubjectRequestType"];
+            /** @description What the person asks for, in their own words. */
+            details?: string | null;
+        };
+        SubjectRequestDecision: {
+            /** @enum {string} */
+            action: "approve" | "reject" | "complete";
+            /** @description Required for `reject` (the legal reason) and for `complete`. */
+            note?: string | null;
+        };
+        SubjectRequest: {
+            /** Format: uuid */
+            id: string;
+            request_type: components["schemas"]["SubjectRequestType"];
+            status: components["schemas"]["SubjectRequestStatus"];
+            /** Format: uuid */
+            person_id: string;
+            requester_display_name: string;
+            /**
+             * Format: uuid
+             * @description The school the request was filed from.
+             */
+            school_id: string;
+            /** Format: uuid */
+            area_id: string;
+            details?: string | null;
+            /** Format: date-time */
+            received_at: string;
+            /** Format: date-time */
+            due_at: string;
+            /** @description Open past `due_at` — a warning (the 30-day figure is unverified). */
+            overdue: boolean;
+            decision_note?: string | null;
+            /** Format: date-time */
+            decided_at?: string | null;
+            /** Format: date-time */
+            completed_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The portfolio export made for an approved access / portability request.
+             */
+            export_id?: string | null;
+        };
+        SubjectRequestPage: {
+            items: components["schemas"]["SubjectRequest"][];
+            next_cursor?: string;
+        };
+        AreaDpo: {
+            /** Format: uuid */
+            membership_id: string;
+            /** Format: uuid */
+            user_id: string;
+            email: string;
+            display_name: string;
+            user_status: components["schemas"]["UserStatus"];
+            /** Format: date */
+            effective_from: string;
+        };
+        DpoAppointmentResult: {
+            dpo: components["schemas"]["AreaDpo"];
+            /** @description Single-use, shown once; null when the account already has a password (as MemberInviteResult). */
+            invite_token: string | null;
+            /** Format: date-time */
+            invite_expires_at: string | null;
+        };
+        /**
          * @description Open enum (CCR-028 owner decision A, 2026-10-14): the server may add a kind in a minor version. Clients must accept a kind they do not know and show the notification by its title_th / route.
          * @enum {string}
          */
-        NotificationKind: "suggestions_ready" | "processing_failed" | "mapping_returned" | "mapping_validated" | "deadline" | "export_ready" | "transfer_approved" | "committee_comment";
+        NotificationKind: "suggestions_ready" | "processing_failed" | "mapping_returned" | "mapping_validated" | "deadline" | "export_ready" | "transfer_approved" | "committee_comment" | "subject_request_received" | "subject_request_updated";
         Notification: {
             /** Format: uuid */
             id: string;
@@ -3093,6 +3251,7 @@ export interface components {
         UploadId: string;
         AnalysisId: string;
         SuggestionId: string;
+        SubjectRequestId: string;
         ExportId: string;
         DeviceSessionId: string;
         /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
@@ -5542,6 +5701,184 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listSubjectRequests: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["SubjectRequestStatus"];
+                /** @description Opaque cursor from the previous page; omit for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Requests */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequestPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createSubjectRequest: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubjectRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequest"];
+                };
+            };
+            /** @description Filed */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequest"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getSubjectRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                requestId: components["parameters"]["SubjectRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequest"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    decideSubjectRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                requestId: components["parameters"]["SubjectRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubjectRequestDecision"];
+            };
+        };
+        responses: {
+            /** @description Decided */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequest"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listAreaDpos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                areaId: components["parameters"]["AreaId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current DPO appointments */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaDpo"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    appointDpo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                areaId: components["parameters"]["AreaId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchoolAdminAppointment"];
+            };
+        };
+        responses: {
+            /** @description Appointed — `invite_token` is returned exactly once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DpoAppointmentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listExports: {

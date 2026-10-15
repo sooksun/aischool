@@ -29,7 +29,13 @@ export type UiCapability =
   /** listAreaSchools / createSchool / updateSchool / appointSchoolAdmin (CCR-021) */
   | 'manageAreaSchools'
   /** clearInjectionFlag (CCR-027) */
-  | 'clearInjectionFlags';
+  | 'clearInjectionFlags'
+  /** createSubjectRequest / listSubjectRequests (own) — FR-117, CCR-029 */
+  | 'fileSubjectRequests'
+  /** listSubjectRequests / decideSubjectRequest (dpo: area) */
+  | 'handleSubjectRequests'
+  /** listAreaDpos / appointDpo (CCR-029) */
+  | 'appointDpos';
 
 export type Capabilities = Record<UiCapability, boolean>;
 
@@ -63,6 +69,12 @@ export const CAPABILITY_ROLES: Record<UiCapability, readonly Role[]> = {
   manageAreaSchools: ['area_admin'],
   // clearInjectionFlag (CCR-027): school_admin of the item's school, never the owner.
   clearInjectionFlags: ['school_admin'],
+  // createSubjectRequest (own): every role that is a person at a school.
+  fileSubjectRequests: ['teacher', 'deputy', 'director', 'school_admin', 'evaluator'],
+  // decideSubjectRequest (dpo: area) — the DPO alone; not area_admin (CCR-029).
+  handleSubjectRequests: ['dpo'],
+  // listAreaDpos / appointDpo — area_admin_writes (CCR-029).
+  appointDpos: ['area_admin'],
 };
 
 const FALSE_CAPS: Capabilities = {
@@ -75,6 +87,9 @@ const FALSE_CAPS: Capabilities = {
   manageMembers: false,
   manageAreaSchools: false,
   clearInjectionFlags: false,
+  fileSubjectRequests: false,
+  handleSubjectRequests: false,
+  appointDpos: false,
 };
 
 /**

@@ -23,18 +23,24 @@ export function CoveragePage() {
     if (!subjectId) { setError('ยังไม่มีข้อมูลบุคลากรของบัญชีนี้'); return; }
     setError(null);
     setReport(null);
+    // A switch of scope while the previous request is in flight must not let the
+    // older answer land last and overwrite the view the user picked.
+    let stale = false;
     (async () => {
       try {
         const role = user.personnel?.position_role ?? 'teacher';
         const fws = unwrap(await api.GET('/frameworks', { params: { query: { role_family: role, status: 'active' } } }));
+        if (stale) return;
         if (fws.length === 0) { setError('ยังไม่มีกรอบการประเมินที่ใช้งานได้'); return; }
-        setReport(unwrap(await api.GET('/coverage', {
+        const r = unwrap(await api.GET('/coverage', {
           params: { query: { subject_type: scope, subject_id: subjectId, framework_version_id: fws[0].id } },
-        })));
+        }));
+        if (!stale) setReport(r);
       } catch (e) {
-        setError(e instanceof ApiError ? thaiMessageFor(e) : 'โหลดไม่สำเร็จ');
+        if (!stale) setError(e instanceof ApiError ? thaiMessageFor(e) : 'โหลดไม่สำเร็จ');
       }
     })();
+    return () => { stale = true; };
   }, [user, schoolId, scope]);
 
   const gaps = report?.indicators.filter((i) => i.validated + i.owner_confirmed === 0).length ?? 0;

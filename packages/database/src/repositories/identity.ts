@@ -147,7 +147,7 @@ export async function listPersonnelForSchool(
  * membership ended today in the list until midnight. On the MySQL dev box that
  * was masked by a timezone artefact (local midnight at UTC+7 stored as the
  * previous UTC date), so the test passed there and nowhere else. */
-function currentMembershipWhere() {
+export function currentMembershipWhere() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return { status: 'active', OR: [{ effectiveTo: null }, { effectiveTo: { gte: today } }] };

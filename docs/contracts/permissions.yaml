@@ -47,7 +47,10 @@
 # version: 2.8.0 — CCR-026 (additive): findMyDuplicateFiles, self-scoped.
 # version: 2.9.0 — CCR-027 (additive): clearInjectionFlag, school_admin of the item's school.
 # version: 2.10.0 — CCR-028 (additive): listAssignmentComments / createAssignmentComment.
-version: 2.10.0
+# version: 2.11.0 — CCR-029 (POLICY CHANGE, decided by the owner 2026-10-15): a `dpo` role, area-scoped,
+#   appointed by area_admin (appointDpo, listAreaDpos; appointDpo joins area_admin_writes). Its only
+#   grants are the data-subject request register (FR-117); it reads no evidence, no school data.
+version: 2.11.0
 status: locked
 locked_at: 2026-07-17
 
@@ -58,6 +61,7 @@ roles:
   evaluator:    { scope: school, description: กรรมการประเมินภายนอก/ภายในที่ถูกแต่งตั้งใน assignment }
   school_admin: { scope: school, description: ผู้ดูแลระบบระดับโรงเรียน — จัดการ cycle, รอบ, บุคลากร }
   area_admin:   { scope: area,   description: เขตพื้นที่ — read-only ข้ามโรงเรียนในเขต (M-1 จาก data model); จัดการโรงเรียนในเขตของตน (CCR-021) }
+  dpo:          { scope: area,   description: เจ้าหน้าที่คุ้มครองข้อมูลส่วนบุคคลของ สพท. — รับและตัดสินคำขอใช้สิทธิของเจ้าของข้อมูลในเขตของตนเท่านั้น (CCR-029, FR-117) ไม่เห็นหลักฐาน }
 
 tenancy:
   rule: >
@@ -71,7 +75,7 @@ tenancy:
   # CCR-021 (FR-090): the only writes an area-scoped role makes. They act on the
   # school record itself, never on a school's data, and only inside the caller's
   # own area (another area's school is RES-001). Each needs step-up (min_acr).
-  area_admin_writes: [createSchool, updateSchool, appointSchoolAdmin, acknowledgeAgreement]   # the last only for administrators' agreements (CCR-025)
+  area_admin_writes: [createSchool, updateSchool, appointSchoolAdmin, acknowledgeAgreement, appointDpo]   # the last only for administrators' agreements (CCR-025)
   ownership:
     evidence: Owner (personnel) or school_admin may mutate; others per matrix below.
     scores: Only the evaluator who owns the per-evaluator record may write it.
@@ -163,6 +167,9 @@ matrix:
   createSchool:            { area_admin: area }
   updateSchool:            { area_admin: area }
   appointSchoolAdmin:      { area_admin: area }
+  # CCR-029: the DPO of an area — appointed and listed by its area admin
+  listAreaDpos:            { area_admin: area-r }
+  appointDpo:              { area_admin: area }
   endMembership:           { school_admin: school }
   issuePasswordReset:      { school_admin: school }
   updatePersonnel:         { school_admin: school }   # never the caller's own account (VAL-002)
@@ -229,6 +236,13 @@ matrix:
   getExport:               { teacher: own, deputy: own, director: school, school_admin: school }
   getExportDownloadUrl:    { teacher: own, deputy: own, director: school, school_admin: school }
 
+  # data-subject requests (FR-117, CCR-029) — `own` is the caller's own person; `area` for the
+  # dpo is the requests of the areas where they hold the role. Nobody else sees them.
+  createSubjectRequest:    { teacher: own, deputy: own, director: own, school_admin: own, evaluator: own }
+  listSubjectRequests:     { teacher: own, deputy: own, director: own, school_admin: own, evaluator: own, dpo: area }
+  getSubjectRequest:       { teacher: own, deputy: own, director: own, school_admin: own, evaluator: own, dpo: area }
+  decideSubjectRequest:    { dpo: area }
+
   # agreements — แบบ PA1 + ประเด็นท้าทาย (CCR-015)
   # The evaluatee owns the document: they write it, they submit it, they can never
   # acknowledge it. `own` here means requireOwnership against the agreement's
@@ -288,6 +302,8 @@ min_acr:
   issuePasswordReset: 2
   updatePersonnel: 2
   createExport: { other_person: 2 }
+  appointDpo: 2
+  decideSubjectRequest: 2
 
 notes:
   - teacher:own on listEvidence means the default filter is owner=self and other owners are rejected.

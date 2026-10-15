@@ -11,7 +11,7 @@ import {
 } from '@seip/database';
 import { ApiError, forbiddenRole } from '@seip/backend-shared';
 import type { AuthedRequest } from '../plugins/auth.js';
-import { resolveGrant } from '../lib/permission-guard.js';
+import { resolveGrant, requireAnyGrant } from '../lib/permission-guard.js';
 import { ownGrant } from '../lib/evidence-access.js';
 
 const OP = 'getCoverage';
@@ -46,6 +46,8 @@ export const coverageRoutes: FastifyPluginAsync = async (app) => {
       subject_id: z.string().uuid(),
       framework_version_id: z.string().uuid(),
     }).parse(request.query);
+    // A role with no grant here at all (dpo, CCR-029) is PERM-001 before any lookup.
+    requireAnyGrant(OP, auth);
     if (!(await getFrameworkById(q.framework_version_id))) throw new ApiError('VAL-002', 'Unknown framework_version_id');
 
     let indicators;

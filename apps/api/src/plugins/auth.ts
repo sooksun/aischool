@@ -191,8 +191,10 @@ async function resolveCurrentSchool(request: FastifyRequest, tenancy: TenancyCon
 
   if (schoolIds.includes(requested)) return requested;
 
+  // Any area-scoped role (area_admin, or dpo — CCR-029) may name a school of its
+  // area: the header only picks the context, and every route still checks a grant.
   const requestedAreaId = await getSchoolAreaId(requested);
-  if (requestedAreaId && hasAreaReadAccess(tenancy, requestedAreaId)) return requested;
+  if (requestedAreaId && (hasAreaReadAccess(tenancy, requestedAreaId) || tenancy.areaRoles.has(requestedAreaId))) return requested;
 
   throw new ApiError('PERM-002', 'X-School-Id does not match an active membership');
 }

@@ -4,6 +4,7 @@
 // channels are later (FR-100; push carries no content, FR-101).
 import {
   notifyFromEvent,
+  completeSubjectRequestForExport,
   claimUnpublishedOutbox,
   markOutboxPublished,
   markOutboxFailed,
@@ -15,6 +16,10 @@ export async function dispatchOutboxBatch(limit = 50): Promise<number> {
   for (const ev of batch) {
     try {
       await notifyFromEvent(ev);
+      // CCR-029: an approved access / portability request is done once its export is
+      // ready. Guarded on status, so a re-dispatched event changes nothing.
+      const exportId = (ev.payload as Record<string, unknown> | null)?.export_id;
+      if (ev.eventType === 'export.ready' && typeof exportId === 'string') await completeSubjectRequestForExport(exportId);
       // Counted only when a row actually changed: a claim whose row disappeared
       // before publish was not dispatched, and saying it was would overstate what
       // this cycle achieved.

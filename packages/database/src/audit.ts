@@ -19,7 +19,7 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   EvidenceIndicatorMapping: ['id', 'evidenceId', 'indicatorId', 'status', 'mappingSource'],
   Report: ['id', 'schoolId', 'cycleId', 'subjectPersonnelId', 'templateCode', 'status'],
   UserAccount: ['id', 'status'], // email/displayName excluded: direct PII
-  SchoolMembership: ['id', 'userId', 'schoolId', 'role', 'status'],
+  SchoolMembership: ['id', 'userId', 'schoolId', 'areaId', 'role', 'status'], // areaId: area-scoped roles (CCR-021/029)
   // CCR-014. fullName and employeeCode excluded: both directly identify a person,
   // same reason UserAccount omits email/displayName above. Who was onboarded is
   // answerable from userId without copying their name into the audit trail.
@@ -47,6 +47,9 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   Request: ['operationId', 'code', 'method', 'route'],
   // CCR-021. A school's record is not personal data; all of it may be audited.
   School: ['id', 'code', 'name', 'areaId', 'status'],
+  // CCR-029. `details` and `decisionNote` excluded: the person's own words about
+  // their data, and the DPO's reasoning about it — kept on the row, never copied.
+  SubjectRequest: ['id', 'personId', 'areaId', 'requestType', 'status', 'exportId'],
 };
 
 function allowlist(entityType: string, obj: Record<string, unknown> | undefined): Snapshot | undefined {

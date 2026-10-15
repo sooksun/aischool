@@ -2294,3 +2294,37 @@ tasks:
       - "permission sweep covers the 4 ops; step-up on other_person"  # DONE — test:security, step-up.test
       - "web page: create, poll, download"                      # DONE — e2e exports.spec
       - "dpa_pack / pa2_workbook"                               # NOT STARTED — rules data unverified
+
+  - id: SEIP-P5-002
+    title: "P5 — FR-117 data-subject request register and the area DPO role (CCR-029)"
+    status: review              # 2026-10-15
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P5-001, SEIP-P1-010]
+    decisions: [CCR-029]
+    primary_paths:
+      - prisma/migrations/20261015000100_subject_request/migration.sql
+      - packages/database/src/repositories/subject-requests.ts
+      - apps/api/src/routes/subject-requests.ts
+      - apps/api/src/routes/areas.ts
+      - apps/web/src/pages/privacy/PrivacyRequestsPage.tsx
+      - apps/web/src/pages/privacy/DpoRequestsPage.tsx
+      - docs/reviews/CCR-029-dpo-role-and-subject-requests.md
+    notes: >
+      Owner decisions 2026-10-15: a new area-scoped dpo role, with Role made an open
+      enum (4.12.0, not 5.0.0); the first slice is the register plus export. The person
+      files any of six types. The area's DPO approves, rejects (with a reason) or
+      completes (with a note). Approving access or portability queues the person's
+      portfolio export, and the request completes itself on export.ready. Other types are
+      carried out by hand. due_at = +30 days, a warning only (NFR-PDPA-05 unverified).
+      The DPO reads no school data. The sweep proves it, and the "no grant, no foothold"
+      routes now answer PERM-001 for area roles. Not done: in-system erasure/correction,
+      due-date reminders, revoking an appointment.
+    acceptance_criteria:
+      - "person files; only they and their area's DPO see it; another area RES-001; area admin PERM-001"  # DONE — subject-requests.test
+      - "approve access → export queued → completed on export.ready; DPO cannot see the export"  # DONE — subject-requests.test
+      - "other types approve → complete with note; reject needs a reason; audit has no free text"  # DONE — subject-requests.test
+      - "area admin appoints / lists DPOs; step-up on appointDpo and decideSubjectRequest"  # DONE — subject-requests.test, step-up.test
+      - "dpo in the permission sweep on every operation"  # DONE — test:security
+      - "web: file + follow; DPO queue; appoint on the area page"  # DONE — e2e privacy-requests.spec
+      - "carry out correction / erasure / restriction in the system"  # NOT STARTED — retention rules to design
+

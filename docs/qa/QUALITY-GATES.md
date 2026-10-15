@@ -162,6 +162,15 @@ file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
 
+## Verified runs (2026-10-15, local — SEIP-P5-002, DPO role + subject requests)
+
+| Command | Result |
+|---|---|
+| `typecheck` · `lint` · `format:check` · `test:unit` · `test:backend` | pass (web 52, incl. the dpo capability test) |
+| `gate:contracts` · `gate:ownership` · `gate:secret-scan` · `gate:dep-audit` | pass; compatibility 4.11.0 → 4.12.0: no breaking changes (Role / NotificationKind values excused as open enums) |
+| api integration · security · step-up · worker | 160 · 12 · 11 · 34 — all pass (+4 subject-requests; sweep now includes `dpo` on every operation) |
+| `test:e2e` (local) | 23/24 — new privacy-requests.spec passes; flows-depth "director creates a report" fails only locally (the local DB holds more than 20 reports, so the new one lands past page 1) |
+
 ## Verified runs (2026-10-14, local — SEIP-P5-001, portfolio export)
 
 | Command | Result |

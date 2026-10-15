@@ -42,7 +42,7 @@ const AcceptInviteBody = z.object({
 });
 
 /** ADR-0014 §6: roles whose sign-in needs a second factor — enrolled at first SEIP ID sign-in. */
-const SECOND_FACTOR_ROLES: ReadonlySet<Role> = new Set<Role>(['director', 'school_admin', 'evaluator', 'area_admin']);
+const SECOND_FACTOR_ROLES: ReadonlySet<Role> = new Set<Role>(['director', 'school_admin', 'evaluator', 'area_admin', 'dpo']);
 
 export const authRoutes: FastifyPluginAsync<{ env: Env; keycloak?: Keycloak | null }> = async (app, { env, keycloak = null }) => {
   /**

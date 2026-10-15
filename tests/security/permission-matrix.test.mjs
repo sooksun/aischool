@@ -28,7 +28,7 @@ const created = trackSchools();
 
 const prisma = createPrismaClient();
 let app;
-const ROLES = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin'];
+const ROLES = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin', 'dpo'];
 const tokenFor = {};
 const userIdFor = {};
 let secondEvaluatorUserId;
@@ -55,7 +55,7 @@ before(async () => {
     const user = await prisma.userAccount.create({
       data: { person: { create: { displayName: 'fixture' } }, email: `perm-${role}-${randomUUID()}@x.io`, displayName: role, status: 'active', passwordHash: await argonHash(password) },
     });
-    if (role === 'area_admin') {
+    if (role === 'area_admin' || role === 'dpo') { // dpo: area-scoped too (CCR-029)
       // Area-scoped: schoolId is NULL by design (permissions.yaml scope: area),
       // so school-scoped teardown can neither see this membership nor the user
       // holding it. Tracked explicitly, like every other deliberately
@@ -205,6 +205,17 @@ const OPERATIONS = () => ({
   createSchool: { method: 'POST', urlFor: async () => `/api/v1/areas/${area.id}/schools`, payload: {} },
   updateSchool: { method: 'PATCH', urlFor: async () => `/api/v1/schools/${school.id}`, payload: { name: 'School' } },
   appointSchoolAdmin: { method: 'POST', urlFor: async () => `/api/v1/schools/${school.id}/admins`, payload: {} },
+  // CCR-029. The area admin's own area; an invalid body so nothing is appointed.
+  listAreaDpos: { method: 'GET', urlFor: async () => `/api/v1/areas/${area.id}/dpos` },
+  appointDpo: { method: 'POST', urlFor: async () => `/api/v1/areas/${area.id}/dpos`, payload: {} },
+  // FR-117. The fixture request is the teacher's (a correction, still `received`):
+  // other `own` holders get RES-001; the dpo of the area reaches it. `complete`
+  // from `received` is VAL-002, so the dpo's decision never changes the fixture.
+  // A create with no grant is PERM-001; each granted role files its own request.
+  createSubjectRequest: { method: 'POST', url: '/api/v1/subject-requests', payload: { request_type: 'objection', details: 'sweep' } },
+  listSubjectRequests: { method: 'GET', url: '/api/v1/subject-requests' },
+  getSubjectRequest: { method: 'GET', urlFor: async () => `/api/v1/subject-requests/${await sweepSubjectRequestId()}` },
+  decideSubjectRequest: { method: 'POST', urlFor: async () => `/api/v1/subject-requests/${await sweepSubjectRequestId()}/decision`, payload: { action: 'complete', note: 'x' } },
   importMembers: { method: 'POST', url: '/api/v1/members/import', payload: { dry_run: true, rows: [{ email: `sweep-import-${randomUUID()}@x.io`, display_name: 'sweep', role: 'teacher' }] } },
   // Random membership id → RES-001 for granted roles (never PERM-001), same
   // philosophy as getReport below.
@@ -372,6 +383,16 @@ const OPERATIONS = () => ({
 // grants but isn't OWNER_ROLE, denial is the CORRECT outcome (proves the
 // ownership boundary), not a matrix mismatch.
 const OWNER_ROLE = 'teacher';
+let subjectRequestIdCache;
+async function sweepSubjectRequestId() {
+  if (!subjectRequestIdCache) {
+    const owner = await prisma.userAccount.findUniqueOrThrow({ where: { id: userIdFor.teacher }, select: { personId: true } });
+    subjectRequestIdCache = (await prisma.subjectRequest.create({
+      data: { personId: owner.personId, requestedByUserId: userIdFor.teacher, schoolId: school.id, areaId: area.id, requestType: 'correction', dueAt: new Date(Date.now() + 86400000) },
+    })).id;
+  }
+  return subjectRequestIdCache;
+}
 let exportIdCache;
 async function sweepExportId() {
   if (!exportIdCache) {

@@ -33,9 +33,11 @@ export async function resolveGrant(
   // caller administers (hasAreaReadAccess semantics, re-derived here from the
   // resource's own school rather than "current school" — an area_admin has no
   // single "current school" to begin with).
+  // Any area-scoped role over the school's area (area_admin; dpo, CCR-029, whose
+  // matrix rows grant nothing at a school — so it falls through to PERM-001).
   const areaId = await getSchoolAreaId(schoolId);
-  if (areaId && auth.tenancy.areaRoles.get(areaId)?.has('area_admin')) {
-    const g = grantFor(operationId, 'area_admin');
+  for (const role of (areaId && auth.tenancy.areaRoles.get(areaId)) || []) {
+    const g = grantFor(operationId, role);
     if (g) return g as Grant;
   }
 

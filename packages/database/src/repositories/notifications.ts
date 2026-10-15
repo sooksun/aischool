@@ -4,6 +4,7 @@
 // or evidence titles, and point at an in-app route.
 import type { NotificationKind, Prisma } from '@prisma/client';
 import { prisma } from '../client.js';
+import { listAreaDpoUserIds } from './subject-requests.js';
 
 export interface OutboxLike { id: string; eventType: string; payload: unknown; actorUserId?: string | null }
 
@@ -89,11 +90,44 @@ async function commentNotice(p: Record<string, unknown>, actorUserId: string | n
   return out;
 }
 
+const SUBJECT_REQUEST_STATUS_TH: Record<string, string> = {
+  fulfilling: 'อนุมัติแล้ว — กำลังจัดทำไฟล์ข้อมูลของคุณ',
+  approved: 'อนุมัติแล้ว — เจ้าหน้าที่กำลังดำเนินการ',
+  completed: 'ดำเนินการเสร็จแล้ว',
+  rejected: 'ไม่อนุมัติ — เปิดดูเหตุผลได้',
+};
+
+/**
+ * CCR-029: a new request tells the area's DPOs; a decision tells the person.
+ * Neither text carries the request's details or the DPO's note.
+ */
+async function subjectRequestNotice(eventType: string, p: Record<string, unknown>, actorUserId: string | null): Promise<{ draft: Draft; userIds: string[] } | null> {
+  if (typeof p.request_id !== 'string') return null;
+  const r = await prisma.subjectRequest.findUnique({ where: { id: p.request_id }, select: { id: true, areaId: true, personId: true, status: true } });
+  if (!r) return null;
+  const base = { entityType: 'SubjectRequest', entityId: r.id };
+  if (eventType === 'subject_request.created') {
+    return {
+      draft: { ...base, kind: 'subject_request_received', titleTh: 'มีคำขอใช้สิทธิของเจ้าของข้อมูลใหม่', bodyTh: 'ตอบภายใน 30 วันนับจากวันรับคำขอ', route: '/dpo/requests' },
+      userIds: (await listAreaDpoUserIds(r.areaId)).filter((id) => id !== actorUserId),
+    };
+  }
+  const status = typeof p.status === 'string' ? p.status : r.status;
+  const bodyTh = SUBJECT_REQUEST_STATUS_TH[status];
+  if (!bodyTh) return null;
+  return {
+    draft: { ...base, kind: 'subject_request_updated', titleTh: 'คำขอใช้สิทธิของคุณมีความคืบหน้า', bodyTh, route: '/privacy-requests' },
+    userIds: await personUserIds(r.personId),
+  };
+}
+
 /** Consumer side of the outbox (events.yaml `consumers: [notification]`). Returns rows created. */
 export async function notifyFromEvent(ev: OutboxLike): Promise<number> {
   const p = (ev.payload ?? {}) as Record<string, unknown>;
-  if (ev.eventType === 'assignment.comment.created') {
-    const n = await commentNotice(p, ev.actorUserId ?? null);
+  if (ev.eventType === 'assignment.comment.created' || ev.eventType === 'subject_request.created' || ev.eventType === 'subject_request.decided') {
+    const n = ev.eventType === 'assignment.comment.created'
+      ? await commentNotice(p, ev.actorUserId ?? null)
+      : await subjectRequestNotice(ev.eventType, p, ev.actorUserId ?? null);
     if (!n || n.userIds.length === 0) return 0;
     const r = await prisma.notification.createMany({
       data: n.userIds.map((userId) => ({ ...n.draft, userId, sourceEventId: ev.id })),

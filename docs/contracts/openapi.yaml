@@ -38,7 +38,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.11.0
+  version: 4.12.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -177,6 +177,8 @@ tags:
   description: Indicator coverage for a person or school
 - name: exports
   description: DPA Pack, PA2 workbook and portfolio exports (ADR-0017)
+- name: privacy
+  description: Data-subject requests (FR-117, CCR-029) — the person files, the DPO of the สพท. decides
 paths:
   /auth/login:
     post:
@@ -2827,6 +2829,191 @@ paths:
                   $ref: '#/components/schemas/DpaSlotProfile'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /subject-requests:
+    get:
+      operationId: listSubjectRequests
+      summary: Data-subject requests — the caller's own, or (for a DPO) their area's
+      description: 'A person sees only their own requests. A DPO sees the requests of every
+        area where they hold the `dpo` role, oldest due first. Never evidence content.
+
+        '
+      tags:
+      - privacy
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/SubjectRequestStatus'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectRequestPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createSubjectRequest
+      summary: File a data-subject request about the caller's own data (FR-117)
+      description: 'The request belongs to the caller''s person and goes to the DPO of the
+        current school''s area. `due_at` is 30 days after receipt by default (NFR-PDPA-05,
+        unverified — a warning, never a block). A school with no area has no DPO to
+        receive it: VAL-002.
+
+        '
+      tags:
+      - privacy
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubjectRequestCreate'
+      responses:
+        '201':
+          description: Filed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectRequest'
+        '200':
+          description: Idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /subject-requests/{requestId}:
+    get:
+      operationId: getSubjectRequest
+      summary: One data-subject request
+      tags:
+      - privacy
+      parameters:
+      - $ref: '#/components/parameters/SubjectRequestId'
+      responses:
+        '200':
+          description: Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /subject-requests/{requestId}/decision:
+    post:
+      operationId: decideSubjectRequest
+      summary: The DPO approves, rejects or completes a request (FR-117)
+      description: '`approve` on `access` / `portability` queues the person''s portfolio
+        export (portfolio_portable) and moves the request to `fulfilling`; it becomes
+        `completed` by itself when the export is ready. The export is the person''s:
+        the DPO cannot download it. `approve` on any other type moves it to `approved`
+        — the change is made by hand, then `complete` closes it with a note. `reject`
+        needs a reason (`note`). A transition from the wrong status is VAL-002. Audited.
+
+        '
+      tags:
+      - privacy
+      parameters:
+      - $ref: '#/components/parameters/SubjectRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubjectRequestDecision'
+      responses:
+        '200':
+          description: Decided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubjectRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /areas/{areaId}/dpos:
+    get:
+      operationId: listAreaDpos
+      summary: The DPOs of one of the caller's areas (CCR-029)
+      tags:
+      - areas
+      parameters:
+      - $ref: '#/components/parameters/AreaId'
+      responses:
+        '200':
+          description: Current DPO appointments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AreaDpo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: appointDpo
+      summary: Appoint the DPO of one of the caller's areas (CCR-029)
+      description: 'An area-scoped `dpo` membership, invited like appointSchoolAdmin — the
+        same one-time invite token, null when the account already has a password. The
+        DPO''s grants are the subject-request register only. Another area is RES-001.
+
+        '
+      tags:
+      - areas
+      parameters:
+      - $ref: '#/components/parameters/AreaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchoolAdminAppointment'
+      responses:
+        '201':
+          description: Appointed — `invite_token` is returned exactly once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DpoAppointmentResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /exports:
     get:
       operationId: listExports
@@ -3052,6 +3239,13 @@ components:
       schema:
         type: string
         format: uuid
+    SubjectRequestId:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     ExportId:
       name: exportId
       in: path
@@ -3189,6 +3383,10 @@ components:
       - administrator
     Role:
       type: string
+      x-seip-open-enum: true
+      description: 'Open enum (CCR-029, owner decision 2026-10-15): the server may add a role
+        in a minor version. Clients must accept a role they do not know and offer it no
+        affordances. `dpo` (area-scoped) handles data-subject requests only.'
       enum:
       - teacher
       - director
@@ -3196,6 +3394,7 @@ components:
       - evaluator
       - school_admin
       - area_admin
+      - dpo
     UserStatus:
       type: string
       description: '`invited` — created but has never set a password; cannot authenticate
@@ -6116,6 +6315,175 @@ components:
         has_more:
           type: boolean
       description: Ordered by (updated_at, id). On conflict the server wins.
+    SubjectRequestType:
+      type: string
+      description: PDPA rights (REG-28, unverified). `access` = a copy; `portability` = a machine-readable copy.
+      enum:
+      - access
+      - portability
+      - correction
+      - erasure
+      - restriction
+      - objection
+    SubjectRequestStatus:
+      type: string
+      enum:
+      - received
+      - fulfilling
+      - approved
+      - completed
+      - rejected
+    SubjectRequestCreate:
+      type: object
+      required:
+      - request_type
+      properties:
+        request_type:
+          $ref: '#/components/schemas/SubjectRequestType'
+        details:
+          type:
+          - string
+          - 'null'
+          maxLength: 2000
+          description: What the person asks for, in their own words.
+    SubjectRequestDecision:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          type: string
+          enum:
+          - approve
+          - reject
+          - complete
+        note:
+          type:
+          - string
+          - 'null'
+          maxLength: 2000
+          description: Required for `reject` (the legal reason) and for `complete`.
+    SubjectRequest:
+      type: object
+      required:
+      - id
+      - request_type
+      - status
+      - person_id
+      - requester_display_name
+      - school_id
+      - area_id
+      - received_at
+      - due_at
+      - overdue
+      properties:
+        id:
+          type: string
+          format: uuid
+        request_type:
+          $ref: '#/components/schemas/SubjectRequestType'
+        status:
+          $ref: '#/components/schemas/SubjectRequestStatus'
+        person_id:
+          type: string
+          format: uuid
+        requester_display_name:
+          type: string
+        school_id:
+          type: string
+          format: uuid
+          description: The school the request was filed from.
+        area_id:
+          type: string
+          format: uuid
+        details:
+          type:
+          - string
+          - 'null'
+        received_at:
+          type: string
+          format: date-time
+        due_at:
+          type: string
+          format: date-time
+        overdue:
+          type: boolean
+          description: Open past `due_at` — a warning (the 30-day figure is unverified).
+        decision_note:
+          type:
+          - string
+          - 'null'
+        decided_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        completed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        export_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: The portfolio export made for an approved access / portability request.
+    SubjectRequestPage:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRequest'
+        next_cursor:
+          type: string
+    AreaDpo:
+      type: object
+      required:
+      - membership_id
+      - user_id
+      - email
+      - display_name
+      - user_status
+      - effective_from
+      properties:
+        membership_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        display_name:
+          type: string
+        user_status:
+          $ref: '#/components/schemas/UserStatus'
+        effective_from:
+          type: string
+          format: date
+    DpoAppointmentResult:
+      type: object
+      required:
+      - dpo
+      - invite_token
+      - invite_expires_at
+      properties:
+        dpo:
+          $ref: '#/components/schemas/AreaDpo'
+        invite_token:
+          type:
+          - string
+          - 'null'
+          description: Single-use, shown once; null when the account already has a password (as MemberInviteResult).
+        invite_expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
     NotificationKind:
       type: string
       x-seip-open-enum: true
@@ -6130,6 +6498,8 @@ components:
       - export_ready
       - transfer_approved
       - committee_comment
+      - subject_request_received
+      - subject_request_updated
     Notification:
       type: object
       required:

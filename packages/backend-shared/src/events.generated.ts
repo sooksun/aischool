@@ -3,7 +3,7 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const EVENTS_VERSION = '2.2.0';
+export const EVENTS_VERSION = '2.3.0';
 
 export type EventType =
   | 'evidence.created'
@@ -24,6 +24,8 @@ export type EventType =
   | 'report.generated'
   | 'ai.suggestion.created'
   | 'assignment.comment.created'
+  | 'subject_request.created'
+  | 'subject_request.decided'
   | 'report.approved';
 
 export interface Event_evidence_created {
@@ -146,6 +148,17 @@ export interface Event_assignment_comment_created {
   kind: 'comment' | 'request_info' | 'reply';
 }
 
+export interface Event_subject_request_created {
+  request_id: string;
+  area_id: string;
+  request_type: string;
+}
+
+export interface Event_subject_request_decided {
+  request_id: string;
+  status: 'fulfilling' | 'approved' | 'completed' | 'rejected';
+}
+
 export interface Event_report_approved {
   report_id: string;
   cycle_id: string;
@@ -173,6 +186,8 @@ export interface EventPayloadMap {
   'report.generated': Event_report_generated;
   'ai.suggestion.created': Event_ai_suggestion_created;
   'assignment.comment.created': Event_assignment_comment_created;
+  'subject_request.created': Event_subject_request_created;
+  'subject_request.decided': Event_subject_request_decided;
   'report.approved': Event_report_approved;
 }
 

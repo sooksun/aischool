@@ -113,10 +113,11 @@ async function onCommitteeFor(operationId: string, auth: AuthedRequest, ev: Evid
   return persons.includes(ev.ownerPersonId);
 }
 
-/** A membership at the school, or area_admin over its area: the caller can see
- * the school exists, so a role denial there is PERM-001, not a hidden RES-001. */
+/** A membership at the school, or an area-scoped role over its area (area_admin,
+ * dpo — CCR-029): the caller can see the school exists, so a role denial there is
+ * PERM-001, not a hidden RES-001. */
 async function hasAnyFootholdAt(auth: AuthedRequest, schoolId: string): Promise<boolean> {
   if (auth.tenancy.schoolRoles.has(schoolId)) return true;
   const areaId = await getSchoolAreaId(schoolId);
-  return !!areaId && !!auth.tenancy.areaRoles.get(areaId)?.has('area_admin');
+  return !!areaId && auth.tenancy.areaRoles.has(areaId);
 }

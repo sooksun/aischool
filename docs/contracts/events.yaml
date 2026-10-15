@@ -29,7 +29,8 @@
 #   export.ready. evidence.created carries owner_person_id.
 # version: 2.1.0 — CCR-028 (additive): assignment.comment.created.
 # version: 2.2.0 — CCR-028 decision A: the notification consumer joins assignment.comment.created.
-version: 2.2.0
+# version: 2.3.0 — CCR-029 (additive): subject_request.created / subject_request.decided.
+version: 2.3.0
 status: locked
 locked_at: 2026-07-17
 
@@ -134,6 +135,18 @@ events:
       CCR-028. The body is never copied into the event. Notification (owner decision A,
       2026-10-14; NotificationKind committee_comment): a comment or request_info notifies
       the evaluatee, a reply notifies the author of its parent; never the actor.
+
+  subject_request.created:
+    payload: { request_id: uuid, area_id: uuid, request_type: string }
+    consumers: [notification, audit-projection]
+    note: CCR-029. Notifies the area's DPOs. No details text in the event.
+
+  subject_request.decided:
+    payload: { request_id: uuid, status: 'enum[fulfilling, approved, completed, rejected]' }
+    consumers: [notification, audit-projection]
+    note: >-
+      CCR-029. Notifies the person. Emitted on approve / reject / complete, and when an
+      access / portability request completes because its export became ready.
 
   report.approved:
     payload: { report_id: uuid, cycle_id: uuid, subject_personnel_id: uuid, approver_user_id: uuid, step_code: string }

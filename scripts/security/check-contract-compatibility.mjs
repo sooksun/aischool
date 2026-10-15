@@ -125,7 +125,7 @@ breaking = breaking.filter((b) => {
   if (hit) excused.push(`${b.text} (open enum ${hit.name})`);
   return !hit;
 });
-for (const e of excused) console.log(`    open-enum value added (additive, CCR-028): ${e}`);
+for (const e of excused) console.log(`    open-enum value added (additive, contract-policy open-enum rule): ${e}`);
 
 if (breaking.length === 0) {
   console.log(`OK  no breaking changes (${base.raw} -> ${head.raw})`);

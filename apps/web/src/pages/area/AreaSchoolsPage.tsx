@@ -7,6 +7,7 @@ import type { components } from '../../api/schema.generated';
 import { useAuth } from '../../hooks/useAuth';
 
 type AreaSchool = components['schemas']['AreaSchool'];
+type AreaDpo = components['schemas']['AreaDpo'];
 
 const errorText = (e: unknown, fallback: string) => (e instanceof ApiError ? thaiMessageFor(e) : fallback);
 
@@ -22,6 +23,11 @@ export function AreaSchoolsPage() {
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [issued, setIssued] = useState<{ school: string; email: string; token: string | null } | null>(null);
+  // CCR-029: the area's DPO (data-subject requests only).
+  const [dpos, setDpos] = useState<AreaDpo[] | null>(null);
+  const [dpoEmail, setDpoEmail] = useState('');
+  const [dpoName, setDpoName] = useState('');
+  const [dpoIssued, setDpoIssued] = useState<{ email: string; token: string | null } | null>(null);
 
   function reload() {
     if (!areaId) return;
@@ -31,6 +37,27 @@ export function AreaSchoolsPage() {
       .catch((e) => setError(errorText(e, 'โหลดรายชื่อโรงเรียนไม่สำเร็จ')));
   }
   useEffect(reload, [areaId]);
+
+  function reloadDpos() {
+    if (!areaId) return;
+    api.GET('/areas/{areaId}/dpos', { params: { path: { areaId } } })
+      .then((res) => setDpos(unwrap(res)))
+      .catch((e) => setError(errorText(e, 'โหลดรายชื่อ DPO ไม่สำเร็จ')));
+  }
+  useEffect(reloadDpos, [areaId]);
+
+  async function appointDpo(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const r = unwrap(await api.POST('/areas/{areaId}/dpos', {
+        params: { path: { areaId } }, body: { email: dpoEmail.trim(), display_name: dpoName.trim() },
+      }));
+      setDpoIssued({ email: dpoEmail.trim(), token: r.invite_token ?? null });
+      setDpoEmail(''); setDpoName('');
+      reloadDpos();
+    } catch (err) { setError(errorText(err, 'แต่งตั้ง DPO ไม่สำเร็จ')); }
+  }
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -111,6 +138,28 @@ export function AreaSchoolsPage() {
           </tbody>
         </table>
       )}
+
+      <section className="card" aria-label="เจ้าหน้าที่คุ้มครองข้อมูลส่วนบุคคล">
+        <h2>เจ้าหน้าที่คุ้มครองข้อมูลส่วนบุคคล (DPO) ของเขต</h2>
+        <p className="field-hint">DPO รับและตัดสินคำขอใช้สิทธิของเจ้าของข้อมูลในเขตนี้เท่านั้น ไม่เห็นหลักฐานหรือข้อมูลของโรงเรียน</p>
+        {dpoIssued && (
+          <div className="alert alert-info" role="status">
+            {dpoIssued.token
+              ? <>ส่งรหัสเชิญนี้ให้ {dpoIssued.email} — แสดงครั้งเดียวเท่านั้น: <code>{dpoIssued.token}</code></>
+              : <>{dpoIssued.email} มีบัญชีอยู่แล้ว ได้รับสิทธิ์ DPO ของเขตแล้ว</>}
+            <button type="button" className="btn" onClick={() => setDpoIssued(null)}>ปิด</button>
+          </div>
+        )}
+        {dpos !== null && dpos.length === 0 && <p>ยังไม่มี DPO</p>}
+        <ul aria-label="DPO ของเขต">
+          {(dpos ?? []).map((d) => <li key={d.membership_id}>{d.display_name} ({d.email}){d.user_status === 'invited' ? ' — ยังไม่ตอบรับคำเชิญ' : ''}</li>)}
+        </ul>
+        <form onSubmit={appointDpo}>
+          <label>อีเมล <input type="email" value={dpoEmail} onChange={(e) => setDpoEmail(e.target.value)} required /></label>
+          <label>ชื่อที่แสดง <input value={dpoName} onChange={(e) => setDpoName(e.target.value)} maxLength={200} required /></label>
+          <button type="submit" className="btn btn-primary">แต่งตั้ง DPO</button>
+        </form>
+      </section>
 
       {appointFor && (
         <form onSubmit={appoint} className="card">

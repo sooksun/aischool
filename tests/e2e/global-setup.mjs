@@ -40,6 +40,9 @@ const E2E_EVAL3_PASSWORD = process.env.E2E_EVAL3_PASSWORD ?? 'e2e-eval3-password
 // creates goes through HTTP from here on.
 const E2E_ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'e2e-admin@seip.local';
 const E2E_ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'e2e-admin-password-1234';
+// CCR-029: the DPO of the e2e school's สพท. (an area-scoped role).
+const E2E_DPO_EMAIL = process.env.E2E_DPO_EMAIL ?? 'e2e-dpo@seip.local';
+const E2E_DPO_PASSWORD = process.env.E2E_DPO_PASSWORD ?? 'e2e-dpo-password-1234';
 
 // The API the fixtures talk to. Defaults to the port .env.example ships and the
 // Vite dev proxy targets; CI can override.
@@ -161,6 +164,20 @@ export default async function globalSetup() {
       school = await prisma.school.create({
         data: { code: 'e2e-school', name: 'E2E Test School' },
       });
+    }
+    // FR-117: a request goes to the DPO of the school's area, so the school has one.
+    const area = await prisma.area.upsert({ where: { code: 'e2e-area' }, create: { code: 'e2e-area', name: 'E2E สพท.' }, update: {} });
+    if (school.areaId !== area.id) school = await prisma.school.update({ where: { id: school.id }, data: { areaId: area.id } });
+    {
+      let dpo = await prisma.userAccount.findUnique({ where: { email: E2E_DPO_EMAIL } });
+      dpo = dpo
+        ? await prisma.userAccount.update({ where: { id: dpo.id }, data: { passwordHash: await argonHash(E2E_DPO_PASSWORD), status: 'active' } })
+        : await prisma.userAccount.create({
+            data: { person: { create: { displayName: 'E2E DPO' } }, email: E2E_DPO_EMAIL, displayName: 'E2E DPO', status: 'active', passwordHash: await argonHash(E2E_DPO_PASSWORD) },
+          });
+      if (!(await prisma.schoolMembership.findFirst({ where: { userId: dpo.id, areaId: area.id, role: 'dpo' } }))) {
+        await prisma.schoolMembership.create({ data: { userId: dpo.id, areaId: area.id, role: 'dpo', membershipScope: 'area', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
+      }
     }
 
     const teacher = await ensureUser(prisma, {
@@ -441,6 +458,7 @@ export default async function globalSetup() {
       teacher: { email: E2E_TEACHER_EMAIL, password: E2E_TEACHER_PASSWORD },
       director: { email: E2E_DIRECTOR_EMAIL, password: E2E_DIRECTOR_PASSWORD },
       admin: { email: E2E_ADMIN_EMAIL, password: E2E_ADMIN_PASSWORD },
+      dpo: { email: E2E_DPO_EMAIL, password: E2E_DPO_PASSWORD },
       schoolId: school.id,
       teacherPersonnelId: teacher.personnelId,
       cycleId,
