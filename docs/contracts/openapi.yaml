@@ -38,7 +38,7 @@ openapi: 3.1.0
 #   History of 1.x–3.x: git log -p docs/contracts/openapi.yaml.
 info:
   title: SEIP API
-  version: 4.12.0
+  version: 4.13.0
   summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation
     + reports/approval/AI + PDF)
   description: 'Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
@@ -1219,6 +1219,46 @@ paths:
         schema:
           type: string
           format: uuid
+      - name: q
+        in: query
+        description: Title contains this text, case-insensitive (FR-054).
+        schema:
+          type: string
+          maxLength: 100
+      - name: kind
+        in: query
+        schema:
+          $ref: '#/components/schemas/EvidenceKind'
+      - name: performed_from
+        in: query
+        description: Work date on or after this day (overlap with performed_from..performed_to). An item with no work date
+          is left out once either bound is given.
+        schema:
+          type: string
+          format: date
+      - name: performed_to
+        in: query
+        description: Work date on or before this day.
+        schema:
+          type: string
+          format: date
+      - name: mapping_state
+        in: query
+        description: '`unmapped` — no live mapping at all; otherwise at least one live mapping in that status.'
+        schema:
+          type: string
+          enum:
+          - unmapped
+          - owner_confirmed
+          - validated
+          - returned
+      - name: cycle_id
+        in: query
+        description: Work date within this evaluation cycle (FR-035 binds by work date). A cycle of a school the caller
+          does not belong to is VAL-002.
+        schema:
+          type: string
+          format: uuid
       - $ref: '#/components/parameters/Page'
       - $ref: '#/components/parameters/PageSize'
       responses:
@@ -1230,6 +1270,8 @@ paths:
                 $ref: '#/components/schemas/EvidencePage'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     post:
       operationId: createEvidence
       summary: Create a logical evidence item (metadata only; files attach via two-phase upload)

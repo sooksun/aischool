@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
-  listEvidence, withAreaScope, resolveAreaScope, createEvidence, getEvidenceDetail, updateEvidence, softDeleteEvidence,
+  listEvidence, withAreaScope, resolveAreaScope, getCycleForRound, createEvidence, getEvidenceDetail, updateEvidence, softDeleteEvidence,
   getEvidenceCategoryById, writeAuditEvent, aggregateScanStatus, getSchoolAreaId, acceptEvidenceByOwner, findOwnerFilesByChecksum,
   listEvaluateePersonIdsForCommitteeMember, getPersonnelInSchoolByPerson,
   openUploadSession, getUploadSession, claimUploadForCompletion, releaseUploadClaim,
@@ -170,6 +170,12 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
       category_id: z.string().uuid().optional(),
       status: z.enum(['draft', 'active', 'archived', 'rejected']).optional(),
       mapped_to_indicator_id: z.string().uuid().optional(),
+      q: z.string().trim().min(1).max(100).optional(),
+      kind: z.enum(['file', 'link', 'note']).optional(),
+      performed_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      performed_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      mapping_state: z.enum(['unmapped', 'owner_confirmed', 'validated', 'returned']).optional(),
+      cycle_id: z.string().uuid().optional(),
       page: z.coerce.number().int().min(1).default(1),
       page_size: z.coerce.number().int().min(1).max(100).default(20),
     }).parse(request.query);
@@ -201,6 +207,22 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
       scope.ownerPersonId = q.owner_person_id;
     }
 
+    // FR-054 work-date window: the explicit bounds, narrowed by a cycle's dates (FR-035).
+    let performedFrom = q.performed_from ? new Date(`${q.performed_from}T00:00:00Z`) : undefined;
+    let performedTo = q.performed_to ? new Date(`${q.performed_to}T00:00:00Z`) : undefined;
+    if (q.cycle_id) {
+      const cycle = await getCycleForRound(q.cycle_id);
+      // A cycle of a school the caller is not at is not theirs to filter by — and says nothing about it.
+      if (!cycle || (cycle.schoolId !== schoolId && !auth.tenancy.schoolRoles.has(cycle.schoolId))) {
+        throw new ApiError('VAL-002', 'Unknown cycle_id', [{ field: 'cycle_id', issue: 'unknown' }]);
+      }
+      if (!performedFrom || cycle.startsOn > performedFrom) performedFrom = cycle.startsOn;
+      if (!performedTo || cycle.endsOn < performedTo) performedTo = cycle.endsOn;
+    }
+    if (performedFrom && performedTo && performedFrom > performedTo) {
+      return { items: [], meta: { page: q.page, page_size: q.page_size, total: 0 } };
+    }
+
     // The filter above is the authorization; withAreaScope is the RLS backstop
     // behind it (ADR-0019) — a filter bug here still cannot list another สพท.
     const areaScope = await resolveAreaScope({
@@ -212,6 +234,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
       categoryId: q.category_id,
       status: q.status,
       mappedToIndicatorId: q.mapped_to_indicator_id,
+      q: q.q, kind: q.kind, performedFrom, performedTo, mappingState: q.mapping_state,
       page: q.page,
       pageSize: q.page_size,
     }, tx));

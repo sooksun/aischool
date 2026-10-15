@@ -26,6 +26,13 @@ export interface ListEvidenceFilter {
   categoryId?: string;
   status?: EvidenceStatus;
   mappedToIndicatorId?: string;
+  /** FR-054 — title contains, case-insensitive. */
+  q?: string;
+  kind?: 'file' | 'link' | 'note';
+  /** Work-date overlap; an item with no work date is left out once either bound is set. */
+  performedFrom?: Date;
+  performedTo?: Date;
+  mappingState?: 'unmapped' | 'owner_confirmed' | 'validated' | 'returned';
   page: number;
   pageSize: number;
 }
@@ -48,7 +55,25 @@ export async function listEvidence(f: ListEvidenceFilter, db: Prisma.Transaction
     ...(f.mappedToIndicatorId
       ? { mappings: { some: { indicatorId: f.mappedToIndicatorId, status: { in: [...LIVE_MAPPING_STATUSES] } } } }
       : {}),
+    kind: f.kind,
+    ...(f.q ? { title: { contains: f.q, mode: 'insensitive' as const } } : {}),
   };
+  // Extra conditions go through AND: retainedBySchool already owns the top-level OR.
+  const and: Prisma.EvidenceWhereInput[] = [];
+  if (f.performedFrom || f.performedTo) {
+    and.push({ performedFrom: { not: null } });
+    // The item's span is [performedFrom, performedTo ?? performedFrom].
+    if (f.performedTo) and.push({ performedFrom: { lte: f.performedTo } });
+    if (f.performedFrom) {
+      and.push({ OR: [{ performedTo: { gte: f.performedFrom } }, { performedTo: null, performedFrom: { gte: f.performedFrom } }] });
+    }
+  }
+  if (f.mappingState === 'unmapped') {
+    and.push({ mappings: { none: { status: { in: [...LIVE_MAPPING_STATUSES] } } } });
+  } else if (f.mappingState) {
+    and.push({ mappings: { some: { status: f.mappingState } } });
+  }
+  if (and.length) where.AND = and;
   const [items, total] = await Promise.all([
     db.evidence.findMany({
       where,

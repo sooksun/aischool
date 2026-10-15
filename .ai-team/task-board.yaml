@@ -2356,3 +2356,30 @@ tasks:
       - "non-owner download audited with file id, no file name"           # DONE — evidence-flow.test
       - "provenance label on owner and committee views"                  # DONE — web unit provenance.test, typecheck
 
+  - id: SEIP-P4-008
+    title: "P4 — FR-054 search and filter the portfolio (CCR-030, 4.13.0)"
+    status: review              # 2026-10-15
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [CCR-030]
+    primary_paths:
+      - packages/database/src/repositories/evidence.ts
+      - apps/api/src/routes/evidence.ts
+      - apps/web/src/pages/EvidenceListPage.tsx
+    notes: >
+      Additive query parameters on listEvidence:
+      - q: title contains, case-insensitive
+      - kind
+      - performed_from / performed_to: overlap with the item's work-date span; undated
+        items drop out once a bound is set
+      - mapping_state: unmapped = no live mapping
+      - cycle_id: its dates bound the work date (FR-035); another school's or an
+        unknown cycle is VAL-002
+      All filters sit inside the grant-derived scope and the RLS backstop, so none
+      widens what a caller can list. The web list has a filter bar, and a filter that
+      matches nothing says so instead of showing the first-run empty state. Not done:
+      a cycle picker on the web (the API takes cycle_id), and filters in the app.
+    acceptance_criteria:
+      - "each filter alone and combined; overlap semantics; foreign cycle VAL-002; stranger finds nothing"  # DONE — evidence-search.test
+      - "web filter bar with a 'no match' state and clear"  # DONE — e2e evidence-search.spec
+

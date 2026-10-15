@@ -5,28 +5,43 @@ import { Link } from 'react-router-dom';
 import { api, unwrap } from '../api/client';
 import { useAuth } from '../hooks/useAuth';
 import { ProfileConfirmBanner } from '../components/ProfileConfirmBanner';
-import type { components } from '../api/schema.generated';
+import type { components, operations } from '../api/schema.generated';
 
 type Evidence = components['schemas']['Evidence'];
 type ScanStatus = components['schemas']['ScanStatus'];
+type ListQuery = NonNullable<operations['listEvidence']['parameters']['query']>;
+
+// FR-054: search and filter the portfolio. Empty values are left out of the query.
+interface Filters { q: string; kind: '' | 'file' | 'link' | 'note'; mapping: '' | 'unmapped' | 'owner_confirmed' | 'validated' | 'returned'; from: string; to: string }
+const NO_FILTERS: Filters = { q: '', kind: '', mapping: '', from: '', to: '' };
+const MAPPING_TH: Record<Exclude<Filters['mapping'], ''>, string> = {
+  unmapped: 'ยังไม่ผูกตัวชี้วัด', owner_confirmed: 'รอรับรอง', validated: 'รับรองแล้ว', returned: 'ถูกส่งกลับ',
+};
 
 export function EvidenceListPage() {
   const { user, logout, capabilities } = useAuth();
   const { submitEvidence } = capabilities;
   const [items, setItems] = useState<Evidence[] | null>(null);
   const [error, setError] = useState(false);
+  const [draft, setDraft] = useState<Filters>(NO_FILTERS);
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const filtered = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
 
   const load = useCallback(async () => {
     try {
-      const page = unwrap(await api.GET('/evidence', {
-        params: { query: { page: 1, page_size: 20 } },
-      }));
+      const query: ListQuery = { page: 1, page_size: 20 };
+      if (filters.q.trim()) query.q = filters.q.trim();
+      if (filters.kind) query.kind = filters.kind;
+      if (filters.mapping) query.mapping_state = filters.mapping;
+      if (filters.from) query.performed_from = filters.from;
+      if (filters.to) query.performed_to = filters.to;
+      const page = unwrap(await api.GET('/evidence', { params: { query } }));
       setItems(page.items);
       setError(false);
     } catch {
       setError(true);
     }
-  }, []);
+  }, [filters]);
 
   useEffect(() => {
     void load();
@@ -48,6 +63,36 @@ export function EvidenceListPage() {
       {user?.display_name && <p className="field-hint">{user.display_name}</p>}
       {user?.personnel && <ProfileConfirmBanner key={user.personnel.id} personnel={user.personnel} />}
 
+      <form
+        className="card"
+        aria-label="ค้นหาและกรองหลักฐาน"
+        onSubmit={(e) => { e.preventDefault(); setFilters(draft); }}
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}
+      >
+        <label className="field">ค้นหาชื่อ
+          <input type="search" value={draft.q} maxLength={100} onChange={(e) => setDraft({ ...draft, q: e.target.value })} />
+        </label>
+        <label className="field">ประเภท
+          <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as Filters['kind'] })}>
+            <option value="">ทั้งหมด</option><option value="file">ไฟล์</option><option value="link">ลิงก์</option><option value="note">บันทึก</option>
+          </select>
+        </label>
+        <label className="field">การผูกตัวชี้วัด
+          <select value={draft.mapping} onChange={(e) => setDraft({ ...draft, mapping: e.target.value as Filters['mapping'] })}>
+            <option value="">ทั้งหมด</option>
+            {(Object.keys(MAPPING_TH) as (keyof typeof MAPPING_TH)[]).map((k) => <option key={k} value={k}>{MAPPING_TH[k]}</option>)}
+          </select>
+        </label>
+        <label className="field">ปฏิบัติงานตั้งแต่
+          <input type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
+        </label>
+        <label className="field">ถึง
+          <input type="date" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
+        </label>
+        <button type="submit" className="btn btn-secondary">ค้นหา</button>
+        {filtered && <button type="button" className="btn" onClick={() => { setDraft(NO_FILTERS); setFilters(NO_FILTERS); }}>ล้างตัวกรอง</button>}
+      </form>
+
       {error && (
         <div className="alert alert-error" role="alert">
           <span aria-hidden="true">⚠</span>
@@ -65,7 +110,11 @@ export function EvidenceListPage() {
         </div>
       )}
 
-      {items !== null && items.length === 0 && (
+      {items !== null && items.length === 0 && filtered && (
+        <p className="field-hint" role="status">ไม่พบหลักฐานที่ตรงกับตัวกรอง</p>
+      )}
+
+      {items !== null && items.length === 0 && !filtered && (
         <div className="empty-state">
           <p>ยังไม่มีหลักฐาน</p>
           {submitEvidence ? (

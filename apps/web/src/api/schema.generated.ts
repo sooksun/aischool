@@ -4131,6 +4131,17 @@ export interface operations {
                 status?: components["schemas"]["EvidenceStatus"];
                 /** @description Only evidence having an active mapping to this indicator */
                 mapped_to_indicator_id?: string;
+                /** @description Title contains this text, case-insensitive (FR-054). */
+                q?: string;
+                kind?: components["schemas"]["EvidenceKind"];
+                /** @description Work date on or after this day (overlap with performed_from..performed_to). An item with no work date is left out once either bound is given. */
+                performed_from?: string;
+                /** @description Work date on or before this day. */
+                performed_to?: string;
+                /** @description `unmapped` — no live mapping at all; otherwise at least one live mapping in that status. */
+                mapping_state?: "unmapped" | "owner_confirmed" | "validated" | "returned";
+                /** @description Work date within this evaluation cycle (FR-035 binds by work date). A cycle of a school the caller does not belong to is VAL-002. */
+                cycle_id?: string;
                 page?: components["parameters"]["Page"];
                 page_size?: components["parameters"]["PageSize"];
             };
@@ -4150,6 +4161,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     createEvidence: {
