@@ -9,6 +9,7 @@ import 'background.dart';
 import 'capture.dart';
 import 'outbox.dart';
 import 'suggestions.dart';
+import 'committee.dart';
 import 'coverage.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -349,6 +350,15 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: const Icon(Icons.folder_open_outlined),
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => MyEvidenceScreen(api: widget.session.api, personId: me.personId!)),
+              ),
+            ),
+          if (canSeeCommitteeView(me))
+            IconButton(
+              key: const Key('committee'),
+              tooltip: 'งานกรรมการ',
+              icon: const Icon(Icons.fact_check_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => CommitteeScreen(api: widget.session.api)),
               ),
             ),
           IconButton(

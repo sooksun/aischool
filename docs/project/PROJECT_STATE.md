@@ -6,6 +6,8 @@ School Evidence Intelligence Platform (SEIP)
 ## Current Phase
 **Rethink → P0 (13–30 Oct 2026)** — PRD v1.0 (`docs/project/PRD.md`), plan (`docs/project/plan.md`) and ADR-0010–0018 accepted by the owner 2026-10-12. Scope v1: evidence hub + committee view + DPA export; scoring frozen for v2 (ADR-0017). Web + Flutter clients, in-country AI (ADR-0010).
 
+> **Committee view in the app (SEIP-P4-009, in review):** committee members and directors now have a read-only "งานกรรมการ" screen in the app. It lists the evaluations in open rounds and, for each one, the confirmed evidence per indicator with its provenance label. Validating, returning and commenting stay on the web. Not yet run on a device.
+
 > **Portfolio search (SEIP-P4-008, contract 4.13.0, in review):** "หลักฐานของฉัน" now has a filter bar: title search, kind, work-date range and mapping state (including not yet mapped). The API also filters by evaluation cycle. Filters only narrow what the caller may already see.
 
 > **Access trail and provenance (SEIP-P4-007, in review):** whenever someone other than the owner (a director, the committee or an admin) opens an evidence item, downloads its file, or opens the committee view, the system now records who did it and through which right. The record holds ids only. The owner's own access is not recorded. Every mapping now carries one label, "AI เสนอ · ยืนยันโดยเจ้าของ" or "เจ้าของเพิ่มเอง", and the committee sees it too.

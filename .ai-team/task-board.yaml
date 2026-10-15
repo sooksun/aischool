@@ -2383,3 +2383,25 @@ tasks:
       - "each filter alone and combined; overlap semantics; foreign cycle VAL-002; stranger finds nothing"  # DONE — evidence-search.test
       - "web filter bar with a 'no match' state and clear"  # DONE — e2e evidence-search.spec
 
+  - id: SEIP-P4-009
+    title: "P4 — FR-065 read-only committee view in the app"
+    status: review              # 2026-10-15
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-002]
+    decisions: []
+    primary_paths:
+      - apps/mobile/lib/src/committee.dart
+      - apps/mobile/test/committee_test.dart
+    notes: >
+      No contract or API change. An evaluator or director gets a "งานกรรมการ" button.
+      It lists the assignments of open and scoring rounds (cycles → rounds →
+      listAssignments; names from listPersonnel when the role may list, a generic label
+      otherwise), then the evaluatee's confirmed evidence per indicator in framework
+      order (listAssignmentEvidence + getFramework). Each item shows its provenance
+      (FR-047), its mapping status and its file count. There is no validate, return or
+      comment action; those stay on the web. A closed round (PERM-003) says access has
+      ended. Not done: opening the files in the app, and a device run.
+    acceptance_criteria:
+      - "offered to evaluator / director only"   # DONE — committee_test
+      - "open rounds only; framework order; provenance; read-only; PERM-003 message"  # DONE — committee_test
+
