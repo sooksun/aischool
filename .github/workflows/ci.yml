@@ -209,6 +209,9 @@ jobs:
           if [ "$ARMED" != "true" ]; then
             echo "::notice::integration gate not yet armed — arms when scripts.test:integration is defined"; exit 0; fi
           npm ci
+          # MySQL 8 enables binlog by default; without SUPER the non-root app user
+          # hits ERROR 1419 creating the constraint triggers, so root relaxes it first.
+          mysql -h 127.0.0.1 -P 3306 -u root -pseip_ci_root -e "SET GLOBAL log_bin_trust_function_creators = 1"
           npx --yes prisma@6 migrate deploy
           npx --yes prisma@6 generate
           node prisma/seed.mjs
@@ -274,7 +277,11 @@ jobs:
         run: npx --yes prisma@6 validate
       - name: Apply migrations up (proves the up-path against a real MySQL)
         if: steps.arm.outputs.armed == 'true'
-        run: npx --yes prisma@6 migrate deploy
+        run: |
+          # MySQL 8 enables binlog by default; without SUPER the non-root app user
+          # hits ERROR 1419 creating the constraint triggers, so root relaxes it first.
+          mysql -h 127.0.0.1 -P 3306 -u root -pseip_ci_root -e "SET GLOBAL log_bin_trust_function_creators = 1"
+          npx --yes prisma@6 migrate deploy
         # No `migrate diff` drift check on purpose: the constraints migration adds
         # generated columns, CHECKs, partial indexes and triggers that Prisma's schema
         # language cannot represent, so diff(schema, migrations) always reports a
@@ -340,6 +347,9 @@ jobs:
             echo "::notice::permission gate not yet armed — arms when tests/security/* land (against permissions.yaml matrix)"; exit 0
           fi
           npm ci
+          # MySQL 8 enables binlog by default; without SUPER the non-root app user
+          # hits ERROR 1419 creating the constraint triggers, so root relaxes it first.
+          mysql -h 127.0.0.1 -P 3306 -u root -pseip_ci_root -e "SET GLOBAL log_bin_trust_function_creators = 1"
           npx --yes prisma@6 migrate deploy
           npx --yes prisma@6 generate
           node prisma/seed.mjs
@@ -401,6 +411,9 @@ jobs:
       - name: Install, migrate, seed, build
         run: |
           npm ci
+          # MySQL 8 enables binlog by default; without SUPER the non-root app user
+          # hits ERROR 1419 creating the constraint triggers, so root relaxes it first.
+          mysql -h 127.0.0.1 -P 3306 -u root -pseip_ci_root -e "SET GLOBAL log_bin_trust_function_creators = 1"
           npx --yes prisma@6 migrate deploy
           npx --yes prisma@6 generate
           node prisma/seed.mjs
