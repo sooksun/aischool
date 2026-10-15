@@ -156,12 +156,11 @@ jobs:
     # working dataset the tests still pass against AND the real API/DB/storage
     # wiring works end-to-end (apps/api's evidence-flow.test.mjs).
     #
-    # MinIO is NOT a `services:` entry (see the "Start MinIO" step below) — a
-    # services container can't be given a command, and minio/minio's default
-    # CMD just prints usage instead of starting the server; it requires an
-    # explicit `server /data` argument. Verified locally: `--entrypoint sh`
-    # (the previous approach here) overrides startup with a no-op shell that
-    # exits immediately, so the server process never runs at all.
+    # MinIO is NOT a `services:` entry (see the "Start MinIO" step below) — that
+    # dates from upstream minio/minio, whose CMD needed an explicit `server /data`
+    # a services container can't be given. Upstream images are no longer
+    # published; bitnamilegacy/minio:2025.4.22 (the same 2025-04-22 build) starts
+    # the server from its own entrypoint, so the docker run takes no command.
     services:
       mysql:
         image: mysql:8.0
@@ -193,9 +192,9 @@ jobs:
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+            bitnamilegacy/minio:2025.4.22
           for i in $(seq 1 20); do
-            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
+            if curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
               echo "minio healthy"; exit 0
             fi
             sleep 2
@@ -331,9 +330,9 @@ jobs:
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+            bitnamilegacy/minio:2025.4.22
           for i in $(seq 1 20); do
-            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
+            if curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
               echo "minio healthy"; exit 0
             fi
             sleep 2
@@ -400,9 +399,9 @@ jobs:
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+            bitnamilegacy/minio:2025.4.22
           for i in $(seq 1 20); do
-            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
+            if curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
               echo "minio healthy"; exit 0
             fi
             sleep 2
