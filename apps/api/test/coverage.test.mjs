@@ -148,6 +148,23 @@ test('committee view: the seated evaluator (from another school) and the directo
   const filtered = await app.inject({ method: 'GET', url: `${url}?indicator_id=${items[1].indicator_id}`, headers: h('director') });
   assert.equal(filtered.json().items.length, 1);
 
+  // FR-111: opening someone else's evidence leaves a trail — who, through which
+  // grant — with ids only; the owner's own reads leave none.
+  const viewAudit = await prisma.auditEvent.findFirst({ where: { requestId: seated.json().request_id ?? undefined, action: 'committee_evidence_viewed', actorUserId: userId.evaluator, entityId: a.id } });
+  assert.ok(viewAudit, 'committee view audited');
+  assert.equal(viewAudit.afterState.grant, 'committee');
+  assert.equal(viewAudit.afterState.itemCount, 2);
+  const evId = items[0].evidence.id;
+  const asDirector = await app.inject({ method: 'GET', url: `/api/v1/evidence/${evId}`, headers: h('director') });
+  assert.equal(asDirector.statusCode, 200);
+  const dirAudit = await prisma.auditEvent.findMany({ where: { action: 'evidence_viewed', entityId: evId, actorUserId: userId.director } });
+  assert.equal(dirAudit.length, 1);
+  assert.deepEqual(dirAudit[0].afterState, { evidenceId: evId, fileId: null, grant: 'school' });
+  await app.inject({ method: 'GET', url: `/api/v1/evidence/${evId}`, headers: h('evaluator', otherSchool) });
+  assert.equal((await prisma.auditEvent.findFirst({ where: { action: 'evidence_viewed', entityId: evId, actorUserId: userId.evaluator } })).afterState.grant, 'committee');
+  await app.inject({ method: 'GET', url: `/api/v1/evidence/${evId}`, headers: h('teacher') });
+  assert.equal(await prisma.auditEvent.count({ where: { action: 'evidence_viewed', entityId: evId, actorUserId: userId.teacher } }), 0, 'the owner is not logged');
+
   const off = await app.inject({ method: 'GET', url, headers: h('offCommittee') });
   assert.equal(off.statusCode, 403);
   assert.equal(off.json().code, 'PERM-003');

@@ -19,7 +19,7 @@ import {
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { requireCurrentSchool, type AuthedRequest } from '../plugins/auth.js';
 import { resolveGrant } from '../lib/permission-guard.js';
-import { authorizeEvidence, isOwner } from '../lib/evidence-access.js';
+import { authorizeEvidence, isOwner, auditNonOwnerAccess } from '../lib/evidence-access.js';
 import { etag, idempotent, requireIfMatch, staleOrMissing } from '../lib/concurrency.js';
 import {
   createS3Client, evidenceObjectKey, presignUpload, presignDownload, createMultipartUpload,
@@ -291,7 +291,8 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);
     const detail = await getEvidenceDetail(evidenceId);
     if (!detail) throw new ApiError('RES-001', 'Evidence not found');
-    await authorizeEvidence('getEvidence', auth, detail);
+    const grant = await authorizeEvidence('getEvidence', auth, detail);
+    await auditNonOwnerAccess(auth, detail, 'evidence_viewed', grant, request.id);
 
     reply.header('ETag', etag(detail.version));
     return {
@@ -621,7 +622,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     const { evidenceId, fileId } = z.object({ evidenceId: z.string().uuid(), fileId: z.string().uuid() }).parse(request.params);
     const detail = await getEvidenceDetail(evidenceId);
     if (!detail) throw new ApiError('RES-001', 'Evidence not found');
-    await authorizeEvidence('getEvidenceFileDownloadUrl', auth, detail);
+    const grant = await authorizeEvidence('getEvidenceFileDownloadUrl', auth, detail);
 
     const file = detail.files.find((f) => f.id === fileId);
     if (!file) throw new ApiError('RES-001', 'Evidence file not found');
@@ -632,6 +633,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
       throw new ApiError('UPL-006', `File is not available for download (scan_status=${file.scanStatus})`);
     }
     const { downloadUrl, expiresAt } = await presignDownload(s3, env.S3_BUCKET, file.storageUri, file.originalFilename);
+    await auditNonOwnerAccess(auth, detail, 'evidence_file_downloaded', grant, request.id, file.id);
     return { download_url: downloadUrl, expires_at: expiresAt.toISOString() };
   });
 

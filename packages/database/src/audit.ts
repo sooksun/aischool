@@ -50,6 +50,10 @@ const AUDIT_ALLOWLIST: Record<string, readonly string[]> = {
   // CCR-029. `details` and `decisionNote` excluded: the person's own words about
   // their data, and the DPO's reasoning about it — kept on the row, never copied.
   SubjectRequest: ['id', 'personId', 'areaId', 'requestType', 'status', 'exportId'],
+  // FR-111. Who looked at someone else's evidence, and through which grant —
+  // ids only; the item itself is never copied.
+  EvidenceAccess: ['evidenceId', 'fileId', 'grant'],
+  AssignmentEvidenceView: ['assignmentId', 'grant', 'itemCount'],
 };
 
 function allowlist(entityType: string, obj: Record<string, unknown> | undefined): Snapshot | undefined {

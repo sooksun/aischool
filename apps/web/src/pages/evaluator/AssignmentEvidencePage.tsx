@@ -8,6 +8,7 @@ import { api, unwrap } from '../../api/client';
 import { ApiError, thaiMessageFor } from '../../api/errors';
 import type { components } from '../../api/schema.generated';
 import { AssignmentComments } from '../../components/AssignmentComments';
+import { provenanceLabel } from '../../lib/provenance';
 
 type Item = components['schemas']['AssignmentEvidenceItem'];
 
@@ -60,7 +61,7 @@ export function AssignmentEvidencePage() {
                 <Link to={`/evidence/${it.evidence.id}`} className="evidence-card">
                   <div className="title">{it.evidence.title}</div>
                   <p className="field-hint">
-                    {it.mapping.status === 'validated' ? 'รับรองแล้ว' : 'รอรับรอง'} · ไฟล์ {it.files.length}
+                    {provenanceLabel(it.mapping.mapping_source)} · {it.mapping.status === 'validated' ? 'รับรองแล้ว' : 'รอรับรอง'} · ไฟล์ {it.files.length}
                     {it.evidence.injection_suspected ? ' · ⚠ อาจมีคำสั่งแฝง' : ''}
                   </p>
                 </Link>

@@ -149,6 +149,15 @@ test('lazy download-url only when scan_status allows it (UPL-006); getEvidence n
   assert.ok(cleanDl.json().download_url.startsWith('http'));
   assert.ok(typeof cleanDl.json().expires_at === 'string');
 
+  // FR-111: the owner's own download leaves no trail; the director's does, ids only.
+  assert.equal(await prisma.auditEvent.count({ where: { action: 'evidence_file_downloaded', entityId: evidence.id } }), 0);
+  const byDirector = await app.inject({ method: 'GET', url: `/api/v1/evidence/${evidence.id}/files/${file.id}/download-url`, headers: auth(directorToken) });
+  assert.equal(byDirector.statusCode, 200, byDirector.body);
+  const trail = await prisma.auditEvent.findMany({ where: { action: 'evidence_file_downloaded', entityId: evidence.id } });
+  assert.equal(trail.length, 1);
+  assert.deepEqual(trail[0].afterState, { evidenceId: evidence.id, fileId: file.id, grant: 'school' });
+  assert.ok(!JSON.stringify(trail[0]).includes('dl.pdf'), 'no file name in the audit trail');
+
   await prisma.evidenceFile.update({ where: { id: file.id }, data: { scanStatus: 'sanitised' } });
   assert.equal((await dl()).statusCode, 200, 'sanitised is served (ADR-0018)');
 

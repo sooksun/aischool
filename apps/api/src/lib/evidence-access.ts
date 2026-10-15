@@ -20,7 +20,7 @@
 // so the item's existence never leaks (permissions.yaml tenancy rule). PERM-001 is
 // reserved for "you can see this school, but your role may not do this".
 import { grantFor, ApiError, forbiddenRole } from '@seip/backend-shared';
-import { getSchoolAreaId, listEvaluateePersonIdsForCommitteeMember, listLiveMappingSchoolIds, isRetainedBySchool } from '@seip/database';
+import { getSchoolAreaId, listEvaluateePersonIdsForCommitteeMember, listLiveMappingSchoolIds, isRetainedBySchool, writeAuditEvent } from '@seip/database';
 import type { AuthedRequest } from '../plugins/auth.js';
 import { resolveGrant, type Grant } from './permission-guard.js';
 
@@ -121,3 +121,20 @@ async function hasAnyFootholdAt(auth: AuthedRequest, schoolId: string): Promise<
   const areaId = await getSchoolAreaId(schoolId);
   return !!areaId && auth.tenancy.areaRoles.has(areaId);
 }
+
+/**
+ * FR-111: an item opened or a file downloaded by anyone but its owner (committee,
+ * director, admin, area) leaves an audit row naming who, through which grant.
+ * The owner's own access is not logged — it is their portfolio.
+ */
+export async function auditNonOwnerAccess(
+  auth: AuthedRequest, ev: EvidenceRef & { id: string }, action: 'evidence_viewed' | 'evidence_file_downloaded',
+  grant: Grant, requestId: string, fileId?: string,
+): Promise<void> {
+  if (isOwner(auth, ev)) return;
+  await writeAuditEvent({
+    schoolId: ev.originSchoolId, actorUserId: auth.userId, action, entityType: 'EvidenceAccess', entityId: ev.id,
+    after: { evidenceId: ev.id, fileId: fileId ?? null, grant }, requestId,
+  });
+}
+

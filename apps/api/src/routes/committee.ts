@@ -10,7 +10,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   getAssignmentDetail, getCommitteeMembership, listCommitteeEvidence, getPersonIdOfPersonnel, getSchoolAreaId,
-  listAssignmentComments, createAssignmentComment, getAssignmentComment, getPersonnelUserId, indicatorInFramework,
+  listAssignmentComments, createAssignmentComment, getAssignmentComment, getPersonnelUserId, indicatorInFramework, writeAuditEvent,
 } from '@seip/database';
 import { ApiError, grantFor } from '@seip/backend-shared';
 import { resolveGrant, type Grant } from '../lib/permission-guard.js';
@@ -58,6 +58,14 @@ export const committeeRoutes: FastifyPluginAsync = async (app) => {
     const page = await listCommitteeEvidence({
       personId, frameworkVersionId: assignment.round.cycle.frameworkVersionId, indicatorId: q.indicator_id, offset, limit: q.limit,
     });
+    // FR-111: someone else's portfolio was opened — who, through which grant, how much.
+    if (auth.personId !== personId) {
+      await writeAuditEvent({
+        schoolId: assignment.schoolId, actorUserId: auth.userId, action: 'committee_evidence_viewed',
+        entityType: 'AssignmentEvidenceView', entityId: assignment.id,
+        after: { assignmentId: assignment.id, grant, itemCount: page.items.length }, requestId: request.id,
+      });
+    }
     return {
       items: page.items.map((m) => {
         const files = m.evidence.files;

@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, unwrap } from '../api/client';
+import { provenanceLabel } from '../lib/provenance';
 import { ApiError, thaiMessageFor } from '../api/errors';
 import type { components } from '../api/schema.generated';
 import { useAuth } from '../hooks/useAuth';
@@ -277,7 +278,7 @@ export function EvidenceDetailPage() {
           return (
             <li key={m.id} className="evidence-card" style={{ marginBottom: 8 }}>
               <div className="title">
-                {mappingSourceLabel(m.mapping_source)} · {mappingStatusLabel(m.status)}
+                {provenanceLabel(m.mapping_source)} · {mappingStatusLabel(m.status)}
               </div>
               {m.note && <p className="field-hint">{m.note}</p>}
               {m.status === 'returned' && m.return_note && (
@@ -323,9 +324,6 @@ export function EvidenceDetailPage() {
   );
 }
 
-function mappingSourceLabel(source: Mapping['mapping_source']): string {
-  return source === 'ai_accepted' ? 'รับจากคำแนะนำ AI' : 'ผูกด้วยมือ';
-}
 
 function scanStatusLabel(status: string): string {
   switch (status) {

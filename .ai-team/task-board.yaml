@@ -2329,3 +2329,30 @@ tasks:
       - "DPO reminded before the due date (7 d, 1 d, overdue), once per milestone"  # DONE 2026-10-15 — worker reminders.test (hourly reminders.run job, kind deadline)
       - "carry out correction / erasure / restriction in the system"  # NOT STARTED — retention rules to design
 
+  - id: SEIP-P4-007
+    title: "P4 — FR-111 audit of non-owner evidence access; FR-047 mapping provenance labels"
+    status: review              # 2026-10-15
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-002]
+    decisions: []
+    primary_paths:
+      - apps/api/src/lib/evidence-access.ts
+      - apps/api/src/routes/evidence.ts
+      - apps/api/src/routes/committee.ts
+      - packages/database/src/audit.ts
+      - apps/web/src/lib/provenance.ts
+    notes: >
+      No contract change. FR-111: getEvidence and getEvidenceFileDownloadUrl write
+      evidence_viewed / evidence_file_downloaded when the caller is not the owner, and
+      listAssignmentEvidence writes committee_evidence_viewed. Each row names the actor
+      and the grant used (school / committee / area-r / via mapping), and carries ids
+      only: no title, no file name. The owner's own reads are not logged. FR-047: one
+      label everywhere, "AI เสนอ · ยืนยันโดยเจ้าของ" or "เจ้าของเพิ่มเอง", now also on
+      the committee view. No confidence is shown (FR-061). Not done: a screen for the
+      owner or the DPO to read the access log (FR-111 asks for the record; reading it
+      is US-21 audit export).
+    acceptance_criteria:
+      - "director / committee views audited with grant; owner not logged"  # DONE — coverage.test
+      - "non-owner download audited with file id, no file name"           # DONE — evidence-flow.test
+      - "provenance label on owner and committee views"                  # DONE — web unit provenance.test, typecheck
+
