@@ -8,3 +8,8 @@
 # the environment). Never fingerprint a real credential here — rotate it.
 7c8279227e2b8f414e2c0e0c1bd3af0c8fe62ce8:apps/worker/test/file-process.test.mjs:generic-api-key:30
 2566f1a6ce2111f6a76017018da1b474e68ca9cd:apps/worker/test/storage-gc.test.mjs:generic-api-key:30
+# Same false positive on another branch (claude/remote-control-5aclif, PR #3):
+# gitleaks scans every fetched branch, and the S3Client config line
+# `secretAccessKey: env.S3_SECRET_KEY` trips generic-api-key on the field
+# name — the value is read from the environment, not inlined.
+b2a216a41c1bc28bae450d88cfb5e31f8d02d4ad:apps/api/test/exports.test.mjs:generic-api-key:59
