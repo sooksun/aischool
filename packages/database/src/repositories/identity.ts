@@ -119,14 +119,15 @@ export async function listPersonnelForSchool(
   });
 }
 
-/** A membership is "current" when it has not been ended. effectiveTo is a DATE,
- * so an offboarding recorded today is still >= today until tomorrow — matching
- * endMembership, which grants the rest of the day rather than retroactively
- * cutting a session that already exists. */
+/** A membership is "current" when it has not been ended and has not lapsed.
+ * endMembership sets status 'ended', and role resolution already refuses any
+ * non-active membership, so an ended row leaves the list at once — keying on
+ * status, not on the DATE effectiveTo alone, which made "ended today" depend on
+ * the host's timezone (UTC kept the row until tomorrow; UTC+7 dropped it). */
 function currentMembershipWhere() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return { OR: [{ effectiveTo: null }, { effectiveTo: { gte: today } }] };
+  return { status: { not: 'ended' as const }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: today } }] };
 }
 
 export async function listMembersForSchool(schoolId: string, opts: { status?: 'current' | 'all' } = {}) {
