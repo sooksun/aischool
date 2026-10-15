@@ -3,13 +3,14 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const ERROR_CODES_VERSION = '1.3.0';
+export const ERROR_CODES_VERSION = '1.6.0';
 
 export type ErrorCode =
   | 'AUTH-001'
   | 'AUTH-002'
   | 'AUTH-003'
   | 'AUTH-004'
+  | 'AUTH-005'
   | 'PERM-001'
   | 'PERM-002'
   | 'PERM-003'
@@ -37,9 +38,13 @@ export type ErrorCode =
   | 'CYCLE-003'
   | 'RPT-001'
   | 'RPT-002'
+  | 'RPT-003'
   | 'AI-001'
+  | 'AGR-001'
+  | 'AGR-002'
   | 'RES-001'
   | 'RES-002'
+  | 'RES-003'
   | 'SYS-001'
   | 'SYS-002';
 
@@ -48,6 +53,7 @@ export const ERROR_CODE_TABLE: Record<ErrorCode, { http: number; meaning: string
   'AUTH-002': { http: 401, meaning: "Token expired" },
   'AUTH-003': { http: 401, meaning: "Account disabled or not yet activated" },
   'AUTH-004': { http: 429, meaning: "Too many login attempts — throttled per IP and/or account (SEC-AUTH-5)" },
+  'AUTH-005': { http: 401, meaning: "Invite token not usable — unknown" },
   'PERM-001': { http: 403, meaning: "Role not allowed for this operation (permissions.yaml matrix)" },
   'PERM-002': { http: 403, meaning: "Cross-school access denied (tenancy) — resource belongs to another school" },
   'PERM-003': { http: 403, meaning: "Not a committee member of this assignment" },
@@ -75,9 +81,13 @@ export const ERROR_CODE_TABLE: Record<ErrorCode, { http: number; meaning: string
   'CYCLE-003': { http: 422, meaning: "Round period outside cycle bounds" },
   'RPT-001': { http: 422, meaning: "Invalid report request — unknown template" },
   'RPT-002': { http: 422, meaning: "Report PDF not ready — still draft or generation_status pending" },
+  'RPT-003': { http: 422, meaning: "Approval not permitted — report not pending_approval" },
   'AI-001': { http: 422, meaning: "Mapping suggest rejected — evidence not eligible" },
+  'AGR-001': { http: 409, meaning: "An agreement already exists for this (cycle" },
+  'AGR-002': { http: 422, meaning: "Agreement not in a state that allows this — content freezes on submit" },
   'RES-001': { http: 404, meaning: "Resource not found (or hidden by tenancy — indistinguishable by design)" },
   'RES-002': { http: 409, meaning: "Concurrent modification (stale version/etag)" },
+  'RES-003': { http: 409, meaning: "Duplicate — an active membership already exists for this (school" },
   'SYS-001': { http: 500, meaning: "Unexpected server error — request_id always present" },
   'SYS-002': { http: 503, meaning: "Dependency unavailable (storage" },
 };

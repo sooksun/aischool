@@ -8,11 +8,13 @@ import {
   listAssignmentsForRound, createAssignmentWithCommittee, getAssignmentDetail,
   getCommitteeMembership, countCommitteeMembers,
   getWorkloadDeclaration, upsertWorkloadDeclaration,
-  replaceIndicatorScores, getIndicatorScores, upsertRoundResult, getRoundResultsForAssignment,
+  replaceScoresAndRollup, getIndicatorScores, getRoundResultsForAssignment,
   getPersonnelById, countExistingUserIds, countCommitteeEligibleUserIds, getFrameworkById, getFrameworkDetail, writeAuditEvent,
+  findAgreementForCycleAndPersonnel,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
 import { resolveGrant, requireOwnership } from '../lib/permission-guard.js';
+import { serializeChallenge } from '../lib/serialize-agreement.js';
 
 function serializeCommitteeMember(m: { evaluatorUserId: string; committeeRole: string; seatNumber: number }) {
   return { evaluator_user_id: m.evaluatorUserId, committee_role: m.committeeRole, seat_number: m.seatNumber };
@@ -66,8 +68,16 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
 
     let evaluateePersonnelId: string | undefined;
     let committeeEvaluatorUserId: string | undefined;
-    if (grant === 'own') evaluateePersonnelId = auth.personnel?.id;
-    else if (grant === 'committee') committeeEvaluatorUserId = auth.userId;
+    // No personnel profile => DENY. An undefined evaluateePersonnelId is not a
+    // narrower filter, it is NO filter, and would expose every assignment in the
+    // round (incl. each colleague's full committee) to an 'own'-scoped caller
+    // (2026-07-18 audit — same shape as the listEvidence fix).
+    if (grant === 'own') {
+      if (!auth.personnel) {
+        throw new ApiError('PERM-001', 'own-scoped role has no personnel profile at this school');
+      }
+      evaluateePersonnelId = auth.personnel.id;
+    } else if (grant === 'committee') committeeEvaluatorUserId = auth.userId;
 
     const { items, total } = await listAssignmentsForRound(roundId, {
       evaluateePersonnelId, committeeEvaluatorUserId, page: q.page, pageSize: q.page_size,
@@ -86,7 +96,6 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
 
     const body = z.object({
       evaluatee_personnel_id: z.string().uuid(),
-      agreement_id: z.string().uuid().nullable().optional(),
       committee: z.array(z.object({
         evaluator_user_id: z.string().uuid(),
         committee_role: z.enum(['chair', 'member']),
@@ -127,9 +136,21 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
       throw new ApiError('VAL-003', "evaluatee's position role does not match this round's framework");
     }
 
+    // CCR-015: derived, never supplied. PerformanceAgreement is unique per
+    // (cycle, personnel) and both are known here, so there is nothing for a
+    // client to choose — which is why AssignmentCreate.agreement_id was removed
+    // in contract 3.0.0. It used to arrive from the body unvalidated, and since
+    // workload_declaration is unique per (agreement, round), a mismatched id made
+    // this evaluatee's ภาระงาน gate read and write someone else's row.
+    //
+    // Null is a legitimate outcome: an assignment may be created before the
+    // evaluatee has filed their PA1. submitMyScores is what refuses (SCORE-004),
+    // at the point where a missing agreement actually matters.
+    const agreement = await findAgreementForCycleAndPersonnel(round.cycle.id, body.evaluatee_personnel_id);
+
     const assignment = await createAssignmentWithCommittee(round.cycle.schoolId, roundId, {
       evaluateePersonnelId: body.evaluatee_personnel_id,
-      agreementId: body.agreement_id ?? null,
+      agreementId: agreement?.id ?? null,
       committee: body.committee.map((c) => ({
         evaluatorUserId: c.evaluator_user_id, committeeRole: c.committee_role, seatNumber: c.seat_number,
       })),
@@ -171,6 +192,14 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
       my_submission_state: mySubmissionState,
       // CCR-009: pin framework for scoring UI — no client graph walk over cycles.
       framework_version_id: assignment.round.cycle.frameworkVersionId,
+      // CCR-013: selects which IndicatorLevel rows apply (ADR-0003 — the rubric
+      // text is seeded data, not UI copy).
+      evaluatee_rank_level_code: assignment.evaluatee.rankLevelCode,
+      // CCR-015: what indicators C.1/C.2.1/C.2.2 actually rate. Null when the
+      // evaluatee has not filed a PA1 for this cycle — the UI must say that
+      // rather than render blank fields, because "no challenge filed" and
+      // "challenge left empty" are different facts about the same 40%.
+      challenge: serializeChallenge(assignment.agreement?.challenges[0]),
     };
   });
 
@@ -234,10 +263,6 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
       throw new ApiError('SCORE-005', `Score set incomplete — expected ${byIndicatorId.size} scored indicators, got ${submittedIds.length}`);
     }
 
-    await replaceIndicatorScores(assignmentId, auth.userId, body.indicator_scores.map((s) => ({
-      indicatorId: s.indicator_id, rubricLevel: s.rubric_level, comment: s.comment ?? null,
-    })));
-
     // Rollup: part1 (standard, equal-weight average) / part2 (challenge,
     // maxPoints-weighted) / total = part1*part1_weight% + part2*part2_weight%
     // (ScoreWeight part1_total=60, part2_total=40 — framework data, not a constant).
@@ -255,15 +280,26 @@ export const scoringRoutes: FastifyPluginAsync = async (app) => {
     const part2Weight = weights.part2_total ?? 40;
     const totalPercent = part1Percent * (part1Weight / 100) + part2Percent * (part2Weight / 100);
 
-    const result = await upsertRoundResult(assignmentId, auth.userId, {
-      part1Percent: round2(part1Percent), part2Percent: round2(part2Percent), totalPercent: round2(totalPercent),
-      passedWorkloadGate: workloadRow.workloadMet,
-    });
-
-    await writeAuditEvent({
-      schoolId: assignment.schoolId, actorUserId: auth.userId, action: 'scores_submitted',
-      entityType: 'EvaluationAssignment', entityId: assignmentId, requestId: request.id,
-    });
+    // Scores, the rollup derived from them, and the audit row commit together.
+    // Previously three sequential awaits: a failure between them left the new
+    // scores next to the PREVIOUS RoundResult, and since total_percent feeds the
+    // generated passed_individual_threshold column, the DB's own pass/fail verdict
+    // silently contradicted the scores behind it (2026-07-18 audit).
+    const result = await replaceScoresAndRollup(
+      assignmentId,
+      auth.userId,
+      body.indicator_scores.map((s) => ({
+        indicatorId: s.indicator_id, rubricLevel: s.rubric_level, comment: s.comment ?? null,
+      })),
+      {
+        part1Percent: round2(part1Percent), part2Percent: round2(part2Percent), totalPercent: round2(totalPercent),
+        passedWorkloadGate: workloadRow.workloadMet,
+      },
+      {
+        schoolId: assignment.schoolId, actorUserId: auth.userId, action: 'scores_submitted',
+        entityType: 'EvaluationAssignment', entityId: assignmentId, requestId: request.id,
+      },
+    );
     return serializeEvaluatorResult(result);
   });
 

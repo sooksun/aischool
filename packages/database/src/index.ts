@@ -6,6 +6,8 @@ export * from './repositories/evidence.js';
 export * from './repositories/mappings.js';
 export * from './repositories/cycles.js';
 export * from './repositories/scoring.js';
+export * from './repositories/agreements.js';
+export * from './repositories/approvals.js';
 export * from './repositories/outbox.js';
 export * from './repositories/jobs.js';
 export * from './repositories/reports.js';

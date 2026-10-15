@@ -163,7 +163,12 @@ export function EvidenceDetailPage() {
             {f.scan_status === 'blocked' && (
               <p className="field-hint" role="alert">ไฟล์ถูกกักไว้ — ดาวน์โหลดไม่ได้ (UPL-006)</p>
             )}
-            {f.scan_status === 'clean' && (
+            {f.scan_status === 'unscanned' && (
+              <p className="field-hint">
+                ระบบนี้ยังไม่ได้ติดตั้งโปรแกรมสแกนไวรัส — ดาวน์โหลดได้ แต่ยังไม่มีการตรวจไฟล์ กรุณาใช้ความระมัดระวัง
+              </p>
+            )}
+            {(f.scan_status === 'clean' || f.scan_status === 'unscanned') && (
               <p style={{ marginTop: 8 }}>
                 <button
                   type="button"
@@ -254,6 +259,10 @@ function scanStatusLabel(status: string): string {
   switch (status) {
     case 'pending': return 'กำลังตรวจสอบ';
     case 'clean': return 'ตรวจสอบแล้ว ปลอดภัย';
+    // CCR-012: deliberately not 'ปลอดภัย' — no scanner ran, so the platform has
+    // no basis for that claim. The file is still downloadable; this label is the
+    // disclosure that goes with it.
+    case 'unscanned': return 'ยังไม่ได้สแกนไวรัส';
     case 'blocked': return 'ถูกกักไว้ — พบปัญหา';
     default: return status;
   }

@@ -80,7 +80,9 @@ h2 { font-size: 1.125rem; margin: 0 0 var(--space-2); }
   text-align: left;
   cursor: pointer;
 }
-.category-card[aria-pressed="true"] {
+/* aria-checked, not aria-pressed: these are role="radio" in a radiogroup.
+   aria-pressed is for toggle buttons (see .chip below). */
+.category-card[aria-checked="true"] {
   border-color: var(--color-primary);
   background: #eef4ff;
 }

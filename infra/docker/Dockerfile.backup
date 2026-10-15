@@ -1,0 +1,25 @@
+# Backup runner (ADR-0009 sibling; ops-runbook §5).
+#
+# Deliberately NOT built from the app image: it needs the MySQL client tools and
+# `mc`, and nothing else. Keeping it separate means the thing that can restore
+# your data does not inherit the app's dependency surface.
+FROM node:24-bookworm-slim
+
+# default-mysql-client provides mysqldump + mysql (MariaDB build; wire-compatible
+# with MySQL 8 for dump/restore).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends default-mysql-client ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# MinIO client for the object mirror.
+RUN curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc \
+ && chmod +x /usr/local/bin/mc
+
+WORKDIR /app
+COPY scripts/ops/backup.mjs scripts/ops/restore.mjs ./scripts/ops/
+COPY infra/docker/backup-entrypoint.sh /usr/local/bin/backup-entrypoint.sh
+RUN chmod +x /usr/local/bin/backup-entrypoint.sh
+
+# Root is required to write into a bind-mounted host directory whose ownership we
+# do not control. The container runs one script on a timer and exposes no port.
+ENTRYPOINT ["/usr/local/bin/backup-entrypoint.sh"]

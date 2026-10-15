@@ -19,6 +19,66 @@ openapi: 3.1.0
 #   detail/complete (no MinIO presign on metadata reads).
 # version 2.6.0 — CCR-011 (additive, cleanup M2): ReportDetail.payload is
 #   ReportPayload (schema_version=1) instead of free-form object.
+# version 2.7.0 — CCR-012 (additive): ScanStatus gains `unscanned`. The platform
+#   ran no malware scanner, and now says so instead of reporting `clean` — the
+#   previous value was written by a stub that only matched on filename. New
+#   response enum value: clients switching exhaustively on ScanStatus must handle
+#   it (all four values were already reachable in principle; only the honesty
+#   changed). Download policy is unchanged for the caller — `unscanned` is served
+#   exactly like `clean`; `blocked`/`pending` still return UPL-006.
+# version 2.8.0 — CCR-013 (additive): AssignmentDetail.evaluatee_rank_level_code.
+#   Required so a scoring client can select the right IndicatorLevel rows; without
+#   it the level text seeded per (indicator, rank, rubric_level) is unusable and
+#   the UI falls back to four generic phrases, contradicting ADR-0003.
+# version 2.9.0 — CCR-014 (additive): onboarding. Before this, no operation
+#   created a UserAccount, SchoolMembership or PersonnelProfile, and prisma/seed.mjs
+#   created none either — a fresh install seeded the whole ว9/ว10 framework and
+#   nobody who could log in. Adds listPersonnel, listMembers, inviteMember,
+#   endMembership (school_admin, school-scoped) and acceptInvite (unauthenticated:
+#   the invite token IS the credential, like refreshToken). Bootstrap of the FIRST
+#   admin and provisioning of schools/areas deliberately stay OUT of this contract
+#   and ship as operator CLIs — no existing role may write across schools
+#   (area_admin is read-only by contract) and inventing a system_admin role to
+#   allow it would rewrite all 31 permission-matrix rows. See CCR-014 decisions
+#   1 and 2. listPersonnel additionally retires the raw evaluatee UUIDs the
+#   2026-07-19 audit found rendered as primary UI text in four screens.
+# version 3.0.0 — CCR-015 (BREAKING): performance agreements + ประเด็นท้าทาย.
+#   Adds listAgreements/getAgreement/createAgreement/updateAgreement/
+#   submitAgreement/acknowledgeAgreement, and AssignmentDetail.challenge.
+#   BREAKING: `AssignmentCreate.agreement_id` REMOVED. It was passed straight
+#   through unvalidated, so attaching person B's agreement to person A's
+#   assignment made A's ภาระงาน gate read and write B's declaration row
+#   (workload_declaration is unique per (agreement, round)). PerformanceAgreement
+#   is unique per (cycle, personnel) and an assignment already knows both, so the
+#   value is derivable — and a field that cannot be supplied cannot be supplied
+#   wrongly. Same reasoning as MemberInvite having no school_id (CCR-014).
+#   Migration: no external consumer exists (ADR-0004, single deployment); the only
+#   senders were two test fixtures, which CCR-015 replaces with real operations.
+#
+#   Note what this CCR does NOT add: the scoring of ส่วนที่ 2. That already worked
+#   — submitMyScores requires every is_scored indicator and weights T-C.1 (20) /
+#   T-C.2.1 (10) / T-C.2.2 (10) by max_points. What was missing was the thing being
+#   rated: the committee scored 40% of a teacher's result without ever being shown
+#   the method and targets that teacher had committed to. AssignmentDetail.challenge
+#   is the fix; the rest of this version is what makes a challenge exist at all.
+# version 3.1.0 — CCR-016 (additive): report approval. Adds approveReport,
+#   returnReport, listReportApprovals and ReportDetail.approvals. Before this,
+#   report.generate flipped a report draft → pending_approval and nothing moved it
+#   again: three of the five ReportStatus values were unreachable, the whole
+#   ApprovalDecision enum was unused, and report.approved sat in events.yaml's
+#   deferred: block. SEIP could evaluate a teacher end to end and produce the
+#   document, but nobody could sign it.
+#
+#   Approval REQUIRES the report's round to be closed (RPT-003). Nothing checked
+#   round state at report creation or generation, and scores only freeze on close
+#   (SCORE-002) — so approving earlier would stamp a signature on scores that can
+#   still change, producing a document its own data later contradicts.
+#
+#   `Report.status` gains no new values: `approved` was always in the enum and in
+#   the generated types, so no client breaks. This only makes it reachable.
+#   `rejected`, `issued` and `superseded` remain deliberately unreachable — see
+#   CCR-016 decisions 2 and the deferred list for why inventing semantics for them
+#   would be worse than leaving them unused.
 # Protected contract (contract-policy.md): changes now require a Contract Change
 # Request + version bump. Additive changes → 1.x / 2.x minor; breaking changes →
 # next major with a migration plan. The CI gate "contract compatibility" fails
@@ -27,11 +87,33 @@ openapi: 3.1.0
 # fields outside it.
 info:
   title: SEIP API
-  version: 2.6.0
-  summary: School Evidence Intelligence Platform — core API (evidence workflow + PA evaluation + reports/AI + PDF)
+  version: 3.1.0
+  summary: School Evidence Intelligence Platform — core API (onboarding + agreements + evidence workflow + PA evaluation + reports/approval/AI + PDF)
   description: |
-    Contract v2.6 (CCR-011 cleanup M2) — Report.payload is typed ReportPayload
-    (schema_version=1). v2.5 lazy file download; v2.4 list scan_status; core remains
+    Contract v3.1 (CCR-016) — report approval. A director endorses a generated PA
+    report, or returns it with a reason so it can be regenerated. Approval is only
+    permitted once the round is closed, because scores stay mutable until then and
+    a signature on mutable scores is a document that can contradict itself.
+
+    v3.0 (CCR-015) — performance agreements (แบบ PA1) and ประเด็นท้าทาย.
+    A teacher writes their own agreement, states the challenge they are taking on
+    with its method and quantitative/qualitative targets, submits it, and the
+    director acknowledges it. The committee then sees that text while scoring the
+    three indicators that rate it — before v3.0 they scored 40% of the result
+    blind. Breaking: `AssignmentCreate.agreement_id` is gone; the server derives it.
+
+    v2.9 (CCR-014) — onboarding: a school_admin can invite people into
+    their school and an invitee can set their own password. Until v2.9 the API
+    could evaluate a teacher but could not create one. Note what is *not* here by
+    design: creating the first admin, and creating schools/areas. Both need
+    authority no role holds (area_admin is read-only across its area) and both
+    ship as operator CLIs instead — CCR-014 decisions 1 and 2.
+
+    v2.8 (CCR-013) — AssignmentDetail carries the evaluatee's rank so
+    scoring can show the seeded per-rank expected-practice text. v2.7 ScanStatus
+    gains `unscanned`: a deployment with no malware scanner now says so instead of
+    claiming `clean`. v2.6 typed
+    ReportPayload; v2.5 lazy file download; v2.4 list scan_status; core remains
     evidence, PA evaluation, reports, AI suggest.
 
     **Business rules that bind every implementation**
@@ -69,6 +151,8 @@ security:
 tags:
   - name: auth
     description: Authentication and session identity
+  - name: members
+    description: School membership, personnel and invitations (school admin). School-scoped like every other resource — there is no cross-school write anywhere in this contract.
   - name: taxonomy
     description: Read-only versioned indicator taxonomy (ADR-0003) and evidence categories
   - name: cycles
@@ -77,6 +161,8 @@ tags:
     description: Evidence metadata and two-phase file upload
   - name: mappings
     description: Governed evidence↔indicator mappings (human-confirmed; AI may suggest)
+  - name: agreements
+    description: Performance agreements (แบบ PA1) and ประเด็นท้าทาย — written by the evaluatee, acknowledged by the director
   - name: scoring
     description: Committee assignments and per-evaluator scoring
   - name: reports
@@ -129,6 +215,41 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '400': { $ref: '#/components/responses/ValidationError' }
 
+  /auth/accept-invite:
+    post:
+      operationId: acceptInvite
+      summary: Set the initial password for an invited account (CCR-014)
+      description: |
+        The invite token in the body IS the credential — the invitee has no
+        password yet and therefore cannot hold a bearer token. Single-use: the
+        token is cleared in the same transaction that stores the password hash,
+        and the account moves `invited` → `active`.
+
+        Deliberately does NOT return a token pair. The caller logs in normally
+        afterwards, so SEC-AUTH-3 (`invited` accounts cannot authenticate) stays
+        enforced in exactly one place — `login`.
+
+        Unknown, expired and already-used tokens are indistinguishable (AUTH-005),
+        and the endpoint is throttled on the same limiter as login (SEC-AUTH-5),
+        because the token is guessable in principle.
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptInviteRequest' }
+      responses:
+        '204':
+          description: Password set; the account is now active and may log in
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429':
+          description: AUTH-004 — too many attempts (SEC-AUTH-5)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /auth/logout:
     post:
       operationId: logout
@@ -161,6 +282,126 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CurrentUser' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /personnel:
+    get:
+      operationId: listPersonnel
+      summary: Personnel of the caller's school (CCR-014)
+      description: |
+        Resolves personnel UUIDs to names. Readable by `evaluator` as well as
+        `director`/`school_admin` because a committee member must be able to see
+        who they are scoring — before v2.9 four screens rendered raw UUIDs as
+        primary user-facing text.
+
+        Returns identity needed to pick and display a person, not their evaluation
+        record — no scores, no agreements, no evidence.
+      tags: [members]
+      parameters:
+        - name: status
+          in: query
+          description: Defaults to active only; pass `all` to include former personnel.
+          schema: { type: string, enum: [active, inactive, all], default: active }
+        - name: position_role
+          in: query
+          description: Filter to one framework family (ว9 teacher vs ว10 administrator).
+          schema: { $ref: '#/components/schemas/RoleFamily' }
+      responses:
+        '200':
+          description: Personnel of the caller's school
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PersonnelSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /members:
+    get:
+      operationId: listMembers
+      summary: Accounts holding a membership in the caller's school (school admin)
+      tags: [members]
+      parameters:
+        - name: status
+          in: query
+          description: Defaults to current memberships (no effective_to in the past).
+          schema: { type: string, enum: [current, all], default: current }
+      responses:
+        '200':
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Member' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: inviteMember
+      summary: Invite a person into the caller's school (school admin)
+      description: |
+        Creates the `UserAccount` (status `invited`, no password), the
+        `SchoolMembership`, and — when `personnel` is present — the
+        `PersonnelProfile`, in one transaction.
+
+        The school is taken from the caller's own membership and is NOT a body
+        field. Accepting a client-supplied school id here would make this
+        operation a cross-tenant account factory.
+
+        `personnel` is optional because an external committee `evaluator` belongs
+        to the school without being evaluated by it — the same reason
+        `CurrentUser.personnel` is nullable (CCR-002).
+
+        The returned `invite_token` is shown **once** and is not retrievable
+        afterwards; the admin passes it to the invitee out of band. There is no
+        email dependency by design: an on-prem deployment (ADR-0005) may have no
+        SMTP relay at all.
+
+        Inviting an email that already holds a current membership in this school
+        is a conflict (RES-002), not a second membership.
+      tags: [members]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberInvite' }
+      responses:
+        '201':
+          description: Invited — `invite_token` is returned exactly once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberInviteResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /members/{membershipId}/end:
+    post:
+      operationId: endMembership
+      summary: End a membership, revoking access to this school (school admin)
+      description: |
+        Sets `effective_to` to today. Offboarding, not deletion — evaluation
+        history stays intact and attributable.
+
+        There is deliberately no way to backdate: `effective_to` records when
+        access was actually revoked, and a past date would assert access ended
+        earlier than it did.
+
+        Idempotent — ending an already-ended membership returns it unchanged.
+      tags: [members]
+      parameters:
+        - $ref: '#/components/parameters/MembershipId'
+      responses:
+        '200':
+          description: Membership ended
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
   /frameworks:
     get:
@@ -476,7 +717,7 @@ paths:
     post:
       operationId: completeFileUpload
       summary: 'Phase 2: confirm bytes uploaded; register file and enqueue virus scan'
-      description: Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served only when scan_status=clean (UPL-006).
+      description: Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served when scan_status is clean or unscanned; blocked/pending return UPL-006.
       tags: [evidence]
       parameters:
         - $ref: '#/components/parameters/EvidenceId'
@@ -507,8 +748,10 @@ paths:
       description: |
         Lazy download (CCR-010 / cleanup H2). Call only when the user intends to
         download — `getEvidence` and `completeFileUpload` never presign object
-        storage. Requires `scan_status=clean` (UPL-006); pending/blocked return
-        UPL-006. Same tenancy grants as `getEvidence`. Never returns `storage_uri`.
+        storage. Requires `scan_status` to be `clean` or `unscanned` (CCR-012 —
+        unscanned means no scanner ran, which is disclosed rather than blocked);
+        `pending`/`blocked` return UPL-006. Same tenancy grants as `getEvidence`.
+        Never returns `storage_uri`.
       tags: [evidence]
       parameters:
         - $ref: '#/components/parameters/EvidenceId'
@@ -644,6 +887,147 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Mapping' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /agreements:
+    get:
+      operationId: listAgreements
+      summary: Performance agreements visible to the caller
+      description: |
+        A teacher sees their own; a director or school_admin sees the school's; an
+        evaluator sees those of the people they sit on a committee for.
+      tags: [agreements]
+      parameters:
+        - name: cycle_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AgreementStatus' }
+      responses:
+        '200':
+          description: Agreements
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Agreement' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createAgreement
+      summary: File a performance agreement for a cycle (แบบ PA1)
+      description: |
+        One agreement per (cycle, personnel) — a second attempt is AGR-001, not a
+        second row. The challenge is written as part of the agreement rather than
+        through its own endpoint: it has no independent lifecycle, and an agreement
+        with an orphan challenge is not a state worth modelling.
+
+        Starts in `draft`. Content stays editable until `submitAgreement`.
+      tags: [agreements]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgreementCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /agreements/{agreementId}:
+    get:
+      operationId: getAgreement
+      summary: One agreement with its ประเด็นท้าทาย
+      tags: [agreements]
+      parameters:
+        - $ref: '#/components/parameters/AgreementId'
+      responses:
+        '200':
+          description: Agreement detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateAgreement
+      summary: Edit a draft agreement and its challenge
+      description: |
+        Draft only. Once submitted, the content is frozen (AGR-002): editing a
+        submitted agreement would let an evaluatee rewrite the targets they are
+        about to be scored against, and editing an acknowledged one would rewrite
+        what the director signed.
+      tags: [agreements]
+      parameters:
+        - $ref: '#/components/parameters/AgreementId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgreementPatch' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /agreements/{agreementId}/submit:
+    post:
+      operationId: submitAgreement
+      summary: Submit a draft agreement for the director to acknowledge
+      description: |
+        draft → submitted, and the content freezes. Requires a challenge to exist —
+        submitting an agreement with no ประเด็นท้าทาย would hand the committee an
+        empty 40% to score, which is the defect this whole contract version exists
+        to close (AGR-002).
+      tags: [agreements]
+      parameters:
+        - $ref: '#/components/parameters/AgreementId'
+      responses:
+        '200':
+          description: Submitted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /agreements/{agreementId}/acknowledge:
+    post:
+      operationId: acknowledgeAgreement
+      summary: Director acknowledges a submitted agreement (ผอ. เห็นชอบ)
+      description: |
+        submitted → acknowledged. Never available to the evaluatee, even though
+        they hold `own` on the agreement — acknowledging your own commitments is
+        not a signature.
+      tags: [agreements]
+      parameters:
+        - $ref: '#/components/parameters/AgreementId'
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgreementDetail' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -819,6 +1203,105 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /reports/{reportId}/approvals:
+    get:
+      operationId: listReportApprovals
+      summary: The decision trail for a report (CCR-016)
+      description: |
+        Grants match `getReport` rather than the narrower write grants: a subject
+        who can read their own result but not who endorsed it would be a strange
+        kind of transparency.
+
+        Append-only — there is no operation that edits or removes a decision, and
+        that is what makes the signature mean anything.
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: Decisions, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Approval' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reports/{reportId}/approve:
+    post:
+      operationId: approveReport
+      summary: Endorse a generated report (ผอ. ลงนาม)
+      description: |
+        `pending_approval` → `approved`, recording an Approval row with the actor
+        and timestamp.
+
+        **Requires the report's round to be closed** (RPT-003). Scores only freeze
+        when a round closes (SCORE-002), so approving earlier would timestamp a
+        signature against numbers that can still change — the document would later
+        contradict its own data with nothing to show for it. Reports with
+        `round_id = null` are cycle-level and skip the check; there is no round to
+        freeze.
+
+        The evaluatee may never approve their own report, even where their role
+        holds the grant — a director is an evaluatee too under ว10, and
+        `permissions.yaml` cannot express "any grant except over yourself".
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalDecisionInput' }
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /reports/{reportId}/return:
+    post:
+      operationId: returnReport
+      summary: Return a report for rework (ส่งกลับให้แก้ไข)
+      description: |
+        `pending_approval` → `draft`, so the report can be regenerated once
+        whatever was wrong is fixed.
+
+        `comment` is REQUIRED here, unlike on approve: sending a result back with
+        no stated reason gives the person who has to fix it nothing to act on.
+
+        Note there is no "reject". A report renders scores that already exist, so
+        marking one rejected while that data stands unchanged would be a
+        contradiction rather than a state — if the result itself is wrong, the
+        remedy is to reopen the round and rescore. `ApprovalDecision.rejected`
+        stays unused on purpose (CCR-016 decision 2).
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalReturnInput' }
+      responses:
+        '200':
+          description: Returned to draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportDetail' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
   /reports/{reportId}/pdf:
     get:
       operationId: getReportPdf
@@ -878,6 +1361,16 @@ components:
       schema: { type: string, format: uuid }
     ReportId:
       name: reportId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    MembershipId:
+      name: membershipId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AgreementId:
+      name: agreementId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -945,6 +1438,12 @@ components:
     Role:
       type: string
       enum: [teacher, director, deputy, evaluator, school_admin, area_admin]
+    UserStatus:
+      type: string
+      description: |
+        `invited` — created but has never set a password; cannot authenticate
+        (SEC-AUTH-3). `disabled` — deactivated; also cannot authenticate.
+      enum: [active, disabled, invited]
     EvaluationKind:
       type: string
       enum: [pa, dpa]
@@ -973,7 +1472,17 @@ components:
       description: PA form family × ส/บส variant (layout deferred; code selects payload shape)
     ScanStatus:
       type: string
-      enum: [pending, clean, blocked]
+      enum: [pending, clean, unscanned, blocked]
+      description: |
+        `pending` — queued, the worker has not processed the file yet.
+        `clean` — a scanner ran and found nothing.
+        `unscanned` — the file was processed but NO scanner ran, so the platform
+        makes no claim about its contents (CCR-012). This is the state on any
+        deployment without a malware scanner wired in. It is served like `clean`
+        — the distinction is disclosure, not restriction — and clients are
+        expected to surface it so nobody reads silence as a clean bill of health.
+        `blocked` — quarantined: a scanner rejected it, or the stored object did
+        not match the declared byte_size. Never served (UPL-006).
     RubricLevel:
       type: integer
       minimum: 1
@@ -1038,6 +1547,109 @@ components:
               membership_scope: { type: string, enum: [school, area] }
               school_id: { type: [string, 'null'], format: uuid }
               area_id: { type: [string, 'null'], format: uuid }
+
+    PersonnelSummary:
+      type: object
+      description: Enough to identify and display a person; not their evaluation record.
+      required: [id, full_name, position_role, rank_level_code, status]
+      properties:
+        id: { type: string, format: uuid }
+        full_name: { type: string }
+        employee_code: { type: [string, 'null'] }
+        position_role:
+          $ref: '#/components/schemas/RoleFamily'
+        rank_level_code:
+          type: string
+          description: วิทยฐานะ tier code — same vocabulary as CurrentUser.personnel.rank_level_code
+          examples: [teacher_kru, teacher_chamnankan]
+        status: { type: string, enum: [active, inactive] }
+
+    Member:
+      type: object
+      description: One person's membership in the caller's school, with their account state.
+      required: [membership_id, user_id, email, display_name, role, user_status, effective_from]
+      properties:
+        membership_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        user_status: { $ref: '#/components/schemas/UserStatus' }
+        effective_from: { type: string, format: date }
+        effective_to:
+          description: Null while the membership is current. Set by endMembership.
+          type: [string, 'null']
+          format: date
+        personnel:
+          description: Present when this member is also evaluatee-capable personnel. Null for an external evaluator (CCR-002 shape).
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/PersonnelSummary'
+
+    MemberInvite:
+      type: object
+      description: |
+        No `school_id` — the school is the caller's own. A body-supplied school
+        would turn this into a cross-tenant account factory, so the field does
+        not exist rather than being validated away.
+      required: [email, display_name, role]
+      properties:
+        email:
+          type: string
+          format: email
+          description: Stored lowercase; the server lowercases before insert (a CHECK constraint compares the value against its own lowercase form as BINARY).
+          maxLength: 320
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        role: { $ref: '#/components/schemas/Role' }
+        personnel:
+          description: |
+            Omit for a member who is not evaluated by this school (an external
+            committee `evaluator`). When present, `rank_level_code` must belong to
+            the same role family as `position_role` — a mismatch selects the wrong
+            framework's rubric and is rejected with VAL-003.
+          type: object
+          required: [full_name, position_role, rank_level_code]
+          properties:
+            full_name: { type: string, minLength: 1, maxLength: 200 }
+            employee_code: { type: [string, 'null'], maxLength: 50 }
+            position_role: { $ref: '#/components/schemas/RoleFamily' }
+            rank_level_code: { type: string }
+
+    MemberInviteResult:
+      type: object
+      description: The invite token appears here and nowhere else, ever.
+      required: [member, invite_token, invite_expires_at]
+      properties:
+        member: { $ref: '#/components/schemas/Member' }
+        invite_token:
+          description: |
+            Single-use secret. Only its hash is stored, so this value cannot be
+            recovered after this response — re-invite if it is lost. Deliver it
+            out of band; never log it (SEC-AUTH-1 applies to any credential).
+
+            **Null when the invited email already belongs to an account that has
+            a password.** That case is a real one — a teacher moving schools, or
+            an external evaluator serving two — and it grants the new membership
+            without issuing a credential. Issuing one would let any school_admin
+            take over any account in the system by "inviting" its email: an
+            admin-triggered password reset wearing an onboarding hat. The person
+            simply logs in with the password they already have.
+          type: [string, 'null']
+        invite_expires_at:
+          description: Null exactly when `invite_token` is null.
+          type: [string, 'null']
+          format: date-time
+
+    AcceptInviteRequest:
+      type: object
+      required: [invite_token, password]
+      properties:
+        invite_token: { type: string }
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+          description: Chosen by the invitee. The inviting admin never sees or sets it.
 
     Framework:
       type: object
@@ -1217,7 +1829,7 @@ components:
         scan_status:
           description: |
             Aggregate of attached files (CCR-009). null when there are no files.
-            Worst-of order: pending > blocked > clean. Present on list and detail so
+            Worst-of order: pending > blocked > unscanned > clean. Present on list and detail so
             clients never need N+1 detail fetches for list badges.
           oneOf:
             - type: 'null'
@@ -1432,12 +2044,114 @@ components:
         committee_role: { type: string, enum: [chair, member] }
         seat_number: { type: integer, minimum: 1, maximum: 3 }
 
+    AgreementStatus:
+      type: string
+      description: |
+        `draft` — editable by the evaluatee. `submitted` — content frozen, awaiting
+        the director. `acknowledged` — ผอ. เห็นชอบ; this is what a committee scores
+        against.
+      enum: [draft, submitted, acknowledged]
+
+    AgreementChallenge:
+      type: object
+      description: |
+        ประเด็นท้าทาย — one per agreement, matching the single challenge on the PA1
+        form. The three text fields are what indicators C.1 / C.2.1 / C.2.2 rate
+        (20 / 10 / 10 points), so they are the evidence behind 40% of the result.
+      required: [id, indicator_id, title, method_plan]
+      properties:
+        id: { type: string, format: uuid }
+        indicator_id:
+          type: string
+          format: uuid
+          description: The framework's วิธีดำเนินการ indicator (T-C.1 / A-C.1) — the anchor this challenge is filed under.
+        title:
+          type: string
+          description: ประเด็นท้าทาย เรื่อง … — the subject of the challenge.
+        method_plan:
+          type: string
+          description: วิธีดำเนินการ — scored by C.1 (20 points).
+        quantitative_target:
+          type: [string, 'null']
+          description: ผลลัพธ์เชิงปริมาณ — the target C.2.1 is scored against (10 points).
+        qualitative_target:
+          type: [string, 'null']
+          description: ผลลัพธ์เชิงคุณภาพ — the target C.2.2 is scored against (10 points).
+        target_group: { type: [string, 'null'], description: กลุ่มเป้าหมาย — not scored. }
+        period_note: { type: [string, 'null'], description: ช่วงเวลาดำเนินการ — not scored. }
+
+    AgreementChallengeInput:
+      type: object
+      required: [title, method_plan]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 500 }
+        method_plan: { type: string, minLength: 1, maxLength: 5000 }
+        quantitative_target: { type: [string, 'null'], maxLength: 5000 }
+        qualitative_target: { type: [string, 'null'], maxLength: 5000 }
+        target_group: { type: [string, 'null'], maxLength: 500 }
+        period_note: { type: [string, 'null'], maxLength: 500 }
+
+    Agreement:
+      type: object
+      required: [id, school_id, cycle_id, personnel_id, form_variant, status]
+      properties:
+        id: { type: string, format: uuid }
+        school_id: { type: string, format: uuid }
+        cycle_id: { type: string, format: uuid }
+        personnel_id: { type: string, format: uuid }
+        form_variant:
+          type: string
+          enum: [PA1_s, PA1_bs]
+          description: /ส for teachers (ว9), /บส for administrators (ว10). Derived from the personnel's position_role, not chosen by the client.
+        status: { $ref: '#/components/schemas/AgreementStatus' }
+        submitted_at: { type: [string, 'null'], format: date-time }
+
+    AgreementDetail:
+      allOf:
+        - $ref: '#/components/schemas/Agreement'
+        - type: object
+          properties:
+            challenge:
+              description: Null while still being drafted; required before the agreement can be submitted.
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/AgreementChallenge'
+
+    AgreementCreate:
+      type: object
+      description: |
+        No `school_id` and no `form_variant` — both are derived (the school from
+        the caller's membership, the variant from the personnel's position_role).
+        `personnel_id` is required rather than implied because a school_admin may
+        file on behalf of staff, but it is validated against the caller's school
+        and against the `own` grant for an evaluatee filing their own.
+      required: [cycle_id, personnel_id]
+      properties:
+        cycle_id: { type: string, format: uuid }
+        personnel_id: { type: string, format: uuid }
+        challenge:
+          description: Optional at creation so an agreement can be started and finished later; required by the time it is submitted.
+          $ref: '#/components/schemas/AgreementChallengeInput'
+
+    AgreementPatch:
+      type: object
+      description: Draft only (AGR-002). Omitted fields are left unchanged.
+      properties:
+        challenge: { $ref: '#/components/schemas/AgreementChallengeInput' }
+
     AssignmentCreate:
       type: object
+      description: |
+        No `agreement_id` (removed in 3.0.0, CCR-015). PerformanceAgreement is
+        unique per (cycle, personnel) and the assignment knows both, so the server
+        derives it. It used to be accepted from the body and passed through
+        unvalidated, which let one person's assignment be attached to another
+        person's agreement — and since workload_declaration is unique per
+        (agreement, round), that made the ภาระงาน gate read and write the wrong
+        person's row.
       required: [evaluatee_personnel_id, committee]
       properties:
         evaluatee_personnel_id: { type: string, format: uuid }
-        agreement_id: { type: [string, 'null'], format: uuid }
         committee:
           type: array
           minItems: 3
@@ -1449,8 +2163,21 @@ components:
       allOf:
         - $ref: '#/components/schemas/Assignment'
         - type: object
-          required: [workload_gate_declared, my_submission_state, framework_version_id]
+          required: [workload_gate_declared, my_submission_state, framework_version_id, evaluatee_rank_level_code]
           properties:
+            challenge:
+              description: |
+                The evaluatee's ประเด็นท้าทาย, read-only (CCR-015). This is the
+                whole point of contract v3.0: indicators C.1 / C.2.1 / C.2.2 carry
+                40% of the result and rate the method and targets recorded here, so
+                without it the committee was scoring free text they had never seen.
+
+                Null when the evaluatee has no agreement for this cycle yet — the
+                scoring UI must say so rather than render an empty field, because
+                "no challenge filed" and "challenge left blank" are different facts.
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/AgreementChallenge'
             workload_gate_declared: { type: boolean }
             workload_met: { type: [boolean, 'null'] }
             my_submission_state:
@@ -1463,6 +2190,15 @@ components:
               description: |
                 Framework pinned by the assignment's cycle (CCR-009). Clients use this
                 to load taxonomy for scoring — no graph walk over cycles/rounds.
+            evaluatee_rank_level_code:
+              type: string
+              examples: [apply_adapt]
+              description: |
+                วิทยฐานะ of the person being evaluated (CCR-013). IndicatorLevel rows
+                are keyed by (rank_level_code, rubric_level), so without this a client
+                cannot tell which rank's expected-practice text applies and is forced
+                to invent generic rubric labels — which is what apps/web did. There is
+                no personnel lookup operation, so this cannot be resolved client-side.
 
     ScoreSubmission:
       type: object
@@ -1591,6 +2327,59 @@ components:
             section_refs:
               type: array
               items: { $ref: '#/components/schemas/ReportSectionRef' }
+            approvals:
+              description: |
+                Decision trail, oldest first (CCR-016). Empty until someone acts.
+                Present on the detail response so a client does not need a second
+                call just to render "who signed this and when".
+              type: array
+              items: { $ref: '#/components/schemas/Approval' }
+
+    Approval:
+      type: object
+      description: One recorded decision on a report. Append-only.
+      required: [id, report_id, approver_user_id, step_code, decision, decided_at]
+      properties:
+        id: { type: string, format: uuid }
+        report_id: { type: string, format: uuid }
+        approver_user_id: { type: string, format: uuid }
+        step_code:
+          type: string
+          description: |
+            Which step in the approval sequence this decision belongs to. Always
+            `director` today — SEIP has one step, and a configurable chain would be
+            a workflow engine built for a workflow that does not exist yet
+            (CCR-016 decision 1). A second step later is additive: a new value here
+            and a rule about ordering, no migration.
+          examples: [director]
+        decision:
+          type: string
+          description: |
+            `rejected` is absent by design, not by omission — see returnReport.
+            `pending` is not emitted either: a row is only written when a decision
+            is actually taken.
+          enum: [approved, returned]
+        comment: { type: [string, 'null'] }
+        decided_at:
+          description: |
+            Nullable because the column must accommodate a `pending` row. Nothing
+            writes one — a row is only created when a decision is actually taken —
+            so in practice this is always set. Typed honestly rather than asserting
+            a timestamp the schema does not guarantee.
+          type: [string, 'null']
+          format: date-time
+
+    ApprovalDecisionInput:
+      type: object
+      properties:
+        comment: { type: [string, 'null'], maxLength: 2000 }
+
+    ApprovalReturnInput:
+      type: object
+      description: Unlike approve, a reason is required — see returnReport.
+      required: [comment]
+      properties:
+        comment: { type: string, minLength: 1, maxLength: 2000 }
 
     # Mirrors packages/backend-shared ReportPayloadV1 (cleanup M2 / CCR-011).
     # generation_status=pending: only base fields; ready: full nested structure.

@@ -1,6 +1,20 @@
 // Deterministic fixtures for Playwright depth e2e (SEIP-QA-004 / cleanup L2).
-// Requires DATABASE_URL + migrated DB (seed taxonomy recommended).
+// Requires DATABASE_URL + a migrated DB (seed taxonomy recommended) AND a running
+// API — see E2E_API_URL below.
 // Does NOT require the worker: ready report payload is written directly for PDF tests.
+//
+// WHICH FIXTURES MAY WRITE DIRECTLY, AND WHY (keep this list honest — the
+// 2026-07-19 audit found a green suite hiding an unusable product because a
+// direct write manufactured a row the product itself could not create):
+//   - identity (users, school, memberships, personnel) — stands in for
+//     scripts/ops/bootstrap-admin.mjs, which is an operator CLI by design
+//     (CCR-014 decision 1). Everything after the first admin goes through HTTP.
+//   - cycle, round, assignment, ready report payload — scaffolding for the flows
+//     under test, all of which DO have working operations; converting them is
+//     desirable but not load-bearing for any known blocker.
+//   - PerformanceAgreement — NO LONGER. It goes through the API since CCR-015.
+//     That one row was SEIP-BLOCK-002: nothing in the product could create it, so
+//     writing it here made the whole scoring path look reachable when it was not.
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { hash as argonHash } from '@node-rs/argon2';
@@ -19,6 +33,51 @@ const E2E_EVAL2_EMAIL = process.env.E2E_EVAL2_EMAIL ?? 'e2e-eval2@seip.local';
 const E2E_EVAL2_PASSWORD = process.env.E2E_EVAL2_PASSWORD ?? 'e2e-eval2-password-1234';
 const E2E_EVAL3_EMAIL = process.env.E2E_EVAL3_EMAIL ?? 'e2e-eval3@seip.local';
 const E2E_EVAL3_PASSWORD = process.env.E2E_EVAL3_PASSWORD ?? 'e2e-eval3-password-1234';
+// CCR-014. Stands in for `scripts/ops/bootstrap-admin.mjs` — the one identity
+// that is legitimately created outside the API, because bootstrapping the first
+// admin is a CLI by design (CCR-014 decision 1). Everyone the onboarding spec
+// creates goes through HTTP from here on.
+const E2E_ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'e2e-admin@seip.local';
+const E2E_ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'e2e-admin-password-1234';
+
+// The API the fixtures talk to. Defaults to the port .env.example ships and the
+// Vite dev proxy targets; CI can override.
+const E2E_API_URL = process.env.E2E_API_URL ?? 'http://127.0.0.1:3011/api/v1';
+
+async function apiLogin(email, password) {
+  const res = await fetch(`${E2E_API_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    // Fail loudly. A silent fallback to a direct DB write is exactly what let a
+    // green suite hide an unusable product (docs/qa/QUALITY-GATES.md § caveats).
+    throw new Error(
+      `[e2e setup] login failed for ${email} (${res.status}). Is the API running on ${E2E_API_URL}? ` +
+      'Fixtures go through HTTP on purpose since CCR-015 — they must not fall back to Prisma.',
+    );
+  }
+  return (await res.json()).access_token;
+}
+
+async function apiPost(token, path, body) {
+  const res = await fetch(`${E2E_API_URL}${path}`, {
+    method: 'POST',
+    // content-type only when there IS a body: Fastify rejects an empty body that
+    // declares application/json (FST_ERR_CTP_EMPTY_JSON_BODY), and several of
+    // these operations (submit, acknowledge) legitimately take none.
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(body ? { 'content-type': 'application/json' } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!res.ok) {
+    throw new Error(`[e2e setup] POST ${path} failed (${res.status}): ${await res.text()}`);
+  }
+  return res.status === 204 ? null : res.json();
+}
 
 async function ensureUser(prisma, {
   email, password, displayName, schoolId, role, withPersonnel, positionRole = 'teacher',
@@ -119,6 +178,15 @@ export default async function globalSetup() {
       positionRole: 'teacher',
     });
 
+    await ensureUser(prisma, {
+      email: E2E_ADMIN_EMAIL,
+      password: E2E_ADMIN_PASSWORD,
+      displayName: 'E2E Admin',
+      schoolId: school.id,
+      role: 'school_admin',
+      withPersonnel: false,
+    });
+
     const eval2 = await ensureUser(prisma, {
       email: E2E_EVAL2_EMAIL,
       password: E2E_EVAL2_PASSWORD,
@@ -142,10 +210,28 @@ export default async function globalSetup() {
     let assignmentId = null;
     let readyReportId = null;
 
-    const fw = await prisma.frameworkVersion.findFirst({
-      where: { status: 'active', roleFamily: 'teacher' },
-      orderBy: { revisionYear: 'desc' },
+    // Selected BY CODE, not by "newest active teacher framework".
+    //
+    // The old query was a guess that happened to work. Every leftover
+    // `frameworkVersion` an integration suite creates with status `active` and
+    // revisionYear 2564 ties with the real one, so the winner was whichever row
+    // the database returned first — and on 2026-07-20 that was a 3-indicator
+    // `rpt-fw-*` fixture with no challenge indicator. The whole e2e run silently
+    // moved onto a framework that is not the product's, and only failed later,
+    // deep in agreement creation, with "framework has no challenge indicator".
+    //
+    // e2e exists to exercise the seeded ว9/2564 taxonomy (ADR-0003). Naming it
+    // makes that explicit and makes a missing seed fail here, with a sentence
+    // saying what to run, instead of somewhere downstream.
+    const fw = await prisma.frameworkVersion.findUnique({
+      where: { code: 'v9-2564-teacher' },
     });
+    if (!fw) {
+      throw new Error(
+        '[e2e setup] framework `v9-2564-teacher` not found — run `npm run db:seed` '
+        + '(ADR-0003: the taxonomy is seed data, never hard-coded)',
+      );
+    }
 
     if (fw && teacher.personnelId) {
       let cycle = await prisma.evaluationCycle.findFirst({
@@ -189,19 +275,29 @@ export default async function globalSetup() {
       }
       roundId = round.id;
 
+      // CCR-015: created through the HTTP API, not `prisma.performanceAgreement
+      // .create(...)`. The direct write that used to live here is why a fully
+      // green e2e run coexisted with a system where no score could be submitted
+      // through the API at all — the fixture manufactured the one row the product
+      // could not. Going through the real operations means this setup now fails
+      // loudly if agreements break, instead of papering over them.
       let agreement = await prisma.performanceAgreement.findFirst({
         where: { schoolId: school.id, cycleId: cycle.id, personnelId: teacher.personnelId },
       });
       if (!agreement) {
-        agreement = await prisma.performanceAgreement.create({
-          data: {
-            schoolId: school.id,
-            cycleId: cycle.id,
-            personnelId: teacher.personnelId,
-            formVariant: 'PA1_s',
-            status: 'submitted',
+        const teacherToken = await apiLogin(E2E_TEACHER_EMAIL, E2E_TEACHER_PASSWORD);
+        const created = await apiPost(teacherToken, '/agreements', {
+          cycle_id: cycle.id,
+          personnel_id: teacher.personnelId,
+          challenge: {
+            title: 'ยกระดับผลสัมฤทธิ์การอ่านของนักเรียนชั้น ป.3',
+            method_plan: 'ใช้ชุดกิจกรรมการอ่านเชิงรุกสัปดาห์ละ 2 คาบ ควบคู่กับการวัดผลรายบุคคล',
+            quantitative_target: 'นักเรียนร้อยละ 80 มีคะแนนการอ่านเพิ่มขึ้นอย่างน้อย 10%',
+            qualitative_target: 'นักเรียนมีเจตคติที่ดีต่อการอ่านและเลือกหนังสืออ่านเองได้',
           },
         });
+        await apiPost(teacherToken, `/agreements/${created.id}/submit`);
+        agreement = await prisma.performanceAgreement.findUnique({ where: { id: created.id } });
       }
 
       let assignment = await prisma.evaluationAssignment.findFirst({
@@ -230,6 +326,18 @@ export default async function globalSetup() {
               },
             },
           },
+        });
+      }
+      // Repair a pre-existing assignment that is not linked to the current
+      // agreement. Without this the fixture is only correct on a virgin database:
+      // an assignment created in an earlier run keeps whatever agreementId it had,
+      // and a null one makes every scoring test fail at SCORE-004 with no hint as
+      // to why. Found exactly that way while converting this file to HTTP.
+      if (assignment.agreementId !== agreement.id) {
+        assignment = await prisma.evaluationAssignment.update({
+          where: { id: assignment.id },
+          data: { agreementId: agreement.id },
+          include: { committee: true },
         });
       }
       assignmentId = assignment.id;
@@ -296,6 +404,7 @@ export default async function globalSetup() {
     writeFileSync(AUTH_STATE, JSON.stringify({
       teacher: { email: E2E_TEACHER_EMAIL, password: E2E_TEACHER_PASSWORD },
       director: { email: E2E_DIRECTOR_EMAIL, password: E2E_DIRECTOR_PASSWORD },
+      admin: { email: E2E_ADMIN_EMAIL, password: E2E_ADMIN_PASSWORD },
       schoolId: school.id,
       teacherPersonnelId: teacher.personnelId,
       cycleId,

@@ -11,8 +11,10 @@ import { mappingRoutes } from './routes/mappings.js';
 import { cycleRoutes } from './routes/cycles.js';
 import { scoringRoutes } from './routes/scoring.js';
 import { reportRoutes } from './routes/reports.js';
+import { memberRoutes } from './routes/members.js';
+import { agreementRoutes } from './routes/agreements.js';
 import { createS3Client, ensureBucket } from './lib/s3.js';
-import { configureLoginRateLimiterFromEnv } from './lib/login-rate-limit.js';
+import { configureLoginRateLimiterFromEnv, configureInviteRateLimiterFromEnv } from './lib/login-rate-limit.js';
 
 export async function buildServer() {
   const env = loadEnv();
@@ -20,6 +22,9 @@ export async function buildServer() {
   const trustProxy = env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true';
   // Process-global singleton (MVP). Edge limit_req remains primary for multi-instance.
   configureLoginRateLimiterFromEnv(process.env);
+  // Separate bucket so onboarding a batch of teachers cannot throttle logins for
+  // the rest of the school behind the same NAT'd IP (CCR-014).
+  configureInviteRateLimiterFromEnv(process.env);
 
   const app = Fastify({
     logger: env.NODE_ENV !== 'test',
@@ -44,6 +49,8 @@ export async function buildServer() {
     await v1.register(cycleRoutes);
     await v1.register(scoringRoutes);
     await v1.register(reportRoutes);
+    await v1.register(memberRoutes);
+    await v1.register(agreementRoutes);
   }, { prefix: '/api/v1' });
 
   if (env.NODE_ENV !== 'test') {

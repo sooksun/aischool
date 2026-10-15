@@ -20,7 +20,7 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 | Build | `npm run build` | `Gate: build` | self-arming | `scripts.build` defined |
 | Migration validation | `npx prisma validate` (DB-001 extends: `migrate diff` up/down) | `Gate: migration validation` | self-arming | `prisma/schema.prisma` exists |
 | Permission tests | `npm run test:security` — asserts the `permissions.yaml` matrix (esp. cross-school RES-001) | `Gate: permission tests` | self-arming | files in `tests/security/` |
-| E2E smoke | `npm run test:e2e` (Playwright: login → evidence list → open submit) | `Gate: e2e smoke` | **LIVE** (SEIP-QA-004) | always; needs Postgres+MinIO+api+web |
+| E2E smoke | `npm run test:e2e` (Playwright: login → evidence list → open submit) | `Gate: e2e smoke` | **LIVE** (SEIP-QA-004) | always; needs MySQL 8 + MinIO + api + web (ADR-0008) |
 | Code owner review | — (not a CI job) | branch protection + CODEOWNERS | policy | requires branch protection (below) |
 
 **Pass thresholds:** every gate is binary (exit 0). `dep-audit` fails on **high+** advisories. oasdiff fails on **breaking** changes only (additive contract changes pass). Secret scan fails on any leak — a confirmed false positive gets an inline `// gitleaks:allow` comment on the exact flagged line (gitleaks' native line-level suppression), with a code comment explaining why it isn't a real secret, reviewed in the same PR. Never skip the gate to work around one. (A repo-wide `.gitleaks.toml` allowlist was tried first for SEIP-API-001's one false positive — `credentials: { ..., secretAccessKey: env.S3_SECRET_KEY }`, gitleaks' `generic-api-key` rule matching the *identifier* `secretAccessKey:` regardless of the RHS being a literal or a variable reference — but its regex/fingerprint matching didn't reliably suppress findings already baked into git history when run through the pinned docker image; the inline comment is simpler, guaranteed to work per-line, and keeps the justification next to the code it excuses.)
@@ -28,6 +28,31 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 **Why the contract check runs on push, not just PRs:** ADR-0004 sanctions committing straight to `develop`, so a PR-only breaking-change check would almost never execute in the real workflow. On `push` it diffs against `github.event.before`; on `pull_request`, against the target branch. Both paths fail the build on a breaking change without an accompanying version bump.
 
 **Authz coverage (SEC-TEN-5):** `gate:contracts` fails if any `operationId` in `openapi.yaml` lacks either a rule in the `permissions.yaml` matrix or an explicit entry under `unauthenticated:` / `any_authenticated:`. An endpoint cannot ship with undocumented authorization.
+
+## Coverage caveats — what a green run does NOT prove
+
+Added 2026-07-19 after a full code audit found the suite passing on a system that cannot be deployed. **A green gate bounds only what it actually exercised.** Every known place where the gates' coverage is narrower than their name suggests is listed here. Keeping this list honest is part of the gate.
+
+**Rule going forward:** any test fixture that reaches past the API — direct Prisma writes, hand-seeded rows, mocked auth — **must be recorded in this section** in the same change that introduces it. A fixture that manufactures state the product cannot manufacture makes the suite prove the wrong thing.
+
+| Caveat | Evidence | Consequence |
+|---|---|---|
+| ~~**Fixtures bypass the API to create state the product cannot create**~~ — **closed 2026-07-19** | `grep -rn "performanceAgreement.create" apps/ tests/` returns only the repository that implements it. CCR-014 made identity rows creatable (`tests/e2e/onboarding.spec.ts` onboards a teacher through the browser); CCR-015 did the same for agreements, and `global-setup.mjs` now **fails loudly** if the API is unreachable rather than falling back to a direct write | What remains is scaffolding for flows that *do* have working operations (cycle, round, assignment, ready-report payload) — desirable to convert, but no longer capable of hiding an unreachable path. The one identity still created outside the API is the bootstrap admin, an operator CLI by design (CCR-014 decision 1) |
+| ~~**Permission sweep covers 28 of 31 matrix operations**~~ — **closed 2026-07-19** | Sweep now covers **40 of 41** rows (`permission-matrix.test.mjs`, 240 assertions). `completeFileUpload` and `getEvidenceFileDownloadUrl` were added and immediately reported 3 mismatches — all three were the sweep not knowing those ops are ownership-gated, not enforcement bugs | The single remaining exclusion is `getAssignmentResults`, excluded *deliberately* with a documented reason and covered by `scoring-flow.test.mjs:333` |
+| **No coverage instrumentation exists anywhere** | no `coverage` config in any vite/vitest config or `package.json` | The 164 test cases have no denominator. "Unit tests pass" says nothing about what fraction of the code ran |
+| **Three e2e tests skip silently green** | `tests/e2e/flows-depth.spec.ts:82`, `:107`, `:127` — `test.skip(!creds.…)` | If `global-setup.mjs` half-fails in CI, the three deepest flows vanish and the build still reports success. A CI-only `throw` would close this |
+| **One e2e assertion is still too soft** — *half closed 2026-07-19* | The create-report test now asserts the report list actually grew by one, not just that the form closed. **Still soft:** the PDF test asserts only `/\.pdf$/i` on the suggested filename | A 0-byte or HTML-error body saved as `.pdf` still passes. Asserting on downloaded bytes is the fix |
+| **`Gate: integration tests` does not run the integration suites** | root `test:integration` in `package.json` is byte-identical to `test:backend` (`node --test "tests/backend/*.test.mjs"`) | The job name overstates it. Saved only because `ci.yml:226-231` invokes the three workspace suites separately. Also `ci.yml:216` creates the MinIO bucket *after* the step that would need it |
+| ~~**`file.process` performs no malware scan**~~ — **closed 2026-07-20** | ClamAV wired per ADR-0009. `apps/worker/test/clamav-scan.test.mjs` covers the protocol against a real INSTREAM server and, when `CLAMAV_HOST` is set, EICAR against a real clamd; `file-process.test.mjs` covers what the job writes to `scan_status` | The load-bearing assertion is *"an unreachable scanner leaves the file pending — never clean"*. A deployment running `SCAN_PROVIDER=none` still serves `unscanned` files: that is disclosed, not gated. **2026-07-20:** the re-scan sweep added `scanned_at`, so a `clean` status with no receipt is now a detectable contradiction rather than an indistinguishable one — see the row below on nothing verifying the sweep was run |
+| **The backup's object half has never actually run** | `mc` is not installed on the dev machine; `backups/` holds six dumps and zero `objects-*` mirrors | Found 2026-07-20 while re-verifying after a schema change. The MySQL dump is genuinely verified (restored into a scratch DB, 32 tables); the MinIO mirror exits 1 immediately. **The 2026-07-20 close-out reported "a real backup ran and verified 32 tables" without noting that the evidence bytes — the actual PDPA payload — were not in it.** The script behaves correctly (exit 1, `!!! BACKUP FAILED`) and `Dockerfile.backup` installs `mc`, so staging is expected to be fine — but *expected* is the operative word until §5.5 is run there |
+| **Nothing verifies that a deployment actually ran the re-scan sweep** | `npm run rescan:files -- --report` is an operator action; no gate or startup check calls it | Enabling ClamAV covers new uploads only. A store carrying pre-CCR-012 rows keeps serving stub-written `clean` files — downloadable, badged ปลอดภัย, never scanned — until someone runs the sweep. The census names that number, but only if asked. Pre-go-live checklist item, not an automated gate |
+| **`dep-audit` ignores moderate advisories** | `npm audit --audit-level=high` | Moderate CVEs pass silently. Deliberate, noted here for completeness |
+| ~~**Integration suites never delete what they create**~~ — **closed 2026-07-20** | `tests/helpers/db-cleanup.mjs`, wired into all 9 API suites, both worker suites, the database evidence suite and both security suites. Measured from an **all-zero baseline** after `db:reset`: 144 tests leave `school=0 evidence=0 files=0 users=0 jobs=0 outbox=0 mappings=0 cycles=0 reports=0` | Latent for months, and only mattered once the ADR-0009 sweep started reading the whole store: a fixture row registered without ever putting an object in MinIO is indistinguishable from production evidence whose bytes were lost. `audit_event` is deliberately still never deleted — the immutability trigger refuses, correctly. **A zero baseline is what makes this measurable**: against the old 994-row database a delta of zero could hide a partial failure, and it did — three suites looked clean by delta and were not |
+| ~~**e2e picked its framework by guessing**~~ — **fixed 2026-07-20** | `global-setup.mjs` selected `findFirst({status:'active', roleFamily:'teacher'}, orderBy revisionYear desc)`. Now selects `v9-2564-teacher` **by code**, and throws a sentence naming `npm run db:seed` if it is missing | Every leftover suite framework is created `active`, `teacher`, `revisionYear 2564` — identical on every field the query sorted by, so the winner was whichever row MySQL returned first. On the first post-reset e2e run that was a 3-indicator `rpt-fw-*` fixture with no challenge indicator: the entire e2e run silently moved onto a framework that is not the product's, then failed deep inside agreement creation with `SYS-001 framework has no challenge indicator`. **A leaked framework is worse than a leaked row — it shadows the seeded ว9 taxonomy (ADR-0003).** Frameworks are not school-scoped, so teardown missed them until `created.addFramework(...)` |
+| **Two classes of fixture are invisible to school-scoped teardown** | Users with no school link (`score-foreign-*`, `session-attacker-*`) and **area-scoped memberships** (`area_admin` carries `schoolId = NULL` by contract, `membershipScope: 'area'`) | Both are deliberate — a non-member proving they cannot score, an area role proving it is read-only across schools — so both need `created.addUser(...)`, and the helper clears area memberships only for users named that way. Any new fixture that is intentionally school-less must do the same or it leaks silently, with green tests |
+| **Test files share one database, one MinIO and one worker-job queue** | `node:test` runs files in parallel processes against the same MySQL, the same bucket and the same `worker_job` table. `reports-and-ai.test.mjs` calls `runOnce`, which claims **one** job — a sibling file's `file.process` job can be the one it takes | Surfaced 2026-07-19 as a ~2-in-3 flake once the CCR-014/CCR-015 suites made the queue busier. Fixed by looping until *that* job is claimed rather than assuming the next one is yours. **Any future test that calls `runOnce` must do the same.** Separately, on 2026-07-20 the `apps/worker` suite was observed failing 4 of 8 once when run in a compound command alongside other suites; **not reproducible in 5 subsequent runs**, cause not established, recorded here so a recurrence is investigated rather than dismissed as noise. A gate that fails at random is a gate people learn to ignore. **2026-07-20:** adding teardown surfaced two real robustness bugs of the same shape in `outbox.ts` and `jobs.ts` — see the row below |
+| ~~**A single vanished row aborts an entire dispatch/poll cycle**~~ — **fixed 2026-07-20** | `markOutboxPublished`/`markOutboxFailed` and `markJobDone`/`markJobFailed`/`markJobTerminalFailed` used `update`, which throws P2025 when the row is gone. Now `updateMany`, returning a count | Both loops *claim* with a proper compare-and-swap and then completed with a call that assumed exclusive ownership of a row they had merely read. Worse, in each loop the recovery handler made the same call — so a P2025 in the `try` produced a second P2025 in the `catch`, which propagated out and abandoned every other claimed item in the batch. Found because test teardown began deleting rows concurrently, but nothing about it is test-only: any retention job, operator cleanup, or second worker would do the same. Regression test: `outbox-claim.test.mjs` "an event that disappears between claim and publish does not abort its batch" |
+| **No SAST, no container image scan, no license check** | `.github/workflows/ci.yml` has no CodeQL/Trivy/Grype job despite three Dockerfiles | Image and code-level vulnerability classes are entirely unexamined |
 
 ## Release gates (run before tagging a release from main — not CI jobs yet)
 
@@ -58,12 +83,12 @@ Gate: e2e smoke
 Local (API already on `PORT` matching Vite proxy, default proxy `3011`):
 
 ```bash
-# terminal 1: Postgres + MinIO via docker compose, then:
+# terminal 1: MinIO via docker compose (DB is the host's Laragon MySQL 8, ADR-0008), then:
 export DATABASE_URL=... JWT_SECRET=... S3_*=... PORT=3011
 npm run build:libs && npm run build --workspace apps/api
 node apps/api/dist/index.js
 
-# terminal 2:
+# terminal 2 (optional — playwright.config spawns vite itself when E2E_BASE_URL is unset):
 npm run dev --workspace apps/web
 
 # terminal 3:
@@ -71,7 +96,15 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-CI starts Postgres, MinIO, migrate+seed, API, Vite, then Playwright Chromium.
+**Windows PowerShell 5.1:** `&&` is a parser error — chain with `;` or separate
+lines (`docker compose up -d; npm run db:migrate; npm run db:seed`), and set env
+vars as `$env:DATABASE_URL = "..."` before `npm run test:e2e` (global-setup needs
+it to seed fixtures). The spawned vite is forced to `--host 127.0.0.1` in
+playwright.config.ts because on Windows vite's default host can bind IPv6-only
+(`[::1]`), which the IPv4 `baseURL` poll never reaches (found 2026-07-18 — the
+local webServer path had never actually run on Windows before that).
+
+CI starts MySQL 8, MinIO, migrate+seed, API, Vite, then Playwright Chromium.
 Fixture users from `tests/e2e/global-setup.mjs`:
 - `e2e-teacher@seip.local` — evidence upload + reports nav
 - `e2e-director@seip.local` — cycles, create report, PDF, chair scoring
@@ -111,6 +144,40 @@ passing on the same tree that introduced CCR-008 + the committee-integrity fix:
 | `npm run gate:contracts` | exit 0 — openapi 2.3.0, generated types + constants in sync |
 | `npm run gate:ownership` | exit 0 |
 | `npm run gate:dep-audit` | exit 0 — 0 vulnerabilities |
+
+## Verified runs (2026-07-18, local — full suite incl. e2e, Windows host)
+
+Against the shared dev compose stack (:5433/:9000), migrate deploy (no pending) +
+seed (792 level rows). All green: `test:backend` 19/19 · api integration 29/29 ·
+worker 9/9 · database 9/9 · `test:security` 3/3 · `typecheck` all workspaces ·
+gates ownership/contracts/dep-audit exit 0 · **`test:e2e` 10/10** — the first
+time the L2 depth specs ever ran green anywhere (CI does not run on `feat/*`
+branches, and the local webServer path was broken on Windows — see the
+PowerShell/IPv4 note above). The run surfaced and fixed **5 authoring bugs in
+`flows-depth.spec.ts`** (substring locators hitting "ไม่ผ่าน…", regex passed to
+`selectOption`, missing shell-wait before `page.goto` mid-login, missing
+`page.reload()` before asserting sessionStorage rotation) — all test bugs; no
+app defects found. Two first-run-only flakes (1× api integration, 2× worker
+file-process) appeared on the cold stack and vanished on re-run — consistent
+with cross-suite state in the shared dev DB; the disposable-stack discipline
+above remains the recommendation for release verification.
+
+## Verified runs (2026-07-18, local — ADR-0008 MySQL migration, full suite + e2e)
+
+Engine switched PostgreSQL → **MySQL 8.0.30** (Laragon host server, ADR-0008);
+migrations rebaselined (init + constraints in MySQL dialect), backend raw-SQL
+tests ported pg → mysql2. Everything re-verified on the same day against
+`mysql://root@localhost:3306/seip`:
+
+| Command | Result |
+|---|---|
+| `npm run db:migrate` + `db:seed` | exit 0 — 2 migrations, 792 level rows (432+360) |
+| `npm run test:backend` | 19/19 — CHECKs, BINARY email check, trigger-maintained `active_uk_key`, generated `pa_uk_key` + threshold, append-only triggers all enforced by MySQL itself |
+| `npm run test:integration --workspace apps/api` | 29/29 (one Prisma JSON-path filter ported to `'$.field'` form) |
+| worker / database / security suites | 9/9 · 9/9 · 3/3 |
+| `npm run typecheck` / `lint` / `build` / `test:unit` | all green (one cast added: evidence.ts UPL-001 `allowed_mime_types` Json) |
+| `npm run gate:ownership` / `gate:contracts` | exit 0 — contracts untouched by the engine swap |
+| **`npm run test:e2e`** | **10/10** — upload → scan-gated download, session refresh, report + PDF, chair scoring, all against Laragon MySQL |
 
 **Branch protection (user action still required):** `test:unit` / `test:integration` /
 `test:security` / `typecheck` / `build` / `lint` are armed and green but NOT in the

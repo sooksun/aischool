@@ -17,7 +17,9 @@ import {
   resetLoginRateLimiterState,
   setLoginRateLimiter,
 } from '../dist/lib/login-rate-limit.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
 
+const created = trackSchools();
 const prisma = new PrismaClient();
 let app;
 let email;
@@ -44,9 +46,9 @@ before(async () => {
       passwordHash: await argonHash(password),
     },
   });
-  const school = await prisma.school.create({
+  const school = created.add(await prisma.school.create({
     data: { code: `rate-${randomUUID()}`, name: 'Rate School' },
-  });
+  }));
   await prisma.schoolMembership.create({
     data: {
       userId: user.id,
@@ -60,6 +62,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   // Restore process singleton so other test files are not throttled (M4).
   restoreAfterSuite?.();
   setLoginRateLimiter(new LoginRateLimiter({

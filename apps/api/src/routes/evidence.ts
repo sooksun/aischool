@@ -81,10 +81,20 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
 
     // 'own' forces the filter to the caller regardless of what the client asked for
     // — this is the enforcement point, not a UI nicety (SEC-TEN-1 applied to roles,
-    // not just schools).
-    let ownerFilter = grant === 'own' ? auth.personnel?.id : q.owner_personnel_id;
-    if (grant === 'own' && q.owner_personnel_id && q.owner_personnel_id !== auth.personnel?.id) {
-      throw new ApiError('PERM-001', "own-scoped role may not list another owner's evidence");
+    // not just schools). No personnel profile => DENY, never an absent filter: an
+    // undefined ownerPersonnelId reaches Prisma as "no owner constraint at all",
+    // which silently widens 'own' to the entire school (2026-07-18 audit).
+    let ownerFilter: string | undefined;
+    if (grant === 'own') {
+      if (!auth.personnel) {
+        throw new ApiError('PERM-001', 'own-scoped role has no personnel profile at this school');
+      }
+      if (q.owner_personnel_id && q.owner_personnel_id !== auth.personnel.id) {
+        throw new ApiError('PERM-001', "own-scoped role may not list another owner's evidence");
+      }
+      ownerFilter = auth.personnel.id;
+    } else {
+      ownerFilter = q.owner_personnel_id;
     }
 
     let ownerFilterIn: string[] | undefined;
@@ -247,17 +257,31 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     const category = await getEvidenceCategoryById(evidence.categoryId);
     if (!category) throw new ApiError('SYS-001', "evidence's own category vanished");
 
-    if (!category.allowedMimeTypes.includes(body.content_type)) {
+    // allowed_mime_types is a JSON column since ADR-0008 (MySQL has no scalar
+    // lists) — seed/tests only ever write a string array into it.
+    const allowedMimeTypes = (category.allowedMimeTypes ?? []) as string[];
+    if (!allowedMimeTypes.includes(body.content_type)) {
       throw new ApiError('UPL-001', `content type ${body.content_type} not allowed for category ${category.code}`,
-        [{ field: 'content_type', issue: `must be one of: ${category.allowedMimeTypes.join(', ')}` }]);
+        [{ field: 'content_type', issue: `must be one of: ${allowedMimeTypes.join(', ')}` }]);
     }
     if (category.maxByteSize && BigInt(body.byte_size) > category.maxByteSize) {
       throw new ApiError('UPL-002', `file exceeds ${category.maxByteSize} bytes for category ${category.code}`);
     }
-    // CCR-002: duration is fail-fast ONLY when the client supplied it — the server
-    // probe (worker, not yet implemented) is the true UPL-003 authority post-upload.
-    if (category.maxDurationSeconds && body.duration_seconds && body.duration_seconds > category.maxDurationSeconds) {
-      throw new ApiError('UPL-003', `duration ${body.duration_seconds}s exceeds ${category.maxDurationSeconds}s for category ${category.code}`);
+    // Duration cap (ว9 inspiration video <= 600s). The client MUST declare a
+    // duration for a capped category: the old `body.duration_seconds &&` guard
+    // short-circuited when the field was absent, so simply omitting it skipped the
+    // rule — and no later stage recovered it, because the worker's "probe" is an
+    // estimate derived from byte size, not a measurement (2026-07-18 audit).
+    // Until a real probe (ffprobe) exists, initiate is the only honest gate, so it
+    // must refuse to guess rather than wave the upload through.
+    if (category.maxDurationSeconds && body.content_type.startsWith('video/')) {
+      if (body.duration_seconds == null) {
+        throw new ApiError('VAL-002', `duration_seconds is required for category ${category.code} (max ${category.maxDurationSeconds}s)`,
+          [{ field: 'duration_seconds', issue: 'required for a duration-capped category' }]);
+      }
+      if (body.duration_seconds > category.maxDurationSeconds) {
+        throw new ApiError('UPL-003', `duration ${body.duration_seconds}s exceeds ${category.maxDurationSeconds}s for category ${category.code}`);
+      }
     }
 
     // fileId + the object key are deterministic from (schoolId, evidenceId, fileId,
@@ -267,7 +291,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     // initiate (client never completes) leaves no row to clean up.
     const fileId = randomUUID();
     const key = evidenceObjectKey(schoolId, evidenceId, fileId, body.original_filename);
-    const { uploadUrl, expiresAt } = await presignUpload(s3, env.S3_BUCKET, key, body.content_type);
+    const { uploadUrl, expiresAt } = await presignUpload(s3, env.S3_BUCKET, key, body.content_type, body.byte_size);
 
     reply.status(201).send({
       file_id: fileId, upload_url: uploadUrl, method: 'PUT', headers: { 'Content-Type': body.content_type },
@@ -344,8 +368,13 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
 
     const file = detail.files.find((f) => f.id === fileId);
     if (!file) throw new ApiError('RES-001', 'Evidence file not found');
-    if (file.scanStatus !== 'clean') {
-      throw new ApiError('UPL-006', 'File is not available for download until scan_status=clean');
+    // CCR-012: 'unscanned' is served like 'clean'. It means no scanner ran, which
+    // is disclosed through scan_status rather than enforced here — blocking it
+    // would stop the product working on every deployment without a scanner, and
+    // the alternative this replaced was labelling those same files 'clean'.
+    // 'pending' (worker hasn't run) and 'blocked' (quarantined) stay refused.
+    if (file.scanStatus !== 'clean' && file.scanStatus !== 'unscanned') {
+      throw new ApiError('UPL-006', `File is not available for download (scan_status=${file.scanStatus})`);
     }
 
     const { downloadUrl, expiresAt } = await presignDownload(
