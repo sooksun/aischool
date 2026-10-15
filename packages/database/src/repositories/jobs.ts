@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../client.js';
 
-export type WorkerJobType = 'file.process' | 'storage.gc' | 'report.generate' | 'evidence.analyze' | 'export.build';
+export type WorkerJobType = 'file.process' | 'storage.gc' | 'report.generate' | 'evidence.analyze' | 'export.build' | 'reminders.run';
 
 export interface EnqueueJobInput {
   jobType: WorkerJobType | string;

@@ -5,6 +5,7 @@ import {
   markJobFailed,
   markJobTerminalFailed,
   enqueueWorkerJob,
+  remindDueSubjectRequests,
 } from '@seip/database';
 import type { Env } from './env.js';
 import { processFileJob, type FileProcessPayload } from './jobs/file-process.js';
@@ -17,7 +18,8 @@ import { processExportBuild, type ExportBuildPayload } from './jobs/export-build
 let gcScheduled = false;
 
 export interface RunOnceOptions {
-  /** When true (default), ensure a storage.gc job is queued once per process. */
+  /** When true (default), ensure the hourly maintenance jobs (storage.gc,
+   * reminders.run) are queued once per process. */
   scheduleGc?: boolean;
 }
 
@@ -39,6 +41,8 @@ export async function runOnce(
       payload: {},
       availableAt: new Date(),
     });
+    // FR-100: due-date reminders for data-subject requests (CCR-029), hourly.
+    await enqueueWorkerJob({ jobType: 'reminders.run', payload: {}, availableAt: new Date() });
     gcScheduled = true;
   }
 
@@ -57,6 +61,9 @@ export async function runOnce(
           payload: {},
           availableAt: new Date(Date.now() + 60 * 60 * 1000),
         });
+      } else if (job.jobType === 'reminders.run') {
+        await remindDueSubjectRequests();
+        await enqueueWorkerJob({ jobType: 'reminders.run', payload: {}, availableAt: new Date(Date.now() + 60 * 60 * 1000) });
       } else if (job.jobType === 'export.build') {
         await processExportBuild(env, s3, job.payload as unknown as ExportBuildPayload);
       } else if (job.jobType === 'evidence.analyze') {

@@ -78,5 +78,5 @@ Two supporting changes:
 
 - Carrying out correction, erasure, restriction and objection in the system. They are done by hand and recorded here; erasure has retention rules (FR-117 "under the retention period") still to design.
 - A DPO approval step before the person's own self-service export: self-service stays (SEIP-P5-001).
-- Reminders before the due date (FR-100), and email delivery.
+- Email delivery. Due-date reminders were added the same day, with no contract change. The hourly `reminders.run` worker job tells the area's DPOs once per milestone: 7 days, 1 day and overdue. It uses the existing `deadline` kind and is tested in `apps/worker/test/reminders.test.mjs`.
 - Revoking a DPO appointment, other than ending the membership in the database.

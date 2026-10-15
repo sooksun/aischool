@@ -2,6 +2,7 @@
 // the DPO of the filing school's area decides. Approving access / portability
 // queues the person's portfolio export and the request completes when that
 // export is ready; any other type is carried out by hand and then completed.
+import { createHash } from 'node:crypto';
 import type { Prisma, SubjectRequestStatus, SubjectRequestType } from '@prisma/client';
 import { prisma } from '../client.js';
 import { writeAuditEvent } from '../audit.js';
@@ -156,6 +157,59 @@ export async function completeSubjectRequestForExport(exportId: string): Promise
 }
 
 export { OPEN as OPEN_SUBJECT_REQUEST_STATUSES };
+
+// ── due-date reminders (FR-100 "คำขอใช้สิทธิใกล้ครบกำหนด") ──
+
+/** Milestones before due_at, largest first; `overdue` once it has passed. */
+export const SUBJECT_REQUEST_REMINDER_DAYS = [7, 1] as const;
+type Milestone = `due_${number}d` | 'overdue';
+
+function milestoneFor(dueAt: Date, now: Date): Milestone | null {
+  const left = dueAt.getTime() - now.getTime();
+  if (left <= 0) return 'overdue';
+  const days = [...SUBJECT_REQUEST_REMINDER_DAYS].sort((a, b) => a - b).find((d) => left <= d * DAY_MS);
+  return days === undefined ? null : `due_${days}d`;
+}
+
+/** A stable id per (request, milestone): the notification's unique (source, user) key makes each reminder fire once. */
+function reminderKey(requestId: string, milestone: Milestone): string {
+  const h = createHash('sha256').update(`subject-request-reminder:${requestId}:${milestone}`).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+/**
+ * Tells each DPO of the area, once per milestone, about an open request that
+ * falls due within 7 days, within 1 day, or is overdue. A milestone passed while
+ * the worker was down is not replayed — the current one is what matters. The
+ * text carries neither the person's name nor the details. Returns rows created.
+ */
+export async function remindDueSubjectRequests(now = new Date()): Promise<number> {
+  const horizon = new Date(now.getTime() + Math.max(...SUBJECT_REQUEST_REMINDER_DAYS) * DAY_MS);
+  const open = await prisma.subjectRequest.findMany({
+    where: { status: { in: OPEN }, dueAt: { lte: horizon } },
+    select: { id: true, areaId: true, dueAt: true },
+  });
+  const dpos = new Map<string, string[]>();
+  let created = 0;
+  for (const r of open) {
+    const m = milestoneFor(r.dueAt, now);
+    if (!m) continue;
+    if (!dpos.has(r.areaId)) dpos.set(r.areaId, await listAreaDpoUserIds(r.areaId));
+    const userIds = dpos.get(r.areaId)!;
+    if (userIds.length === 0) continue;
+    const days = Math.ceil((r.dueAt.getTime() - now.getTime()) / DAY_MS);
+    const titleTh = m === 'overdue' ? 'คำขอใช้สิทธิของเจ้าของข้อมูลเกินกำหนดแล้ว' : `คำขอใช้สิทธิของเจ้าของข้อมูลจะครบกำหนดในอีก ${days} วัน`;
+    const res = await prisma.notification.createMany({
+      data: userIds.map((userId) => ({
+        userId, kind: 'deadline' as const, titleTh, bodyTh: 'กำหนดนี้ยังไม่ได้ยืนยันทางกฎหมาย — ใช้เป็นคำเตือน',
+        entityType: 'SubjectRequest', entityId: r.id, route: '/dpo/requests', sourceEventId: reminderKey(r.id, m),
+      })),
+      skipDuplicates: true,
+    });
+    created += res.count;
+  }
+  return created;
+}
 
 // ── DPO appointments (area-scoped memberships) ──
 

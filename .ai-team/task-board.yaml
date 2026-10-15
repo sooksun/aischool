@@ -2318,7 +2318,7 @@ tasks:
       carried out by hand. due_at = +30 days, a warning only (NFR-PDPA-05 unverified).
       The DPO reads no school data. The sweep proves it, and the "no grant, no foothold"
       routes now answer PERM-001 for area roles. Not done: in-system erasure/correction,
-      due-date reminders, revoking an appointment.
+      revoking an appointment. (Due-date reminders added the same day: an hourly reminders.run worker job.)
     acceptance_criteria:
       - "person files; only they and their area's DPO see it; another area RES-001; area admin PERM-001"  # DONE — subject-requests.test
       - "approve access → export queued → completed on export.ready; DPO cannot see the export"  # DONE — subject-requests.test
@@ -2326,5 +2326,6 @@ tasks:
       - "area admin appoints / lists DPOs; step-up on appointDpo and decideSubjectRequest"  # DONE — subject-requests.test, step-up.test
       - "dpo in the permission sweep on every operation"  # DONE — test:security
       - "web: file + follow; DPO queue; appoint on the area page"  # DONE — e2e privacy-requests.spec
+      - "DPO reminded before the due date (7 d, 1 d, overdue), once per milestone"  # DONE 2026-10-15 — worker reminders.test (hourly reminders.run job, kind deadline)
       - "carry out correction / erasure / restriction in the system"  # NOT STARTED — retention rules to design
 
