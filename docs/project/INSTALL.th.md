@@ -81,10 +81,29 @@ SEIP_ADMIN_EMAIL=admin@school.ac.th SEIP_ADMIN_PASSWORD='…' \
 
 ## 6. เปิดให้ผู้ใช้เข้า (HTTPS)
 
-ตัว `web` ฟังที่ `127.0.0.1:8080` เท่านั้น. วาง nginx หน้าเครื่องตาม
-[`infra/nginx/seip-staging.conf.example`](../../infra/nginx/seip-staging.conf.example)
-(TLS, จำกัดอัตราการ login, security headers; ส่ง `/api/` และ `/seip-evidence/` ต่อให้ระบบ).
-ใบรับรองห้าม commit.
+ตัว `web` ฟังที่ `127.0.0.1:8080` เท่านั้น. เลือกอย่างใดอย่างหนึ่ง:
+
+- **ง่ายที่สุด — Caddy ในชุด (ขอใบรับรองให้อัตโนมัติ):** ตั้ง DNS ของโดเมนชี้มาเครื่องนี้ เปิดพอร์ต 80/443
+  แล้วเพิ่มใน `.env.staging`: `SEIP_DOMAIN=seip.school.ac.th` และ `SEIP_PUBLIC_ORIGIN=https://seip.school.ac.th`
+  จากนั้น `$C --profile edge up -d` (ดู [`infra/caddy/Caddyfile`](../../infra/caddy/Caddyfile))
+- **มี reverse proxy อยู่แล้ว:** ใช้ [`infra/nginx/seip-staging.conf.example`](../../infra/nginx/seip-staging.conf.example)
+  (TLS, จำกัดอัตราการ login, security headers; ส่ง `/api/` และ `/seip-evidence/` ต่อให้ระบบ). ใบรับรองห้าม commit.
+
+## 6b. ติดตั้ง/อัปเดตอัตโนมัติจาก GitHub ผ่าน SSH
+
+workflow [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) ทำข้อ 2–6 ให้ทั้งหมดบนเซิร์ฟเวอร์
+แล้วรัน smoke ผ่าน HTTPS จริง. รหัสผ่านของระบบ (ฐานข้อมูล, JWT, ที่เก็บไฟล์) **สร้างบนเซิร์ฟเวอร์** ใน
+`/opt/seip/shared/.env.staging` และไม่ผ่าน GitHub.
+
+1. บนเซิร์ฟเวอร์: ติดตั้ง Docker + Compose v2, สร้างผู้ใช้ deploy ในกลุ่ม `docker`, `sudo mkdir -p /opt/seip && sudo chown deploy /opt/seip`,
+   ใส่ public key ของ deploy key ใน `~deploy/.ssh/authorized_keys`, ตั้ง DNS ของโดเมนชี้มาเครื่องนี้ และเปิดพอร์ต 80/443 (และพอร์ต SSH ให้ GitHub เข้าได้)
+2. ใน GitHub: **Settings → Environments → New environment** ชื่อ `seip-production` แล้วใส่
+   - Secrets: `SEIP_DEPLOY_HOST`, `SEIP_DEPLOY_USER`, `SEIP_DEPLOY_SSH_KEY` (private key), `SEIP_DEPLOY_KNOWN_HOSTS`
+     (ผลของ `ssh-keyscan -t ed25519 <host>` ที่คุณตรวจแล้ว), `SEIP_ADMIN_PASSWORD`
+   - Variables: `SEIP_DOMAIN`, `SEIP_ADMIN_EMAIL`, `SEIP_SCHOOL_CODE`, `SEIP_SCHOOL_NAME` (และถ้าต้องการ `SEIP_DEPLOY_PORT`, `SEIP_ACME_EMAIL`)
+3. **Actions → deploy → Run workflow** (หรือ push tag `deploy-…`). ต้องจบด้วย `✓ https://… is installed and working`.
+
+อัปเดตเวอร์ชันครั้งต่อไปก็รัน workflow เดิม — migration รันเอง, ข้อมูลและรหัสผ่านเดิมคงอยู่, เก็บ release ย้อนหลัง 3 ชุดใน `/opt/seip/releases`.
 
 ## 7. หลังติดตั้ง
 

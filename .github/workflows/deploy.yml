@@ -1,0 +1,108 @@
+# Deploy SEIP to the owner's server over SSH, then prove it works over HTTPS.
+#
+# Triggers: a tag `deploy-*` pushed on any commit, or "Run workflow" (manual).
+# Everything server-specific lives in the GitHub environment `seip-production`
+# (Settings → Environments), so nothing about the host is in the repository:
+#
+#   secrets  SEIP_DEPLOY_HOST         server address (IP or name)
+#            SEIP_DEPLOY_USER         SSH user in the docker group (or root)
+#            SEIP_DEPLOY_SSH_KEY      private key for that user (ed25519, no passphrase)
+#            SEIP_DEPLOY_KNOWN_HOSTS  `ssh-keyscan -t ed25519 <host>` output, verified by you
+#            SEIP_ADMIN_PASSWORD      first school admin's password (≥ 12 chars)
+#   vars     SEIP_DOMAIN              e.g. seip.school.ac.th (DNS → the server; 80/443 open)
+#            SEIP_ADMIN_EMAIL         first school admin's email
+#            SEIP_SCHOOL_CODE         e.g. SCH-001      SEIP_SCHOOL_NAME  (optional)
+#            SEIP_DEPLOY_PORT         optional, default 22
+#            SEIP_ACME_EMAIL          optional, TLS certificate contact
+#            SEIP_EDGE                optional, "caddy" (default) or "none"
+#
+# The server needs Docker Engine + Compose v2, openssl and curl. Secrets for the
+# stack itself (database, JWT, storage) are generated ON the server at the first
+# deploy (scripts/ops/deploy-remote.sh) and never pass through GitHub.
+name: deploy
+
+on:
+  push:
+    tags: ['deploy-*']
+  workflow_dispatch:
+    inputs:
+      smoke:
+        description: 'Run smoke-install after deploying (adds a test teacher + 1 item to the school)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-seip-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to the server
+    runs-on: ubuntu-latest
+    environment: seip-production
+    timeout-minutes: 60
+    env:
+      HOST: ${{ secrets.SEIP_DEPLOY_HOST }}
+      USER_: ${{ secrets.SEIP_DEPLOY_USER }}
+      PORT_: ${{ vars.SEIP_DEPLOY_PORT || '22' }}
+      ROOT: /opt/seip
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check configuration
+        run: |
+          missing=""
+          for v in HOST USER_; do [ -n "${!v}" ] || missing="$missing $v"; done
+          [ -n "${{ vars.SEIP_DOMAIN }}" ] || missing="$missing vars.SEIP_DOMAIN"
+          [ -n "${{ secrets.SEIP_DEPLOY_SSH_KEY }}" ] || missing="$missing secrets.SEIP_DEPLOY_SSH_KEY"
+          [ -n "${{ secrets.SEIP_DEPLOY_KNOWN_HOSTS }}" ] || missing="$missing secrets.SEIP_DEPLOY_KNOWN_HOSTS"
+          [ -z "$missing" ] || { echo "::error::environment seip-production is missing:$missing"; exit 1; }
+      - name: SSH setup
+        env:
+          KEY: ${{ secrets.SEIP_DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.SEIP_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          (umask 077; printf '%s\n' "$KEY" > ~/.ssh/id_deploy)
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+          printf 'Host seip\n  HostName %s\n  User %s\n  Port %s\n  IdentityFile ~/.ssh/id_deploy\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
+            "$HOST" "$USER_" "$PORT_" > ~/.ssh/config
+          ssh seip 'docker compose version && openssl version && curl --version | head -1'
+      - name: Upload this commit as a release
+        run: |
+          # git archive = tracked files only: no .env, no uploads, no local state.
+          git archive --format=tar HEAD | ssh seip "set -e; d=$ROOT/releases/$GITHUB_SHA; mkdir -p \$d && tar -x -C \$d"
+      - name: Install / update on the server
+        env:
+          SEIP_ADMIN_PASSWORD: ${{ secrets.SEIP_ADMIN_PASSWORD }}
+        run: |
+          # Values travel on stdin, never in the remote command line (visible in ps).
+          {
+            printf 'export SEIP_ROOT=%q SEIP_RELEASE=%q SEIP_DOMAIN=%q SEIP_ACME_EMAIL=%q SEIP_EDGE=%q\n' \
+              "$ROOT" "$GITHUB_SHA" "${{ vars.SEIP_DOMAIN }}" "${{ vars.SEIP_ACME_EMAIL }}" "${{ vars.SEIP_EDGE || 'caddy' }}"
+            printf 'export SEIP_SCHOOL_CODE=%q SEIP_SCHOOL_NAME=%q SEIP_ADMIN_EMAIL=%q SEIP_ADMIN_PASSWORD=%q\n' \
+              "${{ vars.SEIP_SCHOOL_CODE }}" "${{ vars.SEIP_SCHOOL_NAME }}" "${{ vars.SEIP_ADMIN_EMAIL }}" "$SEIP_ADMIN_PASSWORD"
+            cat scripts/ops/deploy-remote.sh
+          } | ssh seip 'bash -s'
+      - uses: actions/setup-node@v4
+        if: ${{ github.event_name == 'push' || inputs.smoke }}
+        with:
+          node-version: 24
+      - name: Use it over HTTPS, as a browser would
+        if: ${{ github.event_name == 'push' || inputs.smoke }}
+        env:
+          SEIP_ADMIN_EMAIL: ${{ vars.SEIP_ADMIN_EMAIL }}
+          SEIP_ADMIN_PASSWORD: ${{ secrets.SEIP_ADMIN_PASSWORD }}
+        run: |
+          # The certificate may take a minute on the first deploy.
+          for i in $(seq 1 36); do
+            curl -sf -o /dev/null "https://${{ vars.SEIP_DOMAIN }}/" && break
+            [ "$i" = 36 ] && { echo "::error::https://${{ vars.SEIP_DOMAIN }}/ unreachable — DNS, ports 80/443, or the edge"; exit 1; }
+            sleep 5
+          done
+          node scripts/ops/smoke-install.mjs --base="https://${{ vars.SEIP_DOMAIN }}" --scan-wait-ms=600000
+      - name: Server state
+        if: always()
+        run: ssh seip "cd $ROOT/current && docker compose -f docker-compose.staging.yml --env-file $ROOT/shared/.env.staging --profile edge ps -a" || true

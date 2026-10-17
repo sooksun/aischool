@@ -2422,7 +2422,10 @@ tasks:
       - apps/api/src/index.ts
       - apps/api/src/lib/s3.ts
       - scripts/ops/smoke-install.mjs
+      - scripts/ops/deploy-remote.sh
+      - infra/caddy/Caddyfile
       - .github/workflows/ci.yml
+      - .github/workflows/deploy.yml
       - docs/project/INSTALL.th.md
       - docs/project/ops-runbook.md
     notes: >
@@ -2453,3 +2456,5 @@ tasks:
       - "seed + first admin on a docker install without publishing the DB"  # DONE — ops service
       - "CI builds the images and drives a fresh install end to end"  # DONE — Gate: deploy smoke green on 6ccbb54 (run 39025756527): 18 migrations, api on the container IP, invite→accept→upload via /seip-evidence/→clamav scan (423 then 200)→download
       - "Thai install guide"  # DONE — docs/project/INSTALL.th.md
+      - "HTTPS edge without hand-made certificates"  # DONE — profile edge (Caddy, infra/caddy/Caddyfile)
+      - "one-click deploy to the owner's server"  # BUILT — .github/workflows/deploy.yml + scripts/ops/deploy-remote.sh (dry-run with stub docker); WAITING for the owner's GitHub environment seip-production (host, SSH key, known_hosts, domain, admin)

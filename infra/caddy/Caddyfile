@@ -1,0 +1,38 @@
+# Edge proxy for a single-host install (docker-compose.staging.yml, profile
+# "edge"). Caddy obtains and renews the TLS certificate for SEIP_DOMAIN by
+# itself (ACME HTTP-01: ports 80 and 443 must reach this host and the domain's
+# DNS must point here). Prefer this over infra/nginx/seip-staging.conf.example
+# unless the school already runs its own reverse proxy.
+#
+# Everything goes to the web container, the stack's one origin: the SPA, /api/
+# and /<bucket>/ (presigned transfers). reverse_proxy keeps the client's Host,
+# which the presigned-URL signature covers. Set SEIP_PUBLIC_ORIGIN to
+# https://<SEIP_DOMAIN>.
+{
+	email {$SEIP_ACME_EMAIL:admin@localhost}
+}
+
+{$SEIP_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# Login throttling: Caddy core has no limit_req, so the api's own per-IP and
+	# per-email limiter (AUTH-004, ops-runbook §4b) is the control here; it sees
+	# the real client IP through X-Forwarded-For (TRUST_PROXY via NODE_ENV).
+	reverse_proxy web:80 {
+		# Stream uploads straight through to the store.
+		flush_interval -1
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+}

@@ -220,6 +220,30 @@ services:
       - "${SEIP_WEB_BIND:-127.0.0.1:8080}:80"
     networks: [seip_internal]
 
+  # Optional HTTPS edge (profile "edge"): automatic certificates for
+  # SEIP_DOMAIN, in front of web. Skip it when the host already has a reverse
+  # proxy (infra/nginx/seip-staging.conf.example). Start with
+  #   docker compose … --profile edge up -d
+  edge:
+    profiles: [edge]
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on:
+      - web
+    environment:
+      # Required with this profile (Caddy refuses an empty site address);
+      # not interpolated as required so the stack works without it.
+      SEIP_DOMAIN: ${SEIP_DOMAIN:-}
+      SEIP_ACME_EMAIL: ${SEIP_ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - seip_staging_caddy_data:/data
+      - seip_staging_caddy_config:/config
+    networks: [seip_internal]
+
   # Operator one-shots, never started by `up` (profile "ops"). Same image as
   # `migrate` — it has the scripts and the pinned toolchain — but connects as
   # seip_app (DML only), which is all seeding and bootstrap need:
@@ -291,3 +315,5 @@ volumes:
   seip_staging_pgdata:
   seip_staging_seaweedfs:
   seip-clamav:
+  seip_staging_caddy_data:
+  seip_staging_caddy_config:
