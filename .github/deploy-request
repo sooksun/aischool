@@ -6,3 +6,4 @@
 2026-10-17  probe 2: re-check seip-production (~12:10 UTC)
 2026-10-17  deploy: owner reports seip-production filled in (aischool.cnppai.com behind NPM)
 2026-10-17  retry: SSH step now normalises SEIP_DEPLOY_HOST and explains a lookup failure
+2026-10-17  retry: key diagnostics + line-break repair (run 6 said the key was unreadable)
