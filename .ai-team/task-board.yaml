@@ -2451,5 +2451,5 @@ tasks:
       - "presigned upload + download work from the browser origin"  # DONE — presign-public-endpoint.test, smoke-install via gateway
       - "api and worker runtime images boot"  # DONE locally (runtime-stage reproduction); CI deploy smoke
       - "seed + first admin on a docker install without publishing the DB"  # DONE — ops service
-      - "CI builds the images and drives a fresh install end to end"  # DONE — Gate: deploy smoke (first run pending at time of writing)
+      - "CI builds the images and drives a fresh install end to end"  # DONE — Gate: deploy smoke green on 6ccbb54 (run 39025756527): 18 migrations, api on the container IP, invite→accept→upload via /seip-evidence/→clamav scan (423 then 200)→download
       - "Thai install guide"  # DONE — docs/project/INSTALL.th.md

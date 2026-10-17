@@ -173,7 +173,7 @@ Docker image builds cannot run in the dev sandbox (no route from build container
 - runtime stage (`npm ci --omit=dev` + copied dist): **crashed on boot** (`could not locate docs/contracts/permissions.yaml`) until the Dockerfiles copy `docs/contracts` (and `assets/fonts` for the PDF); then api + worker boot.
 - `smoke-install.mjs` through the gateway against that runtime: SPA, admin sign-in, taxonomy, invite → accept → sign-in, presigned PUT via the public origin, complete, scan, download, bytes equal — **pass**.
 - `apps/api` integration incl. new `presign-public-endpoint.test.mjs` — see the run below; e2e 25/25 (earlier today).
-- First CI run of `Gate: deploy smoke` is the real-image proof; recorded in PROJECT_STATE.
+- **CI, real images (6ccbb54, run 39025756527): `Gate: deploy smoke` green** — all images built, 18 migrations applied as seip_migrator, api listening on the container IP, worker reached clamd, smoke through `http://127.0.0.1:8080`: SPA 200, login, invite 201, accept 204, evidence 201, PUT `/seip-evidence/…` 200, complete 200, download-url 423 (scanning) then 200, GET object 200, bytes equal.
 
 ## Verified runs (2026-10-15, local — SEIP-P5-002, DPO role + subject requests)
 
