@@ -2,3 +2,4 @@
 # One line per request, newest last.
 2026-10-17  deploy to cnppai.com (/DATA/AppData/www/aischool, SEIP_EDGE=none) — owner request; environment seip-production created by the owner
 2026-10-17  retry: diagnostic run after the first run saw no settings (e18e34f)
+2026-10-17  probe: re-check seip-production after the owner was given the settings checklist
