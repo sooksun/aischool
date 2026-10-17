@@ -3,6 +3,14 @@
 # infra/seaweedfs/s3.dev.json, wait for it, and create $S3_BUCKET. A `services:`
 # container cannot mount a checked-out file or run an init step, hence a script.
 set -euo pipefail
+# Pull first, with retries: Docker Hub answered 502 to one of four parallel
+# jobs pulling this same image (2026-10-17), failing the whole gate for a
+# commit that touched no code. A registry hiccup is not a test result.
+for attempt in 1 2 3 4 5; do
+  docker pull -q chrislusf/seaweedfs:4.48 && break
+  [ "$attempt" = 5 ] && { echo "::error::could not pull chrislusf/seaweedfs:4.48 after 5 attempts"; exit 1; }
+  echo "pull failed (attempt $attempt), retrying in $((attempt * 10))s"; sleep $((attempt * 10))
+done
 # Small volumes, fixed count: each bucket is a collection with its own volumes,
 # and -volume.max=0 ran out after a few buckets on a CI disk (500 on PutObjectPart).
 docker run -d --name seaweedfs -p 8333:8333 \

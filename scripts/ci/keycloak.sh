@@ -6,6 +6,13 @@
 set -euo pipefail
 case "${1:-}" in
   start)
+    # Pull with retries: a Docker Hub 502 failed a sibling gate on 2026-10-17
+    # (see start-seaweedfs.sh); the registry's bad minute is not a test result.
+    for attempt in 1 2 3 4 5; do
+      docker pull -q keycloak/keycloak:26.7.5 && break
+      [ "$attempt" = 5 ] && { echo "::error::could not pull keycloak/keycloak:26.7.5 after 5 attempts"; exit 1; }
+      echo "pull failed (attempt $attempt), retrying in $((attempt * 10))s"; sleep $((attempt * 10))
+    done
     docker run -d --name keycloak -p 8180:8180 \
       -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=seip_kc_admin_dev_only \
       -v "$PWD/infra/keycloak/seip-realm.dev.json:/opt/keycloak/data/import/seip-realm.json:ro" \
