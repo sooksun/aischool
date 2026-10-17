@@ -9,11 +9,12 @@ process.env.NODE_ENV = 'test';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../../prisma/client.mjs';
 import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { processStorageGc } from '../dist/jobs/storage-gc.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const env = {
   S3_ENDPOINT: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
   S3_BUCKET: process.env.S3_BUCKET ?? 'seip-evidence',
@@ -43,20 +44,23 @@ async function objectExists(key) {
  * soft-delete it at a controlled deletedAt. Mirrors file-process.test.mjs's
  * fixture() shape but skips registerEvidenceFileWithWorkerJobs (GC doesn't
  * need a worker_job/outbox row — it operates directly on evidence_file). */
+const created = trackSchools();
+
 async function fixture(deletedAt) {
   const school = await prisma.school.create({
     data: { code: `gc-${randomUUID().slice(0, 8)}`, name: 'GC School' },
   });
+  created.add(school.id);
   await prisma.rankLevel.upsert({
     where: { code: 'gc_kru' },
     create: { code: 'gc_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 },
     update: {},
   });
   const user = await prisma.userAccount.create({
-    data: { email: `gc-${randomUUID().slice(0, 8)}@example.com`, displayName: 'GC', status: 'active', passwordHash: 'x' },
+    data: { email: `gc-${randomUUID().slice(0, 8)}@example.com`, displayName: 'GC', status: 'active', passwordHash: 'x', person: { create: { displayName: 'GC' } } },
   });
   const personnel = await prisma.personnelProfile.create({
-    data: { schoolId: school.id, userId: user.id, fullName: 'GC Teacher', positionRole: 'teacher', rankLevelCode: 'gc_kru' },
+    data: { schoolId: school.id, userId: user.id, personId: user.personId, fullName: 'GC Teacher', positionRole: 'teacher', rankLevelCode: 'gc_kru' },
   });
   const cat = await prisma.evidenceCategory.upsert({
     where: { code: 'other_document' },
@@ -65,7 +69,7 @@ async function fixture(deletedAt) {
   });
   const evidence = await prisma.evidence.create({
     data: {
-      schoolId: school.id, ownerPersonnelId: personnel.id, uploadedByUserId: user.id,
+      originSchoolId: school.id, ownerPersonId: personnel.personId, uploadedByUserId: user.id,
       categoryId: cat.id, title: 'gc test', status: 'active', deletedAt,
     },
   });
@@ -82,6 +86,12 @@ async function fixture(deletedAt) {
 }
 
 after(async () => {
+  // These fixtures are soft-deleted by design, so they are invisible to the
+  // re-scan sweep — but they still accumulate in `evidence`/`evidence_file`
+  // forever, and the ones GC was asserted NOT to touch keep a live object in
+  // MinIO too. Cleaning the rows is what this helper does; the objects are left
+  // to the real storage.gc, which is the code under test here.
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await prisma.$disconnect();
 });
 

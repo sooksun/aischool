@@ -3,6 +3,8 @@
 ## Status
 Accepted
 
+> Amended by ADR-0010 (เพิ่ม Python สำหรับ AI) และ ADR-0016 (เพิ่ม Dart/Flutter), 2026-10-12
+
 ## Context
 
 `docs/` describes the target repository in detail but never states the stack. The referenced paths, however, only make sense for one:

@@ -3,6 +3,8 @@
 ## Status
 Accepted
 
+> หัวข้อ auth superseded by ADR-0014 · รายละเอียดเว็บ amended by ADR-0016, 2026-10-12
+
 ## Context
 
 ADR-0001 fixed the umbrella stack (Node/TypeScript monorepo) but deliberately left specific frameworks open. As of 2026-07-17, `apps/` and `packages/` contain only `.gitkeep` — the plan (module-boundaries.md, contracts v1.0.0, the evidence-submission UX) has no implementation yet. Before writing `apps/api` and `apps/web`, the framework choice needs to be recorded once, the same way ADR-0001 prevented four agents from guessing differently — now it's one developer across many sessions who must not re-decide this per file.

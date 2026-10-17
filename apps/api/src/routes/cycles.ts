@@ -6,7 +6,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   listCycles, createCycle, getCycleDetail, updateCycle,
-  getCycleForRound, createRound, getRoundForAction, updateRound, writeAuditEvent,
+  getCycleForRound, createRound, getRoundForAction, updateRound, writeAuditEvent, getFrameworkById,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite } from '@seip/backend-shared';
 import { requireCurrentSchool } from '../plugins/auth.js';
@@ -73,6 +73,11 @@ export const cycleRoutes: FastifyPluginAsync = async (app) => {
     }).parse(request.body);
 
     if (body.starts_on > body.ends_on) throw new ApiError('VAL-002', 'starts_on must be on or before ends_on');
+    // An unknown framework id used to reach the INSERT and come back as a 500
+    // (foreign-key violation) — the last client-supplied id left unchecked (FR-095).
+    if (!(await getFrameworkById(body.framework_version_id))) {
+      throw new ApiError('VAL-002', 'Unknown framework_version_id', [{ field: 'framework_version_id', issue: 'unknown' }]);
+    }
 
     const cycle = await createCycle(schoolId, {
       frameworkVersionId: body.framework_version_id, fiscalYear: body.fiscal_year,

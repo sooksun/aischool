@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { STEP_UP_EVENT, WEB_SSO, webLoginHref } from './api/client';
 import { useAuth } from './hooks/useAuth';
 import type { UiCapability } from './lib/capabilities';
 import { LoginPage } from './pages/LoginPage';
@@ -14,6 +16,23 @@ import { EvaluatorHomePage } from './pages/evaluator/EvaluatorHomePage';
 import { EvaluatorCyclePage } from './pages/evaluator/EvaluatorCyclePage';
 import { EvaluatorRoundPage } from './pages/evaluator/EvaluatorRoundPage';
 import { AssignmentScorePage } from './pages/evaluator/AssignmentScorePage';
+import { MembersPage } from './pages/admin/MembersPage';
+import { AreaSchoolsPage } from './pages/area/AreaSchoolsPage';
+import { DevicesPage } from './pages/DevicesPage';
+import { BatchUploadPage } from './pages/BatchUploadPage';
+import { LinkNotePage } from './pages/LinkNotePage';
+import { CoveragePage } from './pages/CoveragePage';
+import { AreaCoveragePage } from './pages/area/AreaCoveragePage';
+import { NotificationsPage, useUnreadNotifications } from './pages/NotificationsPage';
+import { ExportsPage } from './pages/ExportsPage';
+import { PrivacyRequestsPage } from './pages/privacy/PrivacyRequestsPage';
+import { DpoRequestsPage } from './pages/privacy/DpoRequestsPage';
+import { AssignmentEvidencePage } from './pages/evaluator/AssignmentEvidencePage';
+import { AssignmentCommentsPage } from './pages/AssignmentCommentsPage';
+import { MyAssessmentsPage } from './pages/MyAssessmentsPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { AcceptInvitePage } from './pages/AcceptInvitePage';
+import { AgreementPage } from './pages/agreements/AgreementPage';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -41,20 +60,95 @@ function RequireCapability({
 }
 
 /** Nav driven by capability flags — no ad-hoc role arrays (cleanup M3). */
+/**
+ * FR-019: a person at more than one school picks which one they are working for;
+ * the pick is remembered per account. Until they pick, writes would be ambiguous
+ * (the API answers PERM-002), so the page says so plainly.
+ */
+/** "/" — the evidence list, except for a DPO-only account (CCR-029), which has none. */
+function HomePage() {
+  const { capabilities } = useAuth();
+  if (capabilities.handleSubjectRequests && !capabilities.fileSubjectRequests && !capabilities.manageAreaSchools) {
+    return <Navigate to="/dpo/requests" replace />;
+  }
+  return <EvidenceListPage />;
+}
+
+function SchoolPicker() {
+  const { user, schools, schoolId, selectSchool } = useAuth();
+  if (!user || schools.length < 2) return null;
+  return (
+    <div className={schoolId ? 'school-picker' : 'alert alert-info'} role={schoolId ? undefined : 'alert'}>
+      <label htmlFor="school-picker">{schoolId ? 'โรงเรียน' : 'คุณอยู่หลายโรงเรียน กรุณาเลือกโรงเรียนที่กำลังทำงานให้'}</label>{' '}
+      <select id="school-picker" value={schoolId ?? ''} onChange={(e) => selectSchool(e.target.value)}>
+        {!schoolId && <option value="" disabled>เลือกโรงเรียน</option>}
+        {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function AppNav() {
   const { user, capabilities } = useAuth();
   const location = useLocation();
+  const unread = useUnreadNotifications(!!user && location.pathname !== '/login');
   if (!user || location.pathname === '/login') return null;
 
-  const { manageCycles, scoreAsCommittee, viewReports } = capabilities;
-  if (!manageCycles && !scoreAsCommittee && !viewReports) return null;
+  const { manageCycles, scoreAsCommittee, viewReports, submitEvidence, manageMembers, manageAreaSchools, fileSubjectRequests, handleSubjectRequests } = capabilities;
+  if (!manageCycles && !scoreAsCommittee && !viewReports && !submitEvidence && !manageMembers && !manageAreaSchools && !handleSubjectRequests) return null;
+  // CCR-029: a DPO-only account holds no school data — no evidence, no PA1.
+  const dpoOnly = handleSubjectRequests && !fileSubjectRequests && !manageAreaSchools;
 
   return (
     <nav className="app-nav" aria-label="เมนูหลัก">
-      <Link to="/" className={location.pathname === '/' ? 'active' : ''}>หลักฐานของฉัน</Link>
+      {!dpoOnly && <Link to="/" className={location.pathname === '/' ? 'active' : ''}>หลักฐานของฉัน</Link>}
+      {handleSubjectRequests && (
+        <Link to="/dpo/requests" className={location.pathname === '/dpo/requests' ? 'active' : ''}>
+          คำขอใช้สิทธิ (DPO)
+        </Link>
+      )}
+      {/* The only other way in is the floating '+' on the evidence list, whose
+          label lives in aria-label — visible to a screen reader, invisible to
+          everyone else. A teacher who was never shown that button cannot find
+          upload at all, so the primary action gets a named nav entry. */}
+      {submitEvidence && (
+        <Link to="/evidence/new" className={location.pathname === '/evidence/new' ? 'active' : ''}>
+          + ส่งหลักฐาน
+        </Link>
+      )}
+      {submitEvidence && (
+        <Link to="/evidence/batch" className={location.pathname === '/evidence/batch' ? 'active' : ''}>
+          ส่งหลายไฟล์
+        </Link>
+      )}
+      {submitEvidence && (
+        <Link to="/evidence/link-note" className={location.pathname === '/evidence/link-note' ? 'active' : ''}>
+          ลิงก์/บันทึก
+        </Link>
+      )}
       {manageCycles && (
         <Link to="/director/cycles" className={location.pathname.startsWith('/director') ? 'active' : ''}>
           จัดการรอบการประเมิน
+        </Link>
+      )}
+      {!dpoOnly && (
+        <Link to="/agreements" className={location.pathname.startsWith('/agreements') ? 'active' : ''}>
+          ข้อตกลง PA
+        </Link>
+      )}
+      {manageMembers && (
+        <Link to="/admin/members" className={location.pathname.startsWith('/admin') ? 'active' : ''}>
+          บุคลากร
+        </Link>
+      )}
+      {manageAreaSchools && (
+        <Link to="/area/schools" className={location.pathname === '/area/schools' ? 'active' : ''}>
+          โรงเรียนในเขต
+        </Link>
+      )}
+      {manageAreaSchools && (
+        <Link to="/area/coverage" className={location.pathname === '/area/coverage' ? 'active' : ''}>
+          ความพร้อมรายโรงเรียน
         </Link>
       )}
       {scoreAsCommittee && (
@@ -62,6 +156,32 @@ function AppNav() {
           งานกรรมการ
         </Link>
       )}
+      {submitEvidence && user.personnel && (
+        <Link to="/my-assessments" className={location.pathname === '/my-assessments' ? 'active' : ''}>
+          การประเมินของฉัน
+        </Link>
+      )}
+      {submitEvidence && (
+        <Link to="/coverage" className={location.pathname === '/coverage' ? 'active' : ''}>
+          ความครอบคลุม
+        </Link>
+      )}
+      {submitEvidence && (
+        <Link to="/exports" className={location.pathname === '/exports' ? 'active' : ''}>
+          ส่งออก
+        </Link>
+      )}
+      {fileSubjectRequests && (
+        <Link to="/privacy-requests" className={location.pathname === '/privacy-requests' ? 'active' : ''}>
+          ข้อมูลส่วนบุคคล
+        </Link>
+      )}
+      <Link to="/notifications" className={location.pathname === '/notifications' ? 'active' : ''} aria-label={`การแจ้งเตือน ยังไม่อ่าน ${unread}`}>
+        🔔{unread > 0 ? ` ${unread}` : ''}
+      </Link>
+      <Link to="/devices" className={location.pathname === '/devices' ? 'active' : ''}>
+        อุปกรณ์
+      </Link>
       {viewReports && (
         <Link to="/reports" className={location.pathname.startsWith('/reports') ? 'active' : ''}>
           รายงาน PA
@@ -71,14 +191,59 @@ function AppNav() {
   );
 }
 
+/**
+ * ADR-0014 step-up: when the API answers AUTH-006, offer a sign-in with the
+ * second factor that returns to this page. A link, not an automatic redirect,
+ * so nothing half-typed on the page (a return note, say) is lost unasked.
+ */
+function StepUpBanner() {
+  const [needed, setNeeded] = useState(false);
+  const location = useLocation();
+  useEffect(() => {
+    const on = () => setNeeded(true);
+    window.addEventListener(STEP_UP_EVENT, on);
+    return () => window.removeEventListener(STEP_UP_EVENT, on);
+  }, []);
+  useEffect(() => setNeeded(false), [location.pathname]);
+  if (!needed) return null;
+  return (
+    <div className="alert alert-info" role="alert">
+      <span>รายการนี้ต้องยืนยันตัวตนด้วยรหัส OTP อีกขั้นหนึ่ง</span>
+      {WEB_SSO
+        ? <a className="btn btn-primary" href={webLoginHref(location.pathname + location.search, 'mfa')}>ยืนยันตัวตนด้วย OTP</a>
+        : <span>กรุณาออกจากระบบแล้วเข้าสู่ระบบด้วย SEIP ID</span>}
+    </div>
+  );
+}
+
 export function App() {
+  // Switching school remounts the routes, so every page reloads its data for the
+  // school now in X-School-Id instead of showing the previous school's.
+  const { schoolId } = useAuth();
   return (
     <>
       <AppNav />
-      <Routes>
+      <SchoolPicker />
+      <StepUpBanner />
+      <Routes key={schoolId ?? 'no-school'}>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={<RequireAuth><EvidenceListPage /></RequireAuth>} />
-        <Route path="/evidence/new" element={<RequireAuth><EvidenceSubmitPage /></RequireAuth>} />
+        {/* Unauthenticated by contract: the invitee has no password yet, so they
+            cannot be behind RequireAuth. Mirrors permissions.yaml's
+            `unauthenticated: acceptInvite`. */}
+        <Route path="/accept-invite" element={<AcceptInvitePage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/" element={<RequireAuth><HomePage /></RequireAuth>} />
+        {/* Gated, unlike before: an evaluator typing this URL used to get the
+            full 5-step form and only discovered the dead end at POST /evidence. */}
+        <Route path="/evidence/new" element={
+          <RequireCapability capability="submitEvidence"><EvidenceSubmitPage /></RequireCapability>
+        } />
+        <Route path="/evidence/link-note" element={
+          <RequireCapability capability="submitEvidence"><LinkNotePage /></RequireCapability>
+        } />
+        <Route path="/evidence/batch" element={
+          <RequireCapability capability="submitEvidence"><BatchUploadPage /></RequireCapability>
+        } />
         <Route path="/evidence/:evidenceId" element={<RequireAuth><EvidenceDetailPage /></RequireAuth>} />
 
         <Route path="/director/cycles" element={
@@ -89,6 +254,34 @@ export function App() {
         } />
         <Route path="/director/rounds/:roundId/assignments" element={
           <RequireCapability capability="manageCycles"><RoundAssignmentsPage /></RequireCapability>
+        } />
+
+        {/* CCR-015: the evaluatee writes their own PA1. Behind RequireAuth
+            rather than a capability — every role that can be evaluated needs it,
+            and the page itself explains the case where the account has no
+            personnel record (an external evaluator). */}
+        <Route path="/agreements" element={<RequireAuth><AgreementPage /></RequireAuth>} />
+
+        <Route path="/admin/members" element={
+          <RequireCapability capability="manageMembers"><MembersPage /></RequireCapability>
+        } />
+
+        <Route path="/devices" element={<RequireAuth><DevicesPage /></RequireAuth>} />
+        <Route path="/coverage" element={<RequireAuth><CoveragePage /></RequireAuth>} />
+        <Route path="/notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
+        <Route path="/exports" element={<RequireAuth><ExportsPage /></RequireAuth>} />
+        <Route path="/privacy-requests" element={
+          <RequireCapability capability="fileSubjectRequests"><PrivacyRequestsPage /></RequireCapability>
+        } />
+        <Route path="/dpo/requests" element={
+          <RequireCapability capability="handleSubjectRequests"><DpoRequestsPage /></RequireCapability>
+        } />
+
+        <Route path="/area/coverage" element={
+          <RequireCapability capability="manageAreaSchools"><AreaCoveragePage /></RequireCapability>
+        } />
+        <Route path="/area/schools" element={
+          <RequireCapability capability="manageAreaSchools"><AreaSchoolsPage /></RequireCapability>
         } />
 
         <Route path="/reports" element={
@@ -106,6 +299,11 @@ export function App() {
         } />
         <Route path="/evaluator/rounds/:roundId" element={
           <RequireCapability capability="scoreAsCommittee"><EvaluatorRoundPage /></RequireCapability>
+        } />
+        <Route path="/assignments/:assignmentId/comments" element={<RequireAuth><AssignmentCommentsPage /></RequireAuth>} />
+        <Route path="/my-assessments" element={<RequireAuth><MyAssessmentsPage /></RequireAuth>} />
+        <Route path="/assignments/:assignmentId/evidence" element={
+          <RequireCapability capability="governMappings"><AssignmentEvidencePage /></RequireCapability>
         } />
         <Route path="/evaluator/assignments/:assignmentId" element={
           <RequireCapability capability="scoreAsCommittee"><AssignmentScorePage /></RequireCapability>

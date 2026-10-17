@@ -8,3 +8,11 @@
 # the environment). Never fingerprint a real credential here — rotate it.
 7c8279227e2b8f414e2c0e0c1bd3af0c8fe62ce8:apps/worker/test/file-process.test.mjs:generic-api-key:30
 2566f1a6ce2111f6a76017018da1b474e68ca9cd:apps/worker/test/storage-gc.test.mjs:generic-api-key:30
+# P5 export test (2026-10-14): the S3 client read env.S3_SECRET_KEY on one long
+# line that gitleaks' generic-api-key rule matched. No literal value was ever
+# committed; the line now carries an inline gitleaks:allow.
+b2a216a41c1bc28bae450d88cfb5e31f8d02d4ad:apps/api/test/exports.test.mjs:generic-api-key:59
+# Another branch's .gitleaksignore (feat/cleanup-L2-e2e-depth, e86e73d) once
+# quoted that credentials line verbatim in a comment and was flagged itself.
+# gitleaks scans every fetched branch, so the same fingerprint is needed here.
+e86e73d8e7c98d4a847cf0ace7c9df9d42169729:.gitleaksignore:generic-api-key:13

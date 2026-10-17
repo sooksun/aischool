@@ -1,6 +1,6 @@
 # SEIP Operations Runbook (SEIP-OPS-003)
 
-Status: Operational draft for **staging / on-prem** (ADR-0005)  
+Status: Operational draft for **staging / Thai-owned self-hosted profile** (ADR-0011/0012/0013). Production is RDS + S3 in ap-southeast-7.  
 Audience: school or area IT operator + developer bring-up  
 Related: `docker-compose.staging.yml`, `infra/`, `.env.staging.example`, `docs/qa/QUALITY-GATES.md` (backup/restore release gate)
 
@@ -10,26 +10,31 @@ Related: `docker-compose.staging.yml`, `infra/`, `.env.staging.example`, `docs/q
 
 | Env | Compose file | Secrets | Public exposure |
 |---|---|---|---|
-| **dev** | `docker-compose.yml` | Throwaway values in file + `.env.example` | Postgres/MinIO ports on localhost for tooling |
-| **staging / on-prem** | `docker-compose.staging.yml` | **Only** via gitignored `.env.staging` (or OS secrets) | Prefer edge TLS proxy; DB/MinIO not published |
+| **dev** | `docker-compose.yml` | Throwaway values in file + `.env.example` | PostgreSQL :5432 / SeaweedFS S3 :8333 on localhost for tooling |
+| **staging / on-prem** | `docker-compose.staging.yml` | **Only** via gitignored `.env.staging` (or OS secrets) | Prefer edge TLS proxy; DB/S3 not published |
 
-Same architecture everywhere: **Node API + SPA + PostgreSQL + MinIO (S3 API)**. Configuration differs; code does not.
+Same architecture everywhere: **Node API + SPA + PostgreSQL 18 + S3 API (SeaweedFS self-hosted, Amazon S3 in production)**. Configuration differs; code does not.
 
 ---
 
 ## 2. Secrets (SEC-REPO-1)
 
-**Never commit** `.env`, `.env.staging`, private keys, or real MinIO/Postgres passwords.
+**Never commit** `.env`, `.env.staging`, private keys, or real S3/Postgres passwords.
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | postgres, api/worker `DATABASE_URL` | Strong password; rotate with re-encrypt plan |
-| `DATABASE_URL` | api, worker (dev / process) | Staging compose builds this from POSTGRES_* |
+| `POSTGRES_PASSWORD` | postgres (admin), backup verify | Admin only: first-boot role bootstrap and scratch databases. Never given to the app |
+| `SEIP_MIGRATOR_PASSWORD` | `migrate` service, backup | `seip_migrator` owns the schema (ADR-0012 §4) |
+| `SEIP_APP_PASSWORD` | api, worker `DATABASE_URL` | `seip_app`: DML only, cannot rewrite `audit_event` |
+| `DATABASE_URL` / `MIGRATE_DATABASE_URL` | api, worker / `npm run db:migrate` | Staging compose builds these; dev values in `.env.example` |
 | `JWT_SECRET` | api | ≥ 32 characters; rotating invalidates sessions |
-| `S3_ENDPOINT` | api, worker | Staging internal: `http://minio:9000` |
-| `S3_BUCKET` | api, worker, minio-init | Private bucket; no anonymous read |
-| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | api, worker, minio root (staging) | Treat as root secrets; separate app keys later if needed |
-| `S3_REGION` | api, worker | Dummy for S3 SDK; MinIO accepts any |
+| `S3_ENDPOINT` | api, worker | Staging internal: `http://seaweedfs:8333` |
+| `SEIP_PUBLIC_ORIGIN` → api `S3_PUBLIC_ENDPOINT` | api (presigning), web gateway | **Required.** The exact URL users open (`https://seip.school.ac.th`, or `http://127.0.0.1:8080` for a first bring-up). Presigned upload/download URLs are signed for it; `web` forwards `/<bucket>/` from it to SeaweedFS with Host intact. Wrong value = every upload fails with a signature error |
+| `SEIP_WEB_BIND` / `SEIP_API_BIND` | web / api | Host addresses published (defaults `127.0.0.1:8080` / `127.0.0.1:3001`). `deploy-remote.sh` picks free ports on first deploy (web from 8090, api from 3101) and records them |
+| `HOST` | api | Listen address. Staging compose sets `0.0.0.0` — loopback inside a container is unreachable from `web` and the published port |
+| `S3_BUCKET` | api, worker, storage-init | Private bucket; no anonymous read |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | api, worker, SeaweedFS identity (staging) | Treat as root secrets; separate app keys later if needed |
+| `S3_REGION` | api, worker | Dummy for SeaweedFS; `ap-southeast-7` for Amazon S3 Bangkok |
 | `PORT` | api | Default `3001` |
 | `NODE_ENV` | api, worker | `production` in staging compose |
 | `WORKER_POLL_MS` | worker | Job poll interval (default 2000) |
@@ -54,7 +59,8 @@ Templates:
 4. Confirm health:
    ```bash
    docker compose -f docker-compose.staging.yml --env-file .env.staging ps
-   # Expect: postgres, minio, api, worker, web (minio-init exited 0)
+   # Expect: postgres, seaweedfs, api, worker, web, clamav, backup (migrate + storage-init exited 0)
+   # The worker starts only once clamav is healthy (signatures loaded, ~3 min).
    # API container healthcheck is TCP :3001; process probe:
    curl -sS -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:3001/api/v1/auth/login \
      -H 'content-type: application/json' -d '{}'
@@ -64,12 +70,25 @@ Templates:
    docker compose -f docker-compose.staging.yml --env-file .env.staging logs --tail=20 worker
    ```
 5. Install edge TLS (section 4).
-6. Run seed **once** if empty taxonomy (operator decision):
+6. Seed the taxonomy (ว9/ว10 frameworks, categories, rank levels — idempotent),
+   then create the first school and its admin (section 4c). All three run in the
+   `ops` one-shot container on the internal network, as `seip_app`:
    ```bash
-   # from a one-shot node container on the same network, or host with DATABASE_URL pointed at published DB
-   npm run db:seed
+   C="docker compose -f docker-compose.staging.yml --env-file .env.staging"
+   $C run --rm ops node prisma/seed.mjs
+   $C run --rm ops node scripts/ops/provision-school.mjs --code=SCH-001 --name="โรงเรียนตัวอย่าง"
+   SEIP_ADMIN_PASSWORD='choose-something-long' \
+     $C run --rm -e SEIP_ADMIN_PASSWORD ops node scripts/ops/bootstrap-admin.mjs \
+     --email=admin@school.ac.th --name="ผู้ดูแลระบบ" --school=SCH-001
    ```
-7. Create the first school_admin / director accounts via approved bootstrap procedure (not documented as open registration).
+7. Prove it end to end through the public origin (what CI's **deploy smoke**
+   gate runs on every push). It invites a throwaway teacher into that school,
+   uploads a small PDF through the presigned URL, waits for the worker's scan,
+   and downloads it back — on an acceptance install, or end that membership after:
+   ```bash
+   SEIP_ADMIN_EMAIL=admin@school.ac.th SEIP_ADMIN_PASSWORD='…' \
+     node scripts/ops/smoke-install.mjs --base="$SEIP_PUBLIC_ORIGIN"
+   ```
 
 ---
 
@@ -142,64 +161,337 @@ Tests may replace the process singleton via `installLoginRateLimiterForTests` an
 
 ---
 
-## 5. Backup and restore (release gate subject)
+## 4c. First-run bootstrap (CCR-014)
 
-Evidence videos and evaluation rows are **irreplaceable**. Backup **both** Postgres and MinIO on the same schedule (or document RPO/RTO if staggered).
+A freshly migrated + seeded database has the complete ว9/ว10 framework and **no
+people at all**. Two operator commands turn it into something that can be logged
+into. Both are CLIs on purpose, not API endpoints:
 
-### 5.1 PostgreSQL — backup
-
-```bash
-# Staging compose network; adjust container name from `docker compose ps`
-docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T postgres \
-  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "backup-seip-$(date +%Y%m%d).dump"
-```
-
-Store dumps on encrypted media **off the app disk** (or second NAS on-prem). Retain per school policy (entity-dictionary retention intents: cycle+N / evidence+N).
-
-### 5.2 PostgreSQL — restore
-
-```bash
-# Destructive — confirm environment first
-docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T postgres \
-  pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists < backup-seip-YYYYMMDD.dump
-```
-
-Then re-run `prisma migrate deploy` if restore is older than current migrations.
-
-### 5.3 MinIO (evidence objects) — backup
-
-Option A — `mc mirror` to a second disk/NAS:
+- **Nothing may create a school through the API.** All six roles in
+  `permissions.yaml` are school- or area-scoped, and `area_admin` is read-only by
+  contract (PERM-004, SEC-TEN-3), so no role can legitimately write across
+  schools. Adding a `system_admin` to allow it would rewrite all 31 matrix rows.
+- **The first admin cannot invite themselves.** A public bootstrap endpoint whose
+  safety depends on a runtime "are there zero users?" check is wrong in exactly
+  the cases that matter — a restore that left the DB empty, a freshly provisioned
+  tenant. Running these needs DB access, which already implies more authority
+  than they grant.
 
 ```bash
-mc alias set staging http://127.0.0.1:9000 "$S3_ACCESS_KEY" "$S3_SECRET_KEY"   # only if port published for backup window
-mc mirror --overwrite staging/seip-evidence /backup/seip-evidence/
+# 1. the school (idempotent; re-running with the same --code is a no-op)
+node --env-file-if-exists=.env scripts/ops/provision-school.mjs \
+  --code=SCH-001 --name="โรงเรียนตัวอย่าง" \
+  --area-code=AREA-1 --area-name="สพป. เขต 1"     # area is optional
+
+# 2. the first school_admin
+#    Password comes from the environment, never a flag: argv is visible to every
+#    process on the box via `ps` and lands in shell history. Omit it and one is
+#    generated and printed ONCE.
+SEIP_ADMIN_PASSWORD='choose-something-long' \
+node --env-file-if-exists=.env scripts/ops/bootstrap-admin.mjs \
+  --email=admin@school.ac.th --name="ผู้ดูแลระบบ" --school=SCH-001
 ```
 
-Option B — filesystem snapshot of the Docker volume `seip_staging_minio` while MinIO is **stopped** (consistent snapshot).
+Also available as `npm run provision:school -- …` / `npm run bootstrap:admin -- …`
+(these build the workspace libs first). On Windows, npm mangles quoted arguments
+containing spaces — call `node` directly as above when a name contains a space.
 
-### 5.4 MinIO — restore
+`bootstrap-admin` **refuses** to touch an account that already has a password. It
+creates the first admin; it is not a password-reset tool. Recovery is a separate,
+deliberate act.
+
+Everything after this happens in the app: the admin opens **บุคลากร**, invites
+people, and hands each person a single-use invite code. The invitee sets their own
+password at `/accept-invite` — the admin never learns it. Codes expire in 14 days
+and are shown exactly once (only a SHA-256 of each is stored), so a lost code
+means re-inviting, not recovering.
+
+There is no email dependency anywhere in that flow, deliberately: an on-prem
+school server (ADR-0005) may have no SMTP relay.
+
+## 5. Backup and restore (automated)
+
+Evidence videos and evaluation rows are **irreplaceable**. Until 2026-07-20 this
+section was two commands and a hope that someone typed them; the audit called it
+the largest unbounded downside in the system. It is now a script that runs on a
+timer and **proves each dump restorable before calling it a backup**.
+
+### 5.1 Running it
 
 ```bash
-mc mirror --overwrite /backup/seip-evidence/ staging/seip-evidence/
+# manual, from the repo (needs pg_dump/pg_restore/psql 18 on PATH, or PG_BIN_DIR; aws CLI for objects)
+npm run backup                       # dump + object mirror + verify + prune
+npm run backup -- --no-objects       # database only
+npm run backup -- --retain-days=30
 ```
 
-Or restore the volume snapshot, then start MinIO.
+Staging/on-prem runs it automatically — the `backup` service in
+`docker-compose.staging.yml` loops on `BACKUP_INTERVAL_SECONDS` (default daily)
+and logs each run to `docker logs`. A failed run prints `!!! BACKUP FAILED` and
+retries next interval rather than stopping the schedule.
+
+**Point `BACKUP_HOST_DIR` at storage on a different disk from the app.** The
+default (`./backups`) is a bind mount so it is at least outside the Docker
+volumes it protects, but a backup on the same disk as the database survives
+exactly the failures that do not matter.
+
+| variable | default | |
+|---|---|---|
+| `BACKUP_HOST_DIR` | `./backups` | host path for dumps + object mirror |
+| `BACKUP_RETAIN_DAYS` | `14` | older artefacts pruned each run |
+| `BACKUP_INTERVAL_SECONDS` | `86400` | schedule |
+
+### 5.2 What it actually does
+
+1. `pg_dump -Fc --no-owner --no-acl` (as `seip_migrator`, which owns every table)
+   to `<dir>/seip-<timestamp>.dump`, directory 0700 — dumps contain every
+   evaluation score and every teacher's evidence metadata (PDPA at rest).
+2. **Restores that dump into a scratch database (via `BACKUP_ADMIN_URL`, which has
+   CREATEDB) and compares table AND trigger counts**, then drops it. Fails the run
+   if the restore errors or the counts differ.
+3. `aws s3 sync` of the evidence bucket (without `--delete`: a mirror that deletes
+   local copies of missing objects would faithfully replicate an accidental
+   bucket wipe).
+4. Prunes artefacts older than the retention window.
+
+Passwords reach the pg tools through `PGPASSWORD`, never argv, because argv is
+readable by every local user via `ps`.
+
+### 5.3 Restoring
+
+```bash
+# drill: restore into a scratch database, report, drop it (the default)
+npm run restore -- --from=backups/seip-2026-10-13-05-00-00.dump --dry-run
+
+# into a named database
+npm run restore -- --from=<file> --into=seip_recovered
+
+# over the live database — deliberately awkward
+npm run restore -- --from=<file> --into=seip --i-understand-this-overwrites
+```
+
+The drill reports `tables / triggers / evidence / users` and **fails if the
+restored database has no triggers**, because a restore that quietly lost them
+gives you a database that accepts `DELETE` on `audit_event`.
+
+Objects: `aws s3 sync <dir>/objects-<timestamp>/ s3://seip-evidence --endpoint-url <S3_ENDPOINT>`.
+Dumps are taken `--no-acl`, so after a real restore re-run
+`scripts/db/bootstrap-roles.sql` and `npm run db:migrate` — that re-applies the
+`seip_app` grants and the `audit_event` REVOKE.
+
+### 5.4 Why the verify step exists (a real incident, MySQL era)
+
+The first real run of `backup.mjs` **failed its own verify**, and the cause was a
+schema bug nobody had noticed:
+
+Three of the four triggers stored a trailing `;` inside their body. `mysqldump`
+wraps a trigger body in `/*!50003 TRIGGER ... <body> */`, so a `;` at the end of
+`<body>` terminated the statement before the closing `*/` and the restore died
+with `syntax error near '*/'`. **Every backup this project had ever taken could
+not restore its audit-immutability triggers** — and nothing would have said so.
+
+Root cause: Prisma's migration runner passes each statement to the server *with*
+its terminator, except a file's last. Fixed by migrations
+`20260720060000`–`20260720060003`, which is why there is one `CREATE TRIGGER` per
+migration file — merging them back would silently reintroduce the bug in every
+trigger but the last.
+
+The lesson is the one this section is built on: a backup that has never been
+restored is a hypothesis, and the verify step is what turns it into a backup.
 
 ### 5.5 Backup/restore test (QUALITY-GATES release gate)
 
-Before first production go-live, and before each release that touches storage or schema:
+Before first production go-live, and before each release touching storage or schema:
 
-1. Take Postgres dump + MinIO mirror on staging.
-2. Restore into a **throwaway** compose project name.
-3. Confirm: login works; an evidence row’s object is GET-able via presigned flow; mapping/score rows intact.
-4. Record date + operator in the release notes.
+1. `npm run backup` on staging — it self-verifies, so a green run is step 1 and 2.
+   **On staging, not on a dev box.** The database half needs PostgreSQL 18
+   client tools (`pg_dump` must be >= the server major) and the object half needs
+   the aws CLI; the `backup` image installs both. Verified 2026-10-12 against
+   PG18: dump + verify + `--dry-run` restore drill green (database only — the
+   object half was not run locally). A green *database* run is not a green backup.
+2. `npm run restore -- --from=<latest> --dry-run` and check the reported counts
+   against production expectations.
+3. Restore objects into a throwaway bucket; confirm an evidence object is
+   downloadable through the presigned flow.
+4. Confirm login works against the restored database, and that
+   `SELECT COUNT(DISTINCT trigger_name) FROM information_schema.triggers` is 2
+   (`audit_event_no_update`, `audit_event_no_delete`).
+5. Record date + operator in the release notes.
+
+## 5b. Malware scanning and the re-scan sweep (ADR-0009)
+
+### 5b.1 Running the scanner
+
+`clamav` is a first-class service in `docker-compose.staging.yml` and is **required**
+whenever `SCAN_PROVIDER=clamav`. Two operational facts ADR-0009 promised were
+documented here and were not, until this section existed:
+
+- **Memory.** clamd holds the signature database resident — budget ~1 GB, plus
+  headroom during a `freshclam` reload when both copies are briefly live. A host
+  sized for API + worker alone will OOM the container, and an OOM-killed clamd
+  means uploads stay `pending` (fail-closed), not that they pass.
+- **Signatures.** The `clamav/clamav` image runs `freshclam` on a timer. Stale
+  signatures are the silent failure mode: everything looks green while detection
+  degrades. Check `docker compose logs clamav | grep -i "database updated"`.
+
+Verify reachability without scanning anything — the worker also does this at boot
+and logs a loud warning rather than exiting (killing the worker would stop report
+generation and GC too):
+
+```bash
+docker compose -f docker-compose.staging.yml exec clamav clamdscan --version
+```
+
+### 5b.2 Why old files need a sweep at all
+
+Enabling the scanner only covers **new** uploads. Two populations of existing rows
+are left behind, and the dangerous one is not the obvious one:
+
+| Population | `scan_status` | Downloadable? | Reality |
+|---|---|---|---|
+| Pre-CCR-012 uploads | `clean` | yes, badged ปลอดภัย | **Never scanned.** The old `file.process` matched "eicar"/"virus" against the *filename*, read no bytes, and called everything else clean. |
+| `SCAN_PROVIDER=none` period | `unscanned` | yes, badged honestly | Never scanned, and says so. |
+
+The first row is the reason the sweep cannot select on `scan_status`: `clean` is
+precisely the value that lies. It selects on **`evidence_file.scanned_at IS NULL`**
+— a receipt written only when clamd actually returned a verdict. Migration
+`20260718220000` declined to backfill those rows because it "cannot distinguish
+those rows from ones a real scanner might have cleared"; `scanned_at` is that
+distinction made durable.
+
+`scanned_at` stays null for anything refused *without being read* — oversize,
+size-mismatch, scanner down — so "could not be checked" remains re-checkable
+instead of hardening into a permanent verdict.
+
+### 5b.3 Running the sweep
+
+```bash
+# 1. census first — changes nothing, and tells you the size of the problem
+npm run rescan:files -- --report
+
+# 2. see what would be queued
+npm run rescan:files -- --dry-run
+
+# 3. queue a batch (default 500, oldest upload first)
+SCAN_PROVIDER=clamav npm run rescan:files -- --limit=500
+
+# 4. watch it drain; re-run step 3 until --report shows no gap
+npm run rescan:files -- --report
+```
+
+The script **never scans and never writes a verdict** — it enqueues `file.process`
+jobs and stops. The worker does the work through the same path an upload takes, so
+there is one implementation of "what is this file" and one fail-closed policy over
+it. **The worker must be running** or nothing happens.
+
+| Flag | Effect |
+|---|---|
+| `--report` | Coverage census + queue state. Read-only. |
+| `--dry-run` | Select and print, queue nothing. The only mode that runs without a scanner. |
+| `--limit=N` | Batch size (default 500). Re-running is safe — already-queued files are skipped. |
+| `--school=<id>` | Scope to one school. |
+| `--include-blocked` | Also re-scan `blocked`. Opt-in because it can *widen* access: a file blocked only for exceeding `CLAMAV_MAX_BYTES` becomes downloadable if clamd now clears it. Use after raising `StreamMaxLength`. |
+| `--scanned-before=<date>` | Also re-scan genuine but stale verdicts — how a signature update gets swept in. |
+
+It refuses to run when `SCAN_PROVIDER != clamav`: every job would re-derive
+`unscanned`, write no receipt, and re-emit `scan_completed` — the whole store
+pushed through the queue to change nothing.
+
+### 5b.4 Expected outcomes, including the alarming ones
+
+- **Files ending `blocked` is the sweep working.** A file that was serving as
+  `clean` for months and now blocks is the finding, not a regression. Tell the
+  affected teacher before they discover it as a broken download.
+- **Files staying `pending`** mean the scan could not be completed — clamd down,
+  timed out. They are undownloadable until it succeeds. That is fail-closed.
+- **`object missing from storage for file <id> (bucket=… key=…)`** in
+  `--report` means a metadata row outlived its bytes. The sweep is usually the
+  first thing to notice; these rows need a separate data decision (restore the
+  object, or delete the row), not a scanner fix.
+- A failed job **leaves its file exactly as it was**. No verdict is ever invented
+  for a file the scanner could not read.
+- **Terminally-failed jobs do not stop the file being selected again.** The
+  skip-guard only looks at `pending`/`running`, which is right for a transient
+  outage and wrong for a permanently absent object: every future sweep re-queues
+  it and burns another 8 attempts. Deal with those rows (restore the object, or
+  remove the row) rather than letting them accumulate.
+- **A size-mismatch block is permanent but keeps no receipt, so it is re-checked
+  forever.** The mismatch test runs before the scanner and short-circuits it, so
+  no clamd verdict exists to record — `scanned_at` stays null and the file is
+  selected by every future sweep, which re-derives the same block. Harmless
+  (unlike the orphans it does not fail or retry), and deliberate: replacing the
+  stored object would legitimately change the answer. But it means a store with
+  N mismatched files reports a permanent floor of N unverified `blocked` rows.
+  Do not read that floor as a stalled sweep.
+
+### 5b.5 First full-store run, 2026-07-20
+
+Recorded because the numbers are the argument for doing this at all.
+
+| | |
+|---|---|
+| Enqueued | 315 (whole store, `--limit=5000`) |
+| Verified with a real clamd verdict | **295, all clean** |
+| Failed — object missing from storage | 46 |
+| Wall clock | ~7 min, single worker, 10 jobs/poll |
+| Unverified `clean` files being served, before → after | **67 → 0** |
+
+Everything left unverified was accounted for, with nothing unexplained: 50
+`blocked` (opt-out, needs `--include-blocked`), 46 orphaned rows whose objects are
+gone, and 30 soft-deleted (excluded by design; **re-run the sweep after any
+restore**, since a restored file is served again).
+
+**The `blocked` set was then swept too** (`--include-blocked`), and it is the
+clearest demonstration of why that flag is opt-in: 54 blocked files became **22
+downloadable and 32 still blocked**. The split is the point —
+
+- 32 `mismatch.pdf` held, because the size-mismatch check runs before the scanner
+  and short-circuits it. A block earned from metadata is not undone by a scan.
+- 22 flipped to `clean`: 11 blocked by a test's artificial `CLAMAV_MAX_BYTES=1`,
+  4 blocked by the old stub for having "eicar" in the *filename*, 7 written
+  straight to `blocked` by API fixtures. **None of those blocks came from reading
+  the file**, which is exactly the population a re-scan should overturn.
+
+Across the whole store clamd found **no malware**: 333 real verdicts, all clean,
+zero `blocked` with a receipt.
+
+**The 46 orphans were purged the same day**, after each object was re-checked
+against the object store immediately before deletion rather than trusting the recorded job
+error — all 46 confirmed 404, none had come back. Deleting only the
+`evidence_file` rows was rejected: every one was its evidence's **only** file, so
+that would have left 46 `active` evidence with no files at all, which is
+contract-valid (`scan_status: null`) but less visible than a broken file was.
+Whole `Evidence` rows were deleted instead, cascading 46 files and 11 (already
+revoked) mappings; `report_section_ref` was checked first and cited none of them.
+All were integration-test fixtures (`lifecycle`/`y`/`dup`/`t`, synthetic
+`I-<uuid>` indicators).
+
+**On a real store this decision is not automatic.** A missing object may mean a
+storage incident, not junk — restoring the object is the better repair, and the
+row is the only remaining record that the evidence ever existed. There is
+deliberately **no `--purge` flag** on `rescan-files`: a hard delete of evidence is
+not a tool to leave sitting next to the sweep that reports the orphans. Decide,
+then do it by hand, after a backup.
+
+*(Unrelated but noticed while verifying: 475 `draft` and 27 `active` evidence rows
+have no files. The drafts are the normal "initiated, never completed" state. The
+27 are `tests/security/own-scope-null-personnel.test.mjs` tenancy fixtures written
+straight to `active`, not a product path — evidence only reaches `active` through
+a file registering.)*
+
+Two reporting defects surfaced only at this scale and are fixed:
+`summariseRescanJobs` grouped failures by a key that still contained the file id,
+so 46 identical failures printed as 46 lines instead of one `46×` — the exact
+noise the grouping existed to prevent. And the census counted soft-deleted files
+in the "downloadable, badged ปลอดภัย" warning, overstating the alarm by 27; it
+now reports live evidence and lists soft-deleted separately.
 
 ---
 
 ## 6. Disk growth and retention
 
 - Teaching videos dominate growth (ADR-0005 risk).
-- Monitor volume size for `seip_staging_pgdata` and `seip_staging_minio`.
+- Monitor volume size for `seip_staging_pgdata` and `seip_staging_seaweedfs`.
 - Soft-deleted evidence GC is handled by the **worker** service (`WORKER_GC_AFTER_DAYS`).
 - Longer school retention (`evidence+N`) still needs a written purge policy; do not delete volumes without approval.
 
@@ -211,7 +503,7 @@ Staging runs `worker` as a first-class compose service (`infra/docker/Dockerfile
 
 | Job type | Role |
 |---|---|
-| `file.process` | Virus-scan stub + optional video duration probe; updates `scan_status` |
+| `file.process` | Size/integrity check + ClamAV scan (ADR-0009); writes `scan_status` and, only on a real verdict, `scanned_at`. Also the sweep's unit of work (§5b). |
 | `storage.gc` | Removes orphaned/soft-deleted objects after `WORKER_GC_AFTER_DAYS` |
 | outbox dispatch | Publishes transactional outbox rows (domain events) |
 | future | `report.generate`, AI mapping — same process, new job types |

@@ -1,0 +1,11 @@
+{
+  "identities": [
+    {
+      "name": "seip_dev",
+      "credentials": [
+        { "accessKey": "seip_ci", "secretKey": "seip_ci_only_change_me" }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

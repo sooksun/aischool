@@ -1,5 +1,5 @@
 project: SEIP
-updated_at: 2026-07-19T03:00:00+07:00
+updated_at: 2026-10-12T16:30:00+07:00
 # The user is the final approver. Multi-agent fields (per-agent branches, allowed
 # paths, file locks, cross-agent reviewers) are retired — history in git.
 # HARD CONSTRAINT: no production feature code until the Sprint 0 exit gate passes
@@ -770,3 +770,1691 @@ tasks:
       - Access-token refresh after corruption
       - Director create report + download PDF
       - Chair submits scores on seeded assignment
+
+  # --- Release blockers, opened by the 2026-07-19 code audit ---
+  # These are B-1/B-2/B-3 in docs/project/PROJECT_STATE.md ("Audit correction").
+  # Each is a missing contract surface, not a bug: the models exist in
+  # prisma/schema.prisma but have zero references in apps/ and packages/.
+  # None can merge without a CCR + version bump + user approval (CLAUDE.md).
+  # Major vs minor is decided per CCR, not assumed: an earlier version of this
+  # comment claimed all three need a MAJOR bump. CCR-014 disproved that — adding
+  # operations is additive under contract-policy.md, so BLOCK-001 is 2.8.0->2.9.0.
+  # The CCR is still required because it adds a second unauthenticated write.
+
+  - id: SEIP-BLOCK-001
+    title: "B-1 — onboarding path: no way to create the first login"
+    status: done                # 2026-07-19 — CCR-014 APPLIED; openapi 2.9.0, permissions 1.5.0, error-codes 1.4.0
+    sprint: 2
+    ccr: CCR-014
+    primary_paths:
+      - docs/reviews/CCR-014-onboarding-identity-operations.md
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - apps/api/src/routes/**
+      - packages/database/src/repositories/identity.ts
+      - prisma/seed.mjs
+    notes: >
+      No operation in openapi.yaml creates School / UserAccount / SchoolMembership /
+      PersonnelProfile, and seed.mjs seeds none of them. hashPassword
+      (packages/auth/src/password.ts:12) has no caller outside its own test. A fresh
+      install therefore has a complete framework taxonomy and nobody who can log in.
+      Decide during the CCR whether first-admin bootstrap is a seeded row, a CLI, or
+      a contract operation — the three have very different authz consequences.
+    acceptance_criteria:
+      - CCR-014 approved by the user before merge (drafted + approved 2026-07-19)   # DONE
+      - "openapi 2.8.0 -> 2.9.0 (additive); permissions 1.4.0 -> 1.5.0; rule for every new operationId"  # DONE — oasdiff confirms non-breaking
+      - Bootstrap admin + school provisioning ship as operator CLI, not API (CCR-014 decisions 1 and 2)  # DONE — scripts/ops/*.mjs
+      - listPersonnel replaces the raw UUIDs in the 4 director/evaluator screens    # DONE (committee seats still uuid — documented limitation)
+      - hashPassword has a real (non-test) caller                                   # DONE — bootstrap-admin.mjs
+      - "db:reset then seed then bootstrap then login works, proven with no direct Prisma writes"  # DONE — tests/e2e/onboarding.spec.ts
+      - tests/security permission sweep extended to the new operations              # DONE — 34/35 rows, 204 assertions
+      - School / UserAccount / SchoolMembership / PersonnelProfile creatable
+      - hashPassword has a real (non-test) caller
+      - "db:reset && db:migrate && db:seed then login succeeds — proven by a test, no direct Prisma writes"
+      - tests/security permission sweep extended to the new operations
+
+  - id: SEIP-BLOCK-002
+    title: "B-2 — PerformanceAgreement + AgreementChallenge have no code (ส่วนที่ 2 scored blind)"
+    status: done                # 2026-07-19 — CCR-015 APPLIED; openapi 3.0.0 (breaking), permissions 1.6.0, error-codes 1.5.0
+    sprint: 2
+    ccr: CCR-015
+    dependencies: [SEIP-BLOCK-001]
+    primary_paths:
+      - docs/reviews/CCR-015-performance-agreement-and-challenge.md
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - apps/api/src/routes/scoring.ts
+      - packages/database/src/repositories/**
+      - tests/e2e/global-setup.mjs
+    notes: >
+      prisma.performanceAgreement and prisma.agreementChallenge have zero references
+      in apps/ and packages/. Two consequences.
+      (1) submitMyScores always dies at the workload gate
+      (apps/api/src/routes/scoring.ts:220-227 — VAL-002 then SCORE-004), so no score
+      can be submitted through the API at all.
+      (2) CORRECTION to this entry's original wording: ประเด็นท้าทาย does NOT "have
+      no implementation" — the 40% IS computed, because submitMyScores requires every
+      is_scored indicator and weights T-C.1/T-C.2.1/T-C.2.2 by maxPoints. What is
+      missing is the thing being rated: AgreementChallenge holds the method plan and
+      the quantitative/qualitative targets, and nothing writes or reads it. The
+      committee scores ส่วนที่ 2 BLIND. That is the sharper defect and CCR-015 leads
+      with it.
+      The suites pass only because scoring-flow.test.mjs:114 and global-setup.mjs
+      insert the agreement row straight through Prisma — deleting those inserts is
+      the acceptance criterion, not a side-effect.
+    acceptance_criteria:
+      - CCR-015 approved by the user before merge (drafted 2026-07-19)
+      - "openapi 2.9.0 -> 3.0.0 — BREAKING: AssignmentCreate.agreement_id removed (derived server-side, not client input)"
+      - PerformanceAgreement creatable, with a draft -> submitted -> acknowledged lifecycle that freezes content on submit
+      - AgreementChallenge written by the evaluatee; weights stay ScoreWeight rows per ADR-0003
+      - "AssignmentDetail exposes the challenge so the committee stops scoring ส่วนที่ 2 blind"
+      - submitMyScores succeeds through the API alone on a freshly seeded DB
+      - "the raw performanceAgreement.create is DELETED from scoring-flow.test.mjs and global-setup.mjs"
+      - Permission sweep extended to all 6 new operations (floor rises from 34)
+      - AUDIT_ALLOWLIST gains PerformanceAgreement, or submit/acknowledge audit rows silently log nothing
+
+  - id: SEIP-BLOCK-003
+    title: "B-3 — Approval is schema-only; reports stall at pending_approval"
+    status: done                # 2026-07-20 — CCR-016 APPLIED; openapi 3.1.0, permissions 1.7.0, error-codes 1.6.0, events 1.3.0
+    sprint: 2
+    ccr: CCR-016
+    dependencies: [SEIP-BLOCK-002]
+    primary_paths:
+      - docs/reviews/CCR-016-report-approval.md
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - docs/contracts/events.yaml
+      - apps/api/src/routes/reports.ts
+      - packages/database/src/repositories/reports.ts
+    notes: >
+      prisma.approval has zero references in apps/ and packages/. report.generate
+      flips draft -> pending_approval and nothing can move it further, so every
+      generated report is terminal. reports.ts:241 already carries the comment
+      "approval workflow is later" — this is that task.
+      CCR-016 (drafted 2026-07-20) found a second problem that a naive approve
+      endpoint would have made worse: NOTHING checks round state when a report is
+      created or generated, and scores only freeze when a round closes
+      (SCORE-002). Approving a report built on still-mutable scores produces a
+      signed document that its own data can later contradict. Hence the
+      round-must-be-closed rule, not just the missing endpoints.
+      Also decided there: `rejected` and `issued`/`superseded` stay unreachable on
+      purpose — see the CCR for why inventing semantics for them is worse than
+      leaving them unused.
+    acceptance_criteria:
+      - CCR-016 approved by the user before merge (drafted 2026-07-20)
+      - "openapi 3.0.0 -> 3.1.0 (additive); permissions 1.7.0; error-codes 1.6.0 (RPT-003); events 1.2.0"
+      - "approveReport / returnReport / listReportApprovals, as a compare-and-swap state machine"
+      - "Approval blocked while the report's round is still open — signing mutable scores is the real defect"
+      - Self-approval refused (a director is an evaluatee under ว10 — matrix cannot express it)
+      - "report.approved moves OUT of the events.yaml deferred: block and gains a producer"
+      - AUDIT_ALLOWLIST gains Approval, excluding `comment` (free text about a named person)
+      - PDF states whether the report has been approved
+      - Test proves a report leaves pending_approval through the API alone
+      - "PROJECT_STATE loses its not-releasable banner — this is the last of the three audit blockers"
+
+  - id: SEIP-OPS-005
+    title: Re-scan evidence uploaded before ADR-0009 (the sweep)
+    status: done                # 2026-07-20 — claude; no contract change (scanned_at is internal)
+    sprint: 2
+    dependencies: [SEIP-BLOCK-003]
+    primary_paths:
+      - scripts/ops/rescan-files.mjs
+      - prisma/migrations/20260721060000_evidence_file_scanned_at/migration.sql
+      - packages/database/src/repositories/evidence.ts
+      - packages/database/src/repositories/jobs.ts
+      - apps/worker/src/jobs/file-process.ts
+      - docs/decisions/ADR-0009-malware-scanning.md
+      - docs/project/ops-runbook.md
+    notes: >
+      ADR-0009 named this as its own blind spot under Consequences. Building it
+      corrected how the gap had been described everywhere, including in this
+      board: the population needing a re-scan is NOT the `unscanned` files, it is
+      the `clean` ones. Those were written by the pre-CCR-012 filename stub, which
+      matched "eicar"/"virus" against the FILENAME, read no bytes, and called
+      everything else clean — they are downloadable, badged ปลอดภัย, and were
+      never scanned. This database held 81 of them against 180 `unscanned`.
+      So the sweep cannot select on scan_status: `clean` is precisely the value
+      that lies, and nothing distinguished a stub verdict from a genuine one.
+      Migration 20260718220000 hit this and refused to backfill for exactly that
+      reason. Hence evidence_file.scanned_at — a receipt written ONLY when clamd
+      read the bytes and answered, so "never really scanned" becomes queryable.
+      Deliberately null for anything refused unread (oversize, size mismatch,
+      scanner down), which keeps "could not be checked" re-checkable instead of
+      letting it harden into a permanent verdict.
+      The script enqueues file.process jobs and never writes a verdict, so there
+      stays exactly one scanner and one fail-closed policy.
+      Two things the first real sweep run exposed, both fixed here: a missing S3
+      object surfaced as a bare `UnknownError` eight times over (S3 HEAD has no
+      response body to parse), and a stalled sweep was indistinguishable from a
+      running one. Also wrote the ClamAV memory/freshclam runbook section that
+      ADR-0009 had claimed already existed.
+    acceptance_criteria:
+      - "scanned_at set only on a real clamd verdict — asserted for unscanned, oversize, size-mismatch and scanner-down"   # DONE
+      - "A stub-written `clean` row is selected despite its status, and drops out once verified"                            # DONE — real clamd
+      - Soft-deleted evidence and already-queued files are skipped                                                          # DONE
+      - Refuses to run under SCAN_PROVIDER != clamav, since it would change nothing                                         # DONE
+      - "`blocked` re-scan is opt-in — it can widen access after a CLAMAV_MAX_BYTES raise"                                   # DONE
+      - Missing storage objects fail with a message naming the file                                                         # DONE
+      - "--report shows the receipt gap and any stalled queue"                                                              # DONE
+      - Sweep run for real against the dev store, not only unit-tested                                                      # DONE — 23 files verified, 2 blocked
+
+  # ── Rethink 2026-10 (PRD v1.0, plan.md, ADR-0010–0018 accepted 2026-10-12) ──
+  - id: SEIP-P0-001
+    title: "P0 week 1 — rebaseline on PostgreSQL 18, SeaweedFS for MinIO, clean dependency audit"
+    status: review              # 2026-10-12 — 13/13 CI gates green (run 38230214195); awaiting owner review
+    branch: claude/remote-control-5aclif   # PR #3 → develop (owner chose to fold L2 + P0 into it)
+    dependencies: []
+    decisions: [ADR-0012, ADR-0013]
+    primary_paths:
+      - prisma/schema.prisma
+      - prisma/migrations/20261013000000_init/migration.sql
+      - prisma/migrations/20261013000100_constraints/migration.sql
+      - scripts/db/bootstrap-roles.sql
+      - scripts/db/migrate.mjs
+      - scripts/ci/start-seaweedfs.sh
+      - scripts/ci/bootstrap-db.sh
+      - .github/workflows/ci.yml
+      - docker-compose.yml
+      - docker-compose.staging.yml
+      - scripts/ops/backup.mjs
+      - scripts/ops/restore.mjs
+    notes: >
+      MySQL migrations retired, not ported (ADR-0012 §6): fresh init generated by
+      prisma migrate diff + the develop-era constraints (partial unique indexes,
+      NULLS NOT DISTINCT, generated pass threshold, audit trigger) plus a REVOKE of
+      UPDATE/DELETE/TRUNCATE on audit_event from seip_app. Neither role is
+      superuser; CI migrates as seip_migrator and runs everything else as
+      seip_app. The move surfaced three latent defects, fixed here: SDK default
+      CRC32 on presigned PUTs (every real upload 400s on S3/SeaweedFS), an outbox
+      claim race (now FOR UPDATE SKIP LOCKED + lease), and ended memberships
+      lingering in the current list until midnight.
+    acceptance_criteria:
+      - Migrations apply from zero as a non-superuser role                         # DONE (local PG18)
+      - "test:backend 20, api 78, database 17, worker 21, security 6, e2e 12"     # DONE (local)
+      - npm audit --audit-level=high clean                                         # DONE — 0 vulnerabilities
+      - No MinIO image or MySQL reference left in CI / compose                     # DONE
+      - All CI gates green on GitHub Actions                                       # DONE — 13/13, run 38230214195 (first time for this codebase)
+
+  - id: SEIP-P0-002
+    title: "P0 week 2 — Prisma 6.19 → 7.10 (ADR-0012 §5)"
+    status: review              # 2026-10-12 — 13/13 CI green (run 38304129059); awaiting owner review
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-001]
+    decisions: [ADR-0012]
+    primary_paths:
+      - prisma.config.ts
+      - prisma/client.mjs
+      - packages/database/src/client.ts
+      - prisma/schema.prisma
+    notes: >
+      Pinned exactly at 7.10.0 (npm `latest` is 8.0.0-rc). Connection URL moved
+      from schema.prisma to prisma.config.ts (migrate uses MIGRATE_DATABASE_URL
+      when set). The client now goes through @prisma/adapter-pg; all 18 direct
+      `new PrismaClient()` sites (tests, seed, ops scripts) use a factory instead.
+      Prisma 7's CLI drags in mysql2 3.15.3 (Studio) with a high advisory —
+      overridden to ^3.24.5; audit stays at 0. Also fixed a staging bug from
+      P0-001: Dockerfile.api's last stage is `migrate`, so the target-less `api`
+      build in docker-compose.staging.yml would have produced the migrate image.
+    acceptance_criteria:
+      - "build, typecheck, lint, format, unit green"                               # DONE
+      - "test:backend 20, api 78, database 17, worker 21, security 6, e2e 12"     # DONE (local, fresh DB)
+      - npm audit high clean                                                       # DONE — 0
+      - "api runtime image builds — NOT verifiable in this sandbox (npm inside docker build hits the session proxy: SELF_SIGNED_CERT_IN_CHAIN); CI does not build images"   # OPEN
+      - CI 13/13 green again after the upgrade (P0 exit criterion)                 # DONE — run 38304129059 on cefc5d7
+
+  - id: SEIP-P0-003
+    title: "P0 week 2 — draft contract 4.0.0 (CCR-017) + internal AI contract"
+    status: done                # 2026-10-12 — owner approved; applied by SEIP-P1-001
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-001]
+    decisions: [ADR-0010, ADR-0015, ADR-0016, ADR-0017, ADR-0018]
+    primary_paths:
+      - docs/reviews/CCR-017-contract-4.0.0.md
+      - docs/contracts/drafts/internal-ai-0.1.0.yaml   # openapi-4.0.0 draft applied → docs/contracts/openapi.yaml
+      - scripts/security/check-contract-compatibility.mjs
+    notes: >
+      Draft only — nothing in force changes; apply in P1 after approval. 49 → 74
+      operations (+28, −3, 9 tagged v2). oasdiff: 87 breaking items, all on the
+      evidence/mapping/upload surface. Found and fixed a fail-open in the
+      contract-compatibility gate: when `docker run tufin/oasdiff` failed (Docker
+      Hub 429), empty stdout parsed as `[]` and the gate passed unchecked.
+    acceptance_criteria:
+      - Draft lints clean with the gate's linter and generates TS types           # DONE
+      - Breaking list produced by the gate's own checker, recorded in the CCR     # DONE — 87
+      - Permissions / error-code / event deltas and migration plan in the CCR     # DONE
+      - Dart client compiles from the draft (swagger_parser spike)                # DONE — SEIP-P0-004
+      - Owner approves CCR-017                                                     # DONE 2026-10-12
+
+  - id: SEIP-P0-004
+    title: "P0 week 2 — Dart client spike (swagger_parser) against contract 4.0.0 draft"
+    status: review              # 2026-10-12 — 14/14 CI green incl. dart client (run 38306379490)
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-003]
+    decisions: [ADR-0016]
+    primary_paths:
+      - clients/dart/seip_api/
+      - .github/workflows/ci.yml
+    notes: >
+      swagger_parser 1.45.0 + retrofit_generator 10.2.11 + json_serializable 6.14.1
+      on Dart 3.13.5: 16 clients / 74 requests / 170 models generate, build and
+      analyse clean (--fatal-infos); 4 decode tests pass. Fallback to
+      openapi-generator not needed. Two draft fixes folded back into CCR-017
+      (SyncChange per-entity fields instead of a discriminator-less oneOf;
+      MemberInvitePersonnel named). Generated code is not committed — CI and
+      tool/generate.sh regenerate it. New CI job "Gate: dart client" (14th gate).
+      retrofit_generator 9.x fails to compile against retrofit 4.10 (Parser enum
+      gained DartMappable) — pinned ^10.2.
+    acceptance_criteria:
+      - Client generated from the contract, not hand-written                      # DONE
+      - build_runner + dart analyze --fatal-infos clean                           # DONE
+      - Decode tests for sync / suggestion / upload session                       # DONE (4)
+      - Gate green in CI                                                           # DONE — run 38306379490 (14/14)
+
+  - id: SEIP-P0-005
+    title: "P0 — S3 conformance suite (ADR-0013 §4)"
+    status: review              # 2026-10-12 — 4/4 locally (x3); in CI integration gate
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-001]
+    decisions: [ADR-0013, ADR-0016, ADR-0018]
+    primary_paths:
+      - tests/storage/s3-conformance.test.mjs
+      - docker-compose.yml
+      - scripts/ci/start-seaweedfs.sh
+    notes: >
+      Proves presigned single PUT size binding, checksummed presigned multipart
+      parts (corrupt part rejected), ListParts resume, server-side complete,
+      abort, and Object Lock retention + legal hold on SeaweedFS 4.48. Found:
+      ChecksumAlgorithm on CreateMultipartUpload breaks server-side complete on
+      SeaweedFS (ListParts has no part checksums) — rule recorded in ADR-0013 and
+      CCR-017. Found: -volume.max=0 exhausts volumes after a few buckets on a small
+      disk; dev/CI now 64 MB x 100.
+    acceptance_criteria:
+      - Suite green against SeaweedFS                                              # DONE
+      - Runs in CI                                                                 # DONE — integration gate, run on c55baac
+      - Same suite green against Amazon S3 ap-southeast-7                          # OPEN — P1 (needs the AWS account)
+
+  - id: SEIP-P0-006
+    title: "P0 — Flutter skeleton calling the API through the generated Dart client"
+    status: review              # 2026-10-12 — 15/15 CI green incl. mobile (run 38313557183); emulator run open
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-004]
+    decisions: [ADR-0014, ADR-0016]
+    primary_paths:
+      - apps/mobile/
+      - .github/workflows/ci.yml
+    notes: >
+      Flutter 3.47.7 / Dart 3.13.5, Android minSdk 24, iOS. Sign-in → getCurrentUser
+      via clients/dart/seip_api (generated). Tokens in memory only until Keycloak
+      PKCE (P1). Debug-only cleartext for the dev API. Live test signs in as the
+      e2e teacher against the real API and passed on the host VM; an Android
+      emulator run is NOT verified (no emulator in this environment). New CI job
+      "Gate: mobile" (15th). apps/mobile has no package.json, so npm workspaces
+      (apps/*) skip it — verified with npm query and typecheck.
+    acceptance_criteria:
+      - Calls the API only through the generated client                           # DONE
+      - flutter analyze --fatal-infos clean; widget tests pass                     # DONE (2)
+      - Live sign-in against the real API                                          # DONE (host VM)
+      - On an Android emulator (P0 exit wording)                                   # OPEN — needs a machine with an emulator
+      - Gate green in CI                                                           # DONE — run 38313557183 (15/15)
+
+  - id: SEIP-P1-001
+    title: "P1 — apply contract 4.0.0 (CCR-017): person-owned evidence, upload sessions, two-tier mappings"
+    status: review              # 2026-10-12 — CI green (run 38321728017); min_acr open (P2)
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P0-003]
+    decisions: [ADR-0012, ADR-0015, ADR-0016, ADR-0017, ADR-0018]
+    primary_paths:
+      - docs/contracts/
+      - prisma/schema.prisma
+      - prisma/migrations/
+      - packages/database/src/repositories/
+      - apps/api/src/
+      - apps/worker/src/jobs/file-process.ts
+      - apps/web/src/
+      - tests/
+    notes: >
+      openapi 4.0.0 (74 ops) + permissions / error-codes / events 2.0.0 in force;
+      TS types and Dart client regenerated. Data model: Person; evidence owned by
+      a person with an origin school; mappings keyed on framework_version with
+      owner_confirmed → validated / returned / revoked; upload_session (single PUT
+      ≤16 MiB, else S3 multipart, server completes from ListParts);
+      idempotency_key; version columns for If-Match. Baseline migrations
+      regenerated (pre-production). API: authorizeEvidence (owner / origin-school
+      grant / committee; no route → RES-001), Idempotency-Key replay, If-Match,
+      23 phase-gated ops → 501 SYS-003, v2 scoring + reports behind
+      FEATURE_SCORING. Worker re-hashes stored originals (sha256_verified_at,
+      media_state). Web: upload sessions with per-part SHA-256 and resume,
+      validate / return / revoke on the evidence page, AI suggest button removed
+      (returns with P3). Deviations from the draft are listed in CCR-017
+      §Applied. Also fixed: the S3 conformance suite leaked its buckets and
+      exhausted SeaweedFS volumes on a long-lived dev store.
+    acceptance_criteria:
+      - "build, typecheck, lint, format, unit, contracts, ownership, dep-audit, secret-scan green"   # DONE (local)
+      - "contract compat: 95 breaking items accepted on the 2.6.0 → 4.0.0 major bump"               # DONE (local oasdiff)
+      - "test:backend 20, database 18, worker 23, api 85, security 9, storage 4, e2e 13"              # DONE (local, fresh DB)
+      - "dart client generate + analyze + test; mobile analyze + test"                                # DONE (local)
+      - "CI green on the pushed commit"                                                               # DONE — run 38321728017 on 03f64b8, 15/15 jobs
+      - "min_acr (acr ≥ 2 for validate / return / cross-person export) enforced"                     # PARTIAL — enforced behind ENFORCE_MIN_ACR (SEIP-P1-003); on in staging once clients use Keycloak
+      - "web hides v2 screens when FEATURE_SCORING=false"                                            # DONE — vite.config reads the same FEATURE_SCORING; capabilities mask the v2 affordances
+
+  - id: SEIP-P1-002
+    title: "P1 — RLS backstop by สพท. (ADR-0012 §3): seip_scoped role + withAreaScope"
+    status: done                # 2026-10-13 — CI green (run 38325277042); ADR-0019 accepted
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0012, ADR-0015, ADR-0019]
+    primary_paths:
+      - scripts/db/bootstrap-roles.sql
+      - prisma/migrations/20261013000200_rls_backstop/
+      - packages/database/src/area-scope.ts
+      - apps/api/src/routes/evidence.ts
+      - tests/backend/rls-backstop.test.mjs
+      - packages/database/test/area-scope.integration.test.mjs
+    notes: >
+      NOLOGIN read-only role seip_scoped (seip_app may SET ROLE to it, inherits
+      nothing). Policies on evidence, evidence_file, evidence_indicator_mapping,
+      upload_session and personnel_profile apply only to that role: an owner in
+      scope, the controller area, or the origin school when the school has no
+      area. Scope = transaction-local seip.area_ids / school_ids / person_ids;
+      empty fails closed, malformed raises. withAreaScope opens the transaction;
+      resolveAreaScope derives the scope from active memberships plus committee
+      evaluatees. listEvidence now reads through it. The backstop is opt-in: an
+      unwrapped query is still guarded only by the API's authorization (ADR-0019
+      Consequences). Rejected alternative: per-checkout context via
+      AsyncLocalStorage — Prisma batches findUnique across requests.
+    acceptance_criteria:
+      - "raw SQL as the scoped role cannot read another สพท.'s evidence, files, mappings or profiles"  # DONE — tests/backend/rls-backstop.test.mjs
+      - "unset or empty scope sees nothing; malformed scope errors; writes refused"                     # DONE
+      - "an unfiltered ORM query inside withAreaScope returns only the caller's area"                    # DONE — area-scope.integration
+      - "a committee seat across the area boundary keeps the evaluatee's portfolio visible"             # DONE
+      - "test:backend 27, database 23, worker 23, api 85, security 9, storage 4, e2e 13; all gates"     # DONE (local)
+      - "CI green on the pushed commit"                                                                  # DONE — run 38325277042 on 7a6a9d3
+      - "owner accepts ADR-0019"                                                                         # DONE — 2026-10-13
+      - "raw-SQL tenant reads (P3 vector search) go through withAreaScope"                               # OPEN — P3
+
+  - id: SEIP-P1-003
+    title: "P1 — identity slice 1: dev Keycloak realm, Keycloak tokens in the API, min_acr step-up (ADR-0014)"
+    status: review              # 2026-10-13 — CI green (run 38326875657); slices 2+ continue in SEIP-P1-004
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0014]
+    primary_paths:
+      - infra/keycloak/seip-realm.dev.json
+      - docker-compose.yml
+      - scripts/ci/keycloak.sh
+      - packages/auth/src/oidc.ts
+      - packages/backend-shared/src/permissions.ts
+      - apps/api/src/plugins/auth.ts
+      - apps/api/src/lib/permission-guard.ts
+      - apps/api/test/step-up.test.mjs
+      - tests/helpers/keycloak.mjs
+    notes: >
+      Keycloak 26.7.5 (docker compose + CI), realm `seip` from
+      infra/keycloak/seip-realm.dev.json: 60 s access tokens, 30 min idle / 8 h
+      SSO, browser flow with step-up (password = acr "pwd" / LoA 1, TOTP =
+      "mfa" / LoA 2), client scope seip-api (sub, aud seip-api, seip_uid, acr),
+      clients seip-mobile (public PKCE), seip-web (confidential, for the BFF),
+      seip-test (dev realm only). seip_uid is an admin-only user attribute
+      (unmanagedAttributePolicy ADMIN_EDIT). The API routes a token by its
+      header alg: HS256 = its own (acr 1), anything else = Keycloak via JWKS
+      (issuer + audience checked; no seip_uid → AUTH-001; unknown account →
+      AUTH-003). requireAcr runs after the role check (PERM-001 first) on
+      createAssignment, inviteMember, endMembership and actOnMapping
+      validate/return, behind ENFORCE_MIN_ACR (default false). Finding: a
+      direct grant yields acr "pwd" even with a TOTP code, so direct grants
+      can never stand in for step-up; all realm clients have them disabled.
+    acceptance_criteria:
+      - "a password-only Keycloak token gets AUTH-006 on validate / return; the TOTP token passes"   # DONE — step-up.test
+      - "every min_acr operation is tested or phase-gated (derived from permissions.yaml)"           # DONE
+      - "role check before step-up (PERM-001, not AUTH-006)"                                          # DONE
+      - "unlinked or unknown Keycloak users and an untrusted realm are refused"                       # DONE
+      - "CI starts the realm and runs the step-up suite (fails, not skips, when missing)"             # DONE (ci.yml)
+      - "CI green on the pushed commit"                                                               # DONE — run 38326875657 on 229e8dc
+      - "web logs in through the Keycloak BFF (cookie __Host-seip, ADR-0014 §4)"                      # DONE in SEIP-P1-004
+      - "Flutter logs in with PKCE (flutter_appauth)"                                                 # OPEN — next slice
+      - "SEIP accounts provisioned into Keycloak on invite / accept"                                  # OPEN — next slice
+      - "ENFORCE_MIN_ACR=true in staging once both clients use Keycloak"                              # OPEN
+      - "ThaID brokered IdP (sandbox) — needs the สพท. RP registration"                               # BLOCKED — external
+
+  - id: SEIP-P1-004
+    title: "P1 — identity slice 2: web sign-in through Keycloak behind the BFF (CCR-018, ADR-0014 §4)"
+    status: review              # 2026-10-13 — CI green (run 38328163583), incl. dart client + mobile + e2e sso
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-003]
+    decisions: [ADR-0014]
+    primary_paths:
+      - docs/contracts/
+      - docs/reviews/CCR-018-web-sign-in-bff.md
+      - prisma/migrations/20261013000300_web_session/
+      - packages/database/src/repositories/web-sessions.ts
+      - apps/api/src/lib/keycloak.ts
+      - apps/api/src/lib/web-session.ts
+      - apps/api/src/routes/web-auth.ts
+      - apps/api/src/plugins/auth.ts
+      - apps/web/src/
+      - tests/e2e/sso.spec.ts
+    notes: >
+      Contract 4.1.0 (additive; oasdiff: no breaking changes from 4.0.0):
+      webLogin / webCallback / webLogout, webSession cookie scheme, X-CSRF-Token,
+      AUTH-007; permissions 2.1.0, error-codes 2.1.0. Session row stores only
+      SHA-256 of the cookie and of the CSRF token; the Keycloak refresh token is
+      AES-256-GCM sealed (key from JWT_SECRET via HKDF). 30 min idle, 8 h max.
+      At most once a minute a request refreshes against Keycloak; invalid_grant
+      ends the web session (revocation ≤ ~60 s), an unreachable Keycloak does
+      not (availability over revocation, logged). A new sign-in (step-up)
+      replaces the browser's session — acr is never upgraded in place. Open
+      redirect guard on return_to; state, PKCE and ID-token nonce bind the
+      callback to the browser. SPA: SEIP ID button (shown when the build sees
+      KEYCLOAK_ISSUER + WEB_PUBLIC_ORIGIN), CSRF header on writes, no token in
+      JS for cookie sessions, step-up banner on AUTH-006 linking to
+      webLogin?acr=mfa. The password/bearer path stays until the end of P1.
+    acceptance_criteria:
+      - "contract 4.1.0 additive; gate:contracts green; oasdiff 4.0.0→4.1.0 no breaking"            # DONE
+      - "httpOnly session + readable CSRF cookie; only hashes stored; refresh token sealed"           # DONE — web-session.test
+      - "writes without / with a foreign X-CSRF-Token → AUTH-007"                                     # DONE
+      - "tampered state, missing state cookie, off-site return_to never sign anyone in"               # DONE
+      - "step-up: password session AUTH-006 → sign-in with OTP replaces the session → validate ok"    # DONE
+      - "idle 30 min, 8 h max, Keycloak logout elsewhere each end the session"                        # DONE
+      - "e2e: SEIP ID button → Keycloak → shell; reload keeps it; sign-out (CSRF) ends it"             # DONE — sso.spec
+      - "CI green on the pushed commit"                                                               # DONE — run 38328163583 on d3beedb
+      - "e2e for the step-up banner (needs an e2e stack with ENFORCE_MIN_ACR=true)"                   # OPEN
+
+  - id: SEIP-P1-005
+    title: "P1 — identity slice 3: provision SEIP accounts into Keycloak (ADR-0014)"
+    status: review              # 2026-10-13 — CI green (run 38336094640)
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-003]
+    decisions: [ADR-0014]
+    primary_paths:
+      - infra/keycloak/seip-realm.dev.json
+      - prisma/migrations/20261013000400_kc_link/
+      - apps/api/src/lib/keycloak.ts
+      - apps/api/src/routes/auth.ts
+      - apps/api/test/keycloak-provisioning.test.mjs
+    notes: >
+      Service-account client seip-provisioner (client credentials; realm-management
+      manage-users / view-users / query-users in the seip realm only). The API
+      creates the realm user (username = email, emailVerified, seip_uid, the
+      password) at accept-invite and at password login — the two moments it holds
+      the password, so it is never stored. Roles behind a second factor (director,
+      school_admin, evaluator, area_admin; ADR-0014 §6) get CONFIGURE_TOTP as a
+      required action. Idempotent by seip_uid; an existing realm user is never
+      modified. Best effort with 5 s timeouts: Keycloak down never blocks a
+      sign-in, and user_account.kc_linked_at stays null so the next password
+      login retries. An email held by another seip_uid is left alone and logged.
+      Contract unchanged (no new operation or field).
+    acceptance_criteria:
+      - "accept-invite creates the realm user; SEIP ID sign-in works with the chosen password"   # DONE
+      - "step-up roles must enrol TOTP at first SEIP ID sign-in"                                   # DONE
+      - "existing accounts provisioned at next password login, exactly once"                       # DONE
+      - "Keycloak refusing/unreachable never blocks login; retried later"                          # DONE
+      - "email conflict leaves the other realm user untouched"                                     # DONE
+      - "CI green on the pushed commit"                                                            # DONE — run 38336094640 on f1c4cbf
+      - "staging compose runs Keycloak with a real (non-dev) realm and secrets"                    # OPEN — with staging in Bangkok
+      - "accounts that never log in again get a reset-link path (needs email delivery)"            # OPEN
+
+  - id: SEIP-P1-006
+    title: "P1 — identity slice 4: Flutter SEIP ID sign-in (PKCE, offline session per device) + step-up expiry (ADR-0014 §5)"
+    status: review              # 2026-10-13 — CI green (run 38338182959), incl. mobile + dart client
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-003, SEIP-P1-005]
+    decisions: [ADR-0014]
+    primary_paths:
+      - apps/mobile/lib/src/auth.dart
+      - apps/mobile/lib/src/api.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/seip_id_test.dart
+      - apps/mobile/android/app/build.gradle.kts
+      - apps/mobile/ios/Runner/Info.plist
+      - infra/keycloak/seip-realm.dev.json
+      - packages/auth/src/oidc.ts
+      - apps/api/src/plugins/auth.ts
+    notes: >
+      App: flutter_appauth (system browser, PKCE, seip-mobile public client,
+      scope offline_access, redirect th.go.seip.app:/oauth2redirect) and
+      flutter_secure_storage for the refresh token only; access tokens (60 s)
+      in memory. 401 → one shared renewal, replay; renewal refused → signed out
+      and the stored session dropped; restart restores from the keystore without
+      a browser round trip; stepUp() = authorize(acr: mfa); sign-out ends the
+      Keycloak session. Email/password login stays until the end of P1. Realm:
+      offline_access client scope; auth_time claim. API: a second factor counts
+      for 15 min from auth_time (bearer) or from session sign-in (web) —
+      measured that Keycloak keeps acr "mfa" through every refresh. Also
+      measured: Keycloak's admin sign-out does not reliably end offline sessions
+      (a renewed token survived it 4/4 locally, was refused in CI), so P2
+      revokeDeviceSession must delete the device's offline session (ADR-0014
+      implementation notes). First stated as "does not end" — corrected after the
+      CI run on 888a640 disagreed. Test helper now waits out Keycloak's TOTP replay
+      window instead of flaking.
+    acceptance_criteria:
+      - "flutter analyze --fatal-infos; flutter test (SEIP ID sign-in, renewal, shared renewal, revoked device, restore, step-up, sign-out)"   # DONE (9 tests)
+      - "API accepts a seip-mobile PKCE offline token and its renewal; deleting the offline session stops renewal"                          # DONE — step-up.test
+      - "a second factor older than 15 min counts as acr 1 (bearer + web session)"                                                          # DONE — oidc.test + web-session.test
+      - "CI green on the pushed commit"                                                                                                       # DONE — run 38338182959 on 1f5d4d5
+      - "run on an Android emulator / iOS simulator against the dev realm"                                                                   # OPEN — no emulator in this environment
+
+  - id: SEIP-P1-007
+    title: "P1 — FR-095 tenant isolation gaps: access_denied audit, taxonomy grants, last unchecked FK"
+    status: review              # 2026-10-13 — CI green (run 38340443999)
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0012, ADR-0019]
+    primary_paths:
+      - apps/api/src/plugins/error-handler.ts
+      - apps/api/src/lib/permission-guard.ts
+      - apps/api/src/routes/taxonomy.ts
+      - apps/api/src/routes/cycles.ts
+      - tests/security/permission-matrix.test.mjs
+    notes: >
+      permissions.yaml has promised "every deny path emits an AuditEvent with
+      action=access_denied when the request carried a valid identity" since
+      Sprint 0, and nothing wrote one. The error handler now does, best effort,
+      for PERM-*, AUTH-006 and RES-001 (the cross-tenant answer). The audit row
+      carries operationId, code, method and route template, never the query
+      string. Requests with no valid identity are not attributed. The three
+      taxonomy routes checked authentication only, and now need a role
+      (requireAnyGrant). Of the "4 unchecked FK fields" from the 2026-07 audit,
+      three were already fixed (agreements, assignments, reports); the last,
+      createCycle framework_version_id, answered 500 and now answers VAL-002.
+      Not covered: AUTH-007 (a CSRF failure is thrown before the identity is
+      attached).
+    acceptance_criteria:
+      - "every denial the permission sweep provokes has an access_denied row with the right actor, operation and code"   # DONE
+      - "no identity → no row"                                                                                          # DONE
+      - "AUTH-006 denials are audited"                                                                                  # DONE — step-up.test
+      - "taxonomy refuses an account with no live membership (PERM-001)"                                                # DONE
+      - "createCycle unknown framework → VAL-002"                                                                       # DONE
+      - "CI green on the pushed commit"                                                                                 # DONE — run 38340443999 on 529b7aa
+
+  - id: SEIP-P1-008
+    title: "P1 — FR-091 bulk onboarding: import a staff list (CSV) with a dry run and per-row results (CCR-019)"
+    status: review              # 2026-10-13 — CI green (run 38347291380)
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0014]
+    primary_paths:
+      - docs/contracts/
+      - docs/reviews/CCR-019-member-import.md
+      - apps/api/src/routes/members.ts
+      - apps/api/test/member-import.test.mjs
+      - apps/web/src/lib/memberCsv.ts
+      - apps/web/src/pages/admin/MembersPage.tsx
+      - tests/e2e/onboarding.spec.ts
+    notes: >
+      Contract 4.2.0 (additive; oasdiff clean): importMembers, up to 500 rows, each
+      exactly an inviteMember (shared checkInvite / performInvite), per-row
+      invited / would_invite / rejected with the API error; dry_run writes
+      nothing; same grant and min_acr 2 as inviteMember. Web: CSV parsed in the
+      browser (quotes, BOM, CRLF; headers in any order), "check" (dry run) then
+      "import the N valid rows", invite codes shown once; a template download.
+      Not done: email delivery of invites (no SMTP decision yet) and QR codes.
+    acceptance_criteria:
+      - "dry run reports VAL-001 / VAL-002 (dup in file, area_admin) / RES-003 / VAL-003 per row and writes nothing"   # DONE
+      - "import invites the good rows, skips the bad, tokens work with accept-invite"                                   # DONE
+      - "PERM-001 for non-admins; 500-row limit; step-up (min_acr 2) and the permission sweep cover it"                 # DONE
+      - "e2e: admin uploads a CSV, checks, imports, sees the new member"                                                # DONE
+      - "CI green on the pushed commit"                                                                                  # DONE — run 38347291380 on 3b4d2c3
+
+  - id: SEIP-P1-009
+    title: "P1 — FR-019 school context: pick a school when you work at several (CCR-020, contract 4.3.0)"
+    status: review              # 2026-10-13 — CI green (run 38348405185)
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: []
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-020-current-memberships-school-name.md
+      - apps/api/src/routes/auth.ts
+      - apps/web/src/lib/schoolContext.ts
+      - apps/web/src/hooks/useAuth.tsx
+      - apps/web/src/App.tsx
+      - tests/e2e/school-picker.spec.ts
+    notes: >
+      /auth/me now lists only memberships in effect (one isActiveNow rule for access
+      and for the client) and adds school_name. Fixed in passing: after a transfer
+      the web still offered the old school's screens. Web picker remembered per
+      account; routes remount on switch. Not done (rest of FR-019): moving evidence
+      to another school context, and a school_admin uploading on someone's behalf
+      needing the owner's acceptance before it counts.
+    acceptance_criteria:
+      - "/auth/me: current memberships only, with school_name"            # DONE — school-context.test
+      - "two schools: picker, remembered; one school: no picker"          # DONE — school-picker.spec + unit
+      - "contract 4.3.0 additive (oasdiff clean)"                          # DONE
+      - "CI green on the pushed commit"                                    # DONE — run 38348405185 on f3e0024
+
+  - id: SEIP-P1-010
+    title: "P1 — FR-090 area admin manages the schools of their area (CCR-021, contract 4.4.0, permissions 2.3.0)"
+    status: review              # 2026-10-13 — CCR-021 approved by owner
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001, SEIP-P1-008]
+    decisions: [CCR-021]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/contracts/permissions.yaml
+      - docs/reviews/CCR-021-area-admin-manages-schools.md
+      - apps/api/src/routes/areas.ts
+      - packages/database/src/repositories/schools.ts
+      - packages/auth/src/role-resolution.ts
+      - apps/web/src/pages/area/AreaSchoolsPage.tsx
+    notes: >
+      First writes for area_admin (closed list area_admin_writes, min_acr 2). Another
+      area is RES-001. A closed school ends member access through isActiveNow; data
+      is kept. Not done: OQ-33 (สศศ. schools), a per-tenant controller setting.
+    acceptance_criteria:
+      - "area admin lists/creates/renames/closes schools of own area only"   # DONE — area-schools.test
+      - "appoint school_admin via invite"                                    # DONE — area-schools.test
+      - "closed school ends member access"                                   # DONE — area-schools.test
+      - "matrix sweep + step-up cover the 4 ops"                              # DONE
+      - "owner approves CCR-021"                                              # DONE — 2026-10-13
+
+  - id: SEIP-P1-011
+    title: "P1 — FR-051 transfer within one สพท.: the portfolio moves, the new school validates"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001, SEIP-P1-009]
+    decisions: [ADR-0015]
+    primary_paths:
+      - apps/api/src/routes/mappings.ts
+      - apps/api/src/lib/evidence-access.ts
+      - packages/database/src/repositories/mappings.ts
+      - apps/api/test/transfer.test.mjs
+    notes: >
+      No contract change (a mapping's school is not in the contract). A mapping now
+      belongs to the school the owner works at when confirming it, not the evidence's
+      origin school. So after a move the new school's director validates it, and may
+      read the evidence behind a live mapping at their school (getEvidence,
+      listEvidenceMappings, download). The old school keeps read access to items
+      that originated there until the controller rule (OQ-12) is decided. Not done:
+      a cross-สพท. move (ADR-0015 §5), restricting learner-identifiable items, and
+      the teacher moving an item to another school context.
+    acceptance_criteria:
+      - "teacher keeps the whole portfolio after the move"                    # DONE — transfer.test
+      - "old school cannot find or open evidence added after the move"       # DONE — transfer.test
+      - "mapping confirmed after the move is validated by the new school"     # DONE — transfer.test
+
+  - id: SEIP-P1-012
+    title: "P1 — FR-093 device sessions: list each app sign-in and browser, revoke one"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-004, SEIP-P1-006]
+    decisions: [ADR-0014]
+    primary_paths:
+      - prisma/migrations/20261013000500_device_session/migration.sql
+      - apps/api/src/routes/devices.ts
+      - apps/api/src/plugins/auth.ts
+      - apps/api/src/lib/keycloak.ts
+      - packages/database/src/repositories/device-sessions.ts
+      - apps/web/src/pages/DevicesPage.tsx
+      - apps/mobile/lib/src/api.dart
+      - apps/api/test/devices.test.mjs
+    notes: >
+      No contract change: listDeviceSessions and revokeDeviceSession were already in
+      contract 4.0.0, phase-gated for P2, and are served now. An app sign-in (a
+      seip-mobile Keycloak session, the token's sid) becomes a device_session row
+      on first sight. The platform and version come from the app's User-Agent
+      "SEIP-Mobile/<v> (<android|ios>)". Revoking marks the row first, so the app's
+      tokens are refused at once, then deletes the Keycloak offline session, so it
+      cannot renew. The app then wipes its stored session (SeipSession.signOut).
+      Browser sessions come from web_session. Not done: push tokens (P2) and
+      device labels.
+    acceptance_criteria:
+      - "user lists app and browser sessions; current flagged"                # DONE — devices.test
+      - "revoke refuses the device's tokens at once and ends the Keycloak session" # DONE — devices.test
+      - "another person's session is RES-001"                                 # DONE — devices.test
+      - "app wipes local session when renewal is refused"                     # DONE — seip_id_test (SEIP-P1-006)
+
+  - id: SEIP-P1-013
+    title: "P1 — FR-099 password reset issued by the school admin (CCR-022, contract 4.5.0)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-005, SEIP-P1-012]
+    decisions: [CCR-022]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-022-admin-issued-password-reset.md
+      - prisma/migrations/20261013000600_password_reset/migration.sql
+      - packages/database/src/repositories/password-resets.ts
+      - apps/api/src/routes/members.ts
+      - apps/api/src/routes/auth.ts
+      - apps/web/src/pages/ResetPasswordPage.tsx
+      - apps/api/test/password-reset.test.mjs
+    notes: >
+      The admin-issued half of FR-099: a 30-minute, single-use token, shown once.
+      Redeeming it ends every session, here and in SEIP ID, and sets the SEIP ID
+      password. Not done: self-service reset by email/SMS, which waits for a
+      provider in the NFR-Res-06 register. Owner question in CCR-022: should the
+      director's account be excluded from school-admin resets?
+    acceptance_criteria:
+      - "single use, 30 min, newer cancels older, AUTH-008 for all failures"   # DONE
+      - "all sessions end, app refused at once, SEIP ID password updated"      # DONE (real Keycloak)
+      - "not own account / never-activated account; school_admin only, min_acr 2" # DONE
+
+  - id: SEIP-P1-014
+    title: "P1 — FR-099a the person confirms their personnel profile; the admin edits it (CCR-023, contract 4.6.0)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-008]
+    decisions: [CCR-023]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-023-personnel-profile-confirmation.md
+      - prisma/migrations/20261013000700_personnel_confirmation/migration.sql
+      - packages/database/src/repositories/personnel.ts
+      - apps/api/src/routes/members.ts
+      - apps/web/src/components/ProfileConfirmBanner.tsx
+      - apps/web/src/pages/admin/MembersPage.tsx
+      - apps/api/test/personnel-profile.test.mjs
+    notes: >
+      Confirm / request-correction by the person; edit by the school admin. A change
+      of position or rank requires the person to confirm again. Not done: classroom
+      type, subjects and grades, values per cycle, and phone in CSV.
+    acceptance_criteria:
+      - "person confirms or asks for a correction; admin sees the note"     # DONE
+      - "admin edit clears the note; position/rank change unconfirms"        # DONE
+      - "rank outside family VAL-003; school_admin only, min_acr 2"          # DONE
+
+  - id: SEIP-P1-015
+    title: "P1 — FR-019 rest: owner accepts items uploaded on their behalf; owner moves an item to the right school (CCR-024, contract 4.7.0)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-009, SEIP-P1-011]
+    decisions: [CCR-024]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-024-evidence-owner-acceptance-and-move.md
+      - prisma/migrations/20261013000800_evidence_owner_acceptance/migration.sql
+      - apps/api/src/routes/evidence.ts
+      - apps/api/src/routes/mappings.ts
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+      - apps/api/test/evidence-context.test.mjs
+    notes: >
+      An item uploaded by someone else has owner_accepted_at null and cannot be
+      mapped until the owner accepts it. The owner moves an item to another of their
+      current schools within one สพท.; it is audited as moved. Not done: moving an
+      item to another cycle (evidence is not tied to a cycle; mappings take the
+      framework version from the indicator).
+    acceptance_criteria:
+      - "on-behalf upload needs owner acceptance before mapping"   # DONE
+      - "owner moves item to another own school, same สพท. only"   # DONE
+      - "audit for accept and move"                                # DONE
+
+  - id: SEIP-P1-016
+    title: "P1 — owner decisions OQ-31 / OQ-12: area admin acknowledges directors' agreements; the old school keeps only what it used (CCR-025)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-010, SEIP-P1-011]
+    decisions: [CCR-025]
+    primary_paths:
+      - docs/contracts/permissions.yaml
+      - docs/reviews/CCR-025-administrator-agreement-approver-and-retention.md
+      - apps/api/src/routes/agreements.ts
+      - apps/api/src/lib/evidence-access.ts
+      - packages/database/src/repositories/evidence.ts
+      - apps/api/test/agreement-approver.test.mjs
+      - apps/api/test/transfer.test.mjs
+    notes: >
+      Owner answers of 2026-10-13. OQ-31: area_admin acknowledges a school
+      administrator's agreement until a สพท. supervisor role exists (FR-096). OQ-12:
+      after a move, the origin school keeps only items mapped there. CCR-022 stays as
+      built.
+    acceptance_criteria:
+      - "director's agreement: school roles PERM-001, area admin acknowledges"  # DONE
+      - "teacher's agreement: area admin PERM-004"                             # DONE
+      - "old school keeps mapped items only after the move"                   # DONE
+
+  - id: SEIP-P2-001
+    title: "P2 — FR-012 same bytes twice in one portfolio: warn before upload, confirm after re-hash (CCR-026, contract 4.8.0)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [CCR-026]
+    primary_paths:
+      - docs/contracts/openapi.yaml
+      - docs/reviews/CCR-026-duplicate-files-in-portfolio.md
+      - prisma/migrations/20261013000900_file_duplicate_of/migration.sql
+      - packages/database/src/repositories/evidence.ts
+      - apps/worker/src/jobs/file-process.ts
+      - apps/api/src/routes/evidence.ts
+      - apps/web/src/pages/EvidenceSubmitPage.tsx
+      - apps/api/test/duplicates.test.mjs
+    notes: >
+      A warning, never a refusal. The pre-check uses the client hash against
+      server-verified files only; the worker flags duplicate_of_file_id after its own
+      re-hash. Not done: skipping AI for duplicates (P3), near-duplicates (FR-013),
+      and the mobile client check.
+    acceptance_criteria:
+      - "owner sees duplicates before bytes move; never another person's"   # DONE
+      - "worker marks the later copy after re-hash"                          # DONE
+
+  - id: SEIP-P2-002
+    title: "P2 — FR-006 / FR-009 offline outbox and resumable upload in the app (engine)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-006, SEIP-P2-001]
+    decisions: [ADR-0016, ADR-0018]
+    primary_paths:
+      - apps/mobile/lib/src/outbox.dart
+      - apps/mobile/test/outbox_test.dart
+      - apps/mobile/test/live_outbox_test.dart
+      - apps/mobile/android/app/src/main/AndroidManifest.xml
+    notes: >
+      No contract change. The engine keeps the queue in the platform keystore
+      (SecureOutboxStore). Evidence and upload creates replay with stable UUID
+      Idempotency-Keys derived from client_uuid. A resume sends only the parts the
+      server's ListParts lacks, and an expired session is replaced automatically.
+      The local copy is deleted only after sha256_verified_at plus a clean or
+      sanitised scan; a blocked file stays for the person. Android backup is off. Not
+      done: the capture screens (photo, scan, video, share-in), running the drain
+      from a background worker (WorkManager / BGTaskScheduler), encrypting the bytes
+      at rest, the iOS backup-exclusion flag, the 1 GB device test on a low-cost
+      phone, and the 720p rendition.
+    acceptance_criteria:
+      - "offline capture waits; sent when online"                                # DONE — outbox_test
+      - "drop + restart resumes from server ListParts, no part sent twice"         # DONE — outbox_test, live_outbox_test (17 MiB, real API + SeaweedFS)
+      - "expired session replaced automatically"                                  # DONE
+      - "20 replays while flaky make no duplicate"                                # DONE
+      - "local copy deleted only after re-hash + clean scan"                      # DONE
+
+  - id: SEIP-P2-003
+    title: "P2 — FR-014 web: several files at once (drag and drop), one item per file, progress per file"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-001]
+    decisions: []
+    primary_paths:
+      - apps/web/src/pages/BatchUploadPage.tsx
+      - apps/web/src/lib/batchUpload.ts
+      - apps/web/src/lib/batchUpload.test.ts
+      - tests/e2e/batch-upload.spec.ts
+    notes: >
+      No contract change. /evidence/batch: choose a category, drop or pick files.
+      Each file becomes its own evidence item titled after the file, up to 2 upload
+      at once, and one failure never stops the rest. A retry resumes the same item
+      and upload session (Idempotency-Key per file for the life of the page). Each
+      file gets a duplicate warning (CCR-026). Not done: combining several photos
+      into one item (FR-001, app).
+    acceptance_criteria:
+      - "multi-file + drag and drop, progress and Thai status per file"   # DONE — batch-upload.spec
+      - "one failure does not stop the rest; retry resumes"                # DONE — batchUpload.test
+
+  - id: SEIP-P2-004
+    title: "P2 — app capture: photo, video, gallery into the offline outbox, status in Thai (FR-001/003/004/017, first cut)"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-002]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/capture.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/capture_flow_test.dart
+    notes: >
+      The home screen offers ถ่ายรูป, อัดวิดีโอ and เลือกจากคลัง (image_picker). The
+      file is copied into the app's private support directory, with the video length
+      read by video_player. The person picks a category (only those taking that file
+      type) and a title. The item joins the outbox and is listed as รอส่ง / กำลังส่ง /
+      กำลังตรวจ / ส่งไม่ผ่าน. The outbox drains on open, on pull-to-refresh and every
+      30 s while the screen is open. Not done: several photos in one item (FR-001),
+      document scan (FR-002), the recording timer and size warning (FR-003),
+      share-in (FR-004), background drain, encrypting bytes at rest, iOS
+      backup-exclusion flag, and a device run.
+    acceptance_criteria:
+      - "capture offline → queued with category/title/duration, shown as รอส่ง"   # DONE — capture_flow_test
+
+  - id: SEIP-P2-005
+    title: "P2 — FR-021 server measures video/audio (ffprobe); the measured length replaces the declared one and enforces the cap"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0018]
+    primary_paths:
+      - apps/worker/src/media-probe.ts
+      - apps/worker/src/jobs/file-process.ts
+      - infra/docker/Dockerfile.worker
+      - apps/worker/test/file-process.test.mjs
+    notes: >
+      No contract change: duration_seconds, duration_ms, width and height already
+      exist on EvidenceFile. After the re-hash matches, the worker runs ffprobe on a
+      temp copy, records what it measured (replacing the client's declared length),
+      and blocks a clip longer than its category's max_duration_seconds by more than
+      1 s of slack. MEDIA_PROBE=none or a missing binary leaves the length
+      unmeasured, never estimated. The worker image and CI install ffmpeg. Not done:
+      thumbnails, the 720p browser rendition, and stripping EXIF GPS from
+      derivatives.
+    acceptance_criteria:
+      - "measured length replaces the declared one"     # DONE — file-process.test
+      - "over-cap clip blocked on the measured length"  # DONE — file-process.test
+
+  - id: SEIP-P2-006
+    title: "P2 — FR-021 720p browser copy of each video, metadata stripped; the original is untouched"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-005]
+    decisions: [ADR-0018]
+    primary_paths:
+      - apps/worker/src/media-probe.ts
+      - apps/worker/src/jobs/file-process.ts
+      - packages/database/src/repositories/evidence.ts
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+    notes: >
+      No contract change: FileRole review_720p and parent_file_id were already in
+      contract 4.0.0. For a video original that is not blocked, the worker transcodes
+      an H.264/AAC MP4 at most 720 lines high, with faststart and -map_metadata -1 so
+      GPS is removed. It stores the copy next to the original and adds a child row
+      that inherits the scan verdict. This is idempotent per parent and best effort:
+      a failed transcode leaves the original as it is. MEDIA_RENDITIONS=on|off. The
+      web lists originals only and offers "ดูแบบ 720p". Not done: posters and
+      thumbnails, photo EXIF stripping, audio proxy, and client-side compression
+      before upload (FR-007/FR-008).
+    acceptance_criteria:
+      - "720p child file, original untouched, GPS metadata absent"  # DONE — file-process.test
+      - "re-processing does not make a second copy"                # DONE
+
+  - id: SEIP-P2-007
+    title: "P2 — FR-021 preview picture (poster) for each photo and video, EXIF and GPS removed; the original is untouched"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-006]
+    decisions: [ADR-0018]
+    primary_paths:
+      - apps/worker/src/media-probe.ts
+      - apps/worker/src/jobs/file-process.ts
+      - packages/database/src/repositories/evidence.ts
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+    notes: >
+      No contract change: FileRole poster was already in contract 4.0.0. For a clean
+      or unscanned image or video original, ffmpeg writes a JPEG at most 480 px wide
+      from the photo or the video's first frame. The output carries pixels only, with
+      no EXIF and no GPS. It is a child row with role poster, idempotent per parent,
+      and best effort. The web shows it above the original's download button. Not
+      done: extracting the capture date before stripping (this belongs to FR-030 /
+      FR-084), an EXIF-free full-size photo for export, and HEIC decoding where
+      ffmpeg lacks it.
+    acceptance_criteria:
+      - "photo poster has no EXIF segment; original still has it"  # DONE — file-process.test
+      - "video poster from first frame, no location tag"            # DONE
+
+  - id: SEIP-P2-008
+    title: "P2 — FR-001 several photos in a row make one evidence item in the app"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-004]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/outbox.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/outbox_test.dart
+      - apps/mobile/test/capture_flow_test.dart
+    notes: >
+      No contract change, because an evidence item already holds many files. After a
+      photo, the app asks "ถ่ายเพิ่ม / เสร็จ". The photos share one category and title,
+      and each becomes an outbox entry with a shared group_uuid. That group_uuid is
+      the item's client_uuid and Idempotency-Key seed, so the server makes the item
+      once. Siblings reuse its id, and each file still has its own upload session.
+      The list shows one row per item ("3 รูป · <slowest state>"). The touched Dart
+      files were run through dart format. Not done: removing one photo from a group
+      before it is sent, and picking several from the gallery at once.
+    acceptance_criteria:
+      - "3 grouped photos -> 1 evidence create, 3 upload sessions, 3 files"  # DONE — outbox_test
+      - "widget: shoot 3, save once, one row '3 รูป · รอส่ง'"                 # DONE — capture_flow_test
+
+  - id: SEIP-P2-009
+    title: "P2 — FR-015 link and note evidence on the web; links are http(s) only"
+    status: review              # 2026-10-13
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0017]
+    primary_paths:
+      - apps/api/src/routes/evidence.ts
+      - apps/web/src/pages/LinkNotePage.tsx
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+      - apps/api/test/evidence-flow.test.mjs
+    notes: >
+      The API already took kind=link and kind=note (contract 4.0.0). It now refuses a
+      link_url that is not http(s) — javascript:, data: and file: are VAL-001 — because
+      the detail page renders the link as an href. The contract description says so; no
+      schema change. A new page, /evidence/link-note ("ลิงก์/บันทึก" in the nav), is
+      idempotent per form. The detail page shows the link (noopener, noreferrer,
+      nofollow) or the note as plain text, and hides the file section for those kinds.
+      The app (same day) gained a "ลิงก์/บันทึก" dialog. The item rides the offline
+      outbox with kind, link_url and note_text, and is done once the server creates it,
+      since there is nothing to upload. Not done: snapshot policy and broken-link checks
+      (FR-015 P5).
+    acceptance_criteria:
+      - "javascript:/data:/file: links refused (VAL-001)"  # DONE — evidence-flow.test
+      - "note active at once, text round-trips"            # DONE
+      - "web form validates http(s)"                       # DONE — LinkNotePage.test
+      - "app: note queued offline, created once, no upload" # DONE — outbox_test, capture_flow_test
+
+  - id: SEIP-P2-010
+    title: "P2 — FR-008 large files wait for Wi-Fi in the app; the person can choose mobile data per item"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-002]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/outbox.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/outbox_test.dart
+      - apps/mobile/test/capture_flow_test.dart
+    notes: >
+      No contract change. Outbox.drain asks NetworkInfo (connectivity_plus on a device)
+      whether the connection is metered. On mobile data with no Wi-Fi or ethernet, a file
+      above wifiOnlyAboveBytes (default 50 MB) does not start sending bytes; small files
+      and links/notes still go. A file the server already has is still checked. The row
+      shows "รอ Wi-Fi (ไฟล์ใหญ่)" with a "ใช้เน็ตมือถือ" button, which sets
+      allow_mobile_data for the item (the whole group) and is stored with the queue. The
+      held-for-Wi-Fi flag itself is not stored, since it depends on the network now. Not
+      done: a settings screen to change the 50 MB limit, and re-draining automatically
+      when Wi-Fi returns (with background drain).
+    acceptance_criteria:
+      - "metered: big waits, small goes; allow -> big goes"  # DONE — outbox_test
+      - "allow_mobile_data survives a restart"              # DONE
+      - "widget: รอ Wi-Fi + ใช้เน็ตมือถือ"                    # DONE — capture_flow_test
+
+  - id: SEIP-P2-011
+    title: "P2 — FR-003 the app shows a recording's length and warns (never stops) when it exceeds the category cap"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-004]
+    decisions: [ADR-0016, ADR-0003]
+    primary_paths:
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/capture_flow_test.dart
+    notes: >
+      After a recording, the details dialog shows "ความยาว m:ss". It warns in Thai when
+      that length exceeds the chosen category's max_duration_seconds. The cap is
+      framework data, never a constant. Changing the category re-checks it. The person
+      can still save: the server refuses at initiate (UPL-003) and on the measured
+      length (SEIP-P2-005). Not done: a live timer while recording. That needs an
+      in-app camera screen (the camera plugin) instead of the system camera through
+      image_picker. Also not done: the one_take / seam pre-flight warning, and the
+      shortest-cap fallback when no category is chosen.
+    acceptance_criteria:
+      - "length shown; warning only when over the category's cap"  # DONE — capture_flow_test
+
+  - id: SEIP-P2-012
+    title: "P2 — FR-002 scan a multi-page paper document in the app into one PDF per item"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-004]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/capture.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/scan_pdf_test.dart
+      - apps/mobile/android/app/src/main/AndroidManifest.xml
+    notes: >
+      A "สแกนเอกสาร" button opens the platform scanner through cunning_document_scanner
+      (ML Kit on Android, VisionKit on iOS). The scanner does edge detection, cropping
+      and perspective correction. pagesToPdf (package pdf, pure Dart, unit-tested) turns
+      the pages into one PDF, one page per scan sized to its image. The PDF is written to
+      the app's private outbox directory, the scanner's temp images are deleted, and it
+      then rides the outbox like any capture. Android declares CAMERA; iOS already has
+      NSCameraUsageDescription. NOT VERIFIED ON A DEVICE: there is no Android/iOS SDK in
+      this environment and CI does not build the app, so the plugin and manifest are
+      uncompiled. The first device build must confirm them (minSdk 24 matches the
+      plugin's).
+    acceptance_criteria:
+      - "3 pages -> one PDF with 3 pages, landscape kept"  # DONE — scan_pdf_test
+      - "scan on a real Android and iPhone"                 # OPEN — needs a device
+
+  - id: SEIP-P2-013
+    title: "P2 — FR-004 share to SEIP from other apps (Android); a shared link opens the link form"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-008, SEIP-P2-009]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/capture.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/capture_flow_test.dart
+      - apps/mobile/android/app/src/main/AndroidManifest.xml
+    notes: >
+      receive_sharing_intent sits behind ShareInbox. Android declares SEND and
+      SEND_MULTIPLE for */*. Shared files are taken as received, copied from the plugin's
+      temp cache into the private outbox directory, and queued through the same path as a
+      capture: one dialog, and several files become one item (FR-001 group). Shared text
+      yields its first http(s) address (firstWebAddress, unit-tested), which opens the
+      link form prefilled (FR-015). The home screen reads the launch share once (then
+      reset) and listens while open. A share made while signed out is picked up after
+      sign-in, because the plugin keeps it until read. NOT DONE: iOS. It needs a Share
+      Extension target and an App Group in Xcode, which cannot be created or built here.
+      NOT VERIFIED ON A DEVICE: the Android build and plugin are uncompiled in this
+      environment.
+    acceptance_criteria:
+      - "widget: 2 shared photos -> one grouped item; shared link -> prefilled link form"  # DONE
+      - "share from LINE / Drive / Photos on Android"                                      # OPEN — needs a device
+      - "iOS Share Extension"                                                              # OPEN
+
+  - id: SEIP-P2-014
+    title: "P2 — FR-006 the outbox drains in the background (WorkManager) without racing the open app's token rotation"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P2-002, SEIP-P1-006]
+    decisions: [ADR-0016, ADR-0014]
+    primary_paths:
+      - apps/mobile/lib/src/background.dart
+      - apps/mobile/lib/src/api.dart
+      - apps/mobile/lib/main.dart
+      - apps/mobile/test/background_test.dart
+    notes: >
+      main() registers a periodic workmanager task: every 15 min, network connected, keep
+      policy. The task restores the SEIP ID session from the keystore and drains the same
+      SecureOutboxStore queue as the app (with the FR-008 Wi-Fi rule). Refresh tokens
+      rotate with reuse detection (realm revokeRefreshToken, max reuse 0), so two
+      guards apply. (1) The open app touches a foreground mark on every 30 s sync, and
+      the task stands down for 2 min after it. (2) SeipSession._renew uses the token in
+      the store rather than its in-memory copy, so a rotation made by the task is picked
+      up. Signed out means the queue waits. The task never throws. drainInBackground is
+      unit-tested (4 cases, including the rotation hand-over). NOT DONE: iOS
+      registration (BGTaskSchedulerPermittedIdentifiers and the AppDelegate hook), and a
+      device check that Android actually runs it; this environment cannot build the app.
+    acceptance_criteria:
+      - "closed app + signed in -> drained; app open -> stands down; signed out -> kept"  # DONE — background_test
+      - "app renews with the rotated token from the store"                                # DONE
+      - "runs on a real Android device; iOS BGTask registration"                          # OPEN
+
+  - id: SEIP-P3-001
+    title: "P3 v0 — analysis → suggestions → owner accepts, end to end on the local_heuristic floor (no GPU yet)"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001, SEIP-P2-009]
+    decisions: [ADR-0010, ADR-0015, ADR-0019]
+    primary_paths:
+      - prisma/migrations/20261014000100_ai_suggestions/migration.sql
+      - packages/database/src/lib/heuristic-suggest.ts
+      - packages/database/src/repositories/analysis.ts
+      - apps/worker/src/jobs/evidence-analyze.ts
+      - apps/worker/src/pdf-text.ts
+      - apps/api/src/routes/analysis.ts
+      - apps/web/src/components/SuggestionsPanel.tsx
+      - tests/e2e/suggestions.spec.ts
+    notes: >
+      No contract change: the seven "analysis" operations, AI-002/003/004 and their
+      permissions rows were already in contract 4.0.0, and now leave phase-gated.ts. New
+      tables evidence_analysis, content_segment, ai_suggestion and suggestion_feedback
+      each have an RLS backstop policy. A partial unique index allows one open
+      suggestion per (evidence, indicator, framework version). A verified, scanned
+      original queues evidence.analyze, and so does a new link or note. The worker
+      extracts the PDF text layer page by page (pdf.js 6.3.289: no rendering, no fonts,
+      no document scripts; control characters stripped). It ranks the owner's ว9/ว10
+      indicators by the share of their content words found (a Thai stop-word list keeps
+      ที่/และ/ผู้ from matching). Each suggestion gets a page locator whose quote
+      validateQuote checks verbatim against the stored segment. The run finishes
+      degraded + provisional, band never clear, calibrated_p null. Batch accept checks
+      the role, then skips every item with AI-004 because no pre-tick gate has passed.
+      calibrated_p, rationale_th and segment text are owner-only. Accept creates an
+      owner_confirmed, ai_accepted mapping with locator_snapshot, which the director
+      then validates as usual. Reject stores a reason. Re-runs are limited to once per
+      10 min (AI-002, Retry-After). A deleted item's queued analysis finishes quietly.
+      The e2e CI job now starts the worker (media off). NOT DONE: the GPU tier, its
+      model, OCR and ASR (AQ-05). Also not done: the extract service (Office, images,
+      video), PII redaction before the model (FR-023a), hidden-text and injection checks
+      (FR-028), the calibration and gold set, and the suggestion inbox in the app.
+    acceptance_criteria:
+      - "Thai PDF → page segments, verbatim quote on the right page, degraded+provisional"  # DONE — worker file-process.test
+      - "owner-only confidence/rationale; stranger RES-001; accept → ai_accepted mapping; AI-003; AI-004; AI-002"  # DONE — api analysis.test
+      - "permission sweep covers all seven ops"                                               # DONE — test:security
+      - "web: teacher accepts a suggestion for a note"                                       # DONE — e2e suggestions.spec
+
+  - id: SEIP-P3-002
+    title: "P3 — FR-023a mask national ids, phone numbers and emails before the mapper, in quotes, and in segments others read"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001]
+    decisions: [ADR-0010]
+    primary_paths:
+      - packages/database/src/lib/pii-redact.ts
+      - packages/database/test/pii-redact.test.mjs
+      - apps/worker/src/jobs/evidence-analyze.ts
+      - apps/api/src/routes/analysis.ts
+    notes: >
+      No contract change. redactPii is rules only, with no model and no network. It
+      masks 13-digit national ids, plain or grouped with space, dash or dot; Thai
+      mobile and landline numbers, including +66; and emails. Thai digits count, and
+      ids are matched before phones. Ordinary numbers stay: years, scores, times, and
+      class sizes. The mapper gets masked text, so every quote, which the director
+      and committee read, is masked. The stored segment keeps the original:
+      listEvidenceSegments gives the owner the original and everyone else the masked
+      text (before this, they got null). Not done: learner names, which need an
+      in-country NER model; the ≥ 200-document recall benchmark the PRD asks for; and
+      masking in the model input of the future GPU tier, which will reuse redactPii.
+    acceptance_criteria:
+      - "ids / phones / emails in every common shape masked; ordinary numbers kept"  # DONE — pii-redact.test
+      - "quotes carry no PII; owner sees original segment, director masked"          # DONE — worker + api tests
+      - "≥ 200-document Thai recall benchmark"                                        # OPEN
+
+  - id: SEIP-P3-003
+    title: "P3 — FR-028 flag items that may carry hidden instructions for the AI; only a school admin clears it (CCR-027)"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001]
+    decisions: [ADR-0010, CCR-027]
+    primary_paths:
+      - packages/database/src/lib/injection-detect.ts
+      - apps/worker/src/pdf-text.ts
+      - apps/worker/src/jobs/evidence-analyze.ts
+      - apps/api/src/routes/evidence.ts
+      - apps/api/src/routes/analysis.ts
+      - apps/web/src/pages/EvidenceDetailPage.tsx
+      - prisma/migrations/20261014000200_injection_flag/migration.sql
+      - docs/reviews/CCR-027-hidden-instruction-flag.md
+    notes: >
+      Additive, contract 4.9.0 / permissions 2.9.0. The rules-only detector (no model,
+      no network) checks three things: zero-width and bidi characters (≥ 3);
+      instruction wording addressed to an AI or asking for a score or blanket mapping,
+      in Thai and English, read after the hidden characters are stripped so they
+      cannot break up a phrase; and PDF text under 2 pt (≥ 20 characters, from pdf.js
+      text transforms). Ordinary uses ("นักเรียนใช้ AI", "ครูให้คะแนนตาม rubric") are
+      not flagged. The flag is stored on the evidence with the content hash it was
+      found for, and a clear applies to that hash only. While flagged, nothing is
+      batch-acceptable. The badge is shown to all readers. clearInjectionFlag is for
+      the school admin only, never the owner, and is audited. Not done: comparing the
+      text layer against an OCR of the rendered page (GPU tier); Office hidden
+      sheets, QR codes and link snapshots (extract service); and step-up on clearing.
+    acceptance_criteria:
+      - "Thai/English instruction text, hidden chars, tiny text flagged; ordinary text not"  # DONE — injection-detect.test, worker test
+      - "owner and director cannot clear; school admin clears with audit; same content stays cleared"  # DONE — api analysis.test
+      - "permission sweep covers clearInjectionFlag"                                         # DONE — test:security
+
+  - id: SEIP-P3-004
+    title: "P3 — the app: sent evidence and its suggested indicators — accept, or reject with a reason"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001, SEIP-P3-003]
+    decisions: [ADR-0010, ADR-0016]
+    primary_paths:
+      - apps/mobile/lib/src/suggestions.dart
+      - apps/mobile/lib/src/screens.dart
+      - apps/mobile/test/suggestions_test.dart
+    notes: >
+      No contract change. The Dart client is generated at build time from the current
+      contract (4.9.0), so it already knows injection_suspected. A "หลักฐานที่ส่งแล้ว"
+      button on the home screen, shown when the account has a person, lists the
+      owner's items (listEvidence owner_person_id). An item opens its open
+      suggestions: band in Thai, rationale and quotes as plain text with page numbers,
+      a note when they are provisional, and the hidden-instruction warning.
+      "ใช่ ผูกตัวชี้วัดนี้" calls acceptSuggestion with a fresh Idempotency-Key.
+      "ไม่ใช่" asks for one of the six reasons and calls rejectSuggestion. These
+      decisions need the network and are not queued in the outbox, since a
+      suggestion only exists online. Not done: push notification when suggestions
+      are ready (P4), and acting on suggestions offline.
+    acceptance_criteria:
+      - "list → item → accept removes it with a 'waiting for the director' note; reject sends the chosen reason"  # DONE — suggestions_test
+
+  - id: SEIP-P4-001
+    title: "P4 — getCoverage: per-indicator coverage for a person, school or area; web coverage page"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001]
+    decisions: [ADR-0015, ADR-0017]
+    primary_paths:
+      - packages/database/src/repositories/coverage.ts
+      - apps/api/src/routes/coverage.ts
+      - apps/api/test/coverage.test.mjs
+      - apps/web/src/pages/CoveragePage.tsx
+      - tests/e2e/coverage.spec.ts
+    notes: >
+      No contract change: getCoverage, its schemas and its permission row were in
+      contract 4.0.0, and it now leaves phase-gated.ts. For each indicator of the
+      framework version (workload-gate rows excluded) it counts live mappings by state
+      (owner_confirmed / validated / returned) and open suggestions. A person's
+      coverage counts by owner, over accepted, undeleted items. A school or area
+      counts by mapping school (the owner's school when confirmed, FR-051), with
+      people_count and never names. Grants: own (the caller's person); school
+      (director or school admin where the person is active staff); committee (a
+      seated evaluator over that person); area-r (the area admin's own area and its
+      schools). No route at all is RES-001; a role with no grant is PERM-001.
+      eligibility_warnings is [] until rules-as-data lands (ADR-0017). The web page
+      "ความครอบคลุม" lists every indicator with its counts and marks gaps; a director
+      or school admin can switch to the whole school. The security sweep checks the
+      fixture teacher's own coverage for every role. Not done: the area dashboard
+      page, the mobile summary (FR-053), and the next-deadline pin.
+    acceptance_criteria:
+      - "own / staff / school / area allowed; peer and stranger RES-001; teacher on school PERM-001"  # DONE — coverage.test
+      - "permission sweep covers getCoverage"                                                        # DONE — test:security
+      - "web: teacher table, director school switch"                                                 # DONE — e2e coverage.spec
+
+  - id: SEIP-P4-002
+    title: "P4 — committee view: an evaluatee's confirmed evidence per indicator, no AI fields, ends when the round closes"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-001]
+    decisions: [ADR-0015]
+    primary_paths:
+      - apps/api/src/routes/committee.ts
+      - packages/database/src/repositories/coverage.ts
+      - apps/web/src/pages/evaluator/AssignmentEvidencePage.tsx
+      - apps/api/test/coverage.test.mjs
+    notes: >
+      No contract change: listAssignmentEvidence was in contract 4.0.0 and now leaves
+      phase-gated.ts. It returns owner_confirmed or validated mappings on the
+      evaluatee's accepted, undeleted items for the cycle's framework version, ordered
+      by indicator and offset-paged. Files exclude anything blocked or pending; a
+      video shows its 720p copy instead of the original. There is no AI confidence,
+      rationale or suggestion. The injection flag on the evidence still shows.
+      Grants: director or school admin of the assignment's school; a member of THIS
+      committee, even from another school, while the round is not closed (PERM-003
+      once closed, FR-062b). Staff without a grant get PERM-001; someone with no
+      foothold at the school gets RES-001. The web page "หลักฐานของผู้รับการประเมิน" is
+      linked from the evaluator's round list and the director's assignment list; items
+      open the evidence page, where validate and return already live. Not done: the
+      view_original / view_derivative grant scopes (no grant table yet), committee
+      comments per indicator (FR-064), and a mobile committee view (FR-065).
+    acceptance_criteria:
+      - "seated evaluator from another school + director see items per indicator; off-committee PERM-003; stranger RES-001; evaluatee 403; closed round ends committee access"  # DONE — coverage.test
+      - "permission sweep covers listAssignmentEvidence"  # DONE — test:security
+
+  - id: SEIP-P4-003
+    title: "P4 — in-app notifications from outbox events (suggestions ready, file blocked, mapping validated/returned); web inbox and settings"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P3-001]
+    decisions: [ADR-0016]
+    primary_paths:
+      - prisma/migrations/20261014000300_notifications/migration.sql
+      - packages/database/src/repositories/notifications.ts
+      - apps/worker/src/jobs/outbox-dispatch.ts
+      - apps/api/src/routes/notifications.ts
+      - apps/web/src/pages/NotificationsPage.tsx
+      - tests/e2e/notifications.spec.ts
+    notes: >
+      No contract change: the four notification operations and their self-scoped rows
+      were in contract 4.0.0 and now leave phase-gated.ts. completeAnalysis now emits
+      analysis.completed (events.yaml), which it did not before. The outbox dispatcher
+      runs the notification consumer before marking an event published. It handles
+      analysis.completed with suggestions (suggestions_ready),
+      evidence.file.scan_completed blocked (processing_failed), mapping.validated and
+      mapping.returned, each to every active account of the evidence owner. The
+      notification table has a unique (source_event_id, user_id), so a re-dispatched
+      event never notifies twice. The Thai texts name no evidence title or file
+      name, and route is always an in-app path, which the web follows only if it
+      starts with a single "/". Read marking and preferences touch the caller's
+      own rows only. Preferences are push (default on), email (default off) and
+      quiet hours (HH:MM, validated). On the web, 🔔 shows the unread count
+      (refreshed every minute and on inbox changes); the page lists notifications,
+      opens them, has "อ่านทั้งหมดแล้ว" and the settings. Not done: actually sending
+      push (FCM/APNs ping only, needs the push-token ops, P2) and email (needs a
+      provider, NFR-Res-06); deadline reminders; the app inbox; per-kind settings.
+    acceptance_criteria:
+      - "suggestions_ready and mapping_validated reach only the owner, exactly once; nobody else can mark them read"  # DONE — api analysis.test
+      - "preferences default, replace, quiet-hours validation"                                                     # DONE
+      - "web: note → notification → opens the item"                                                                # DONE — e2e notifications.spec
+
+  - id: SEIP-P4-004
+    title: "P4 — FR-100 push token per app sign-in (registerPushToken / removePushToken); sending comes later"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-012, SEIP-P4-003]
+    decisions: [ADR-0016]
+    primary_paths:
+      - prisma/migrations/20261014000400_device_push_token/migration.sql
+      - apps/api/src/routes/devices.ts
+      - packages/database/src/repositories/device-sessions.ts
+      - apps/api/test/devices.test.mjs
+    notes: >
+      No contract change: both operations and their self-scoped rows were in contract
+      4.0.0 and now leave phase-gated.ts. device_session gains push_provider, CHECKed
+      to fcm or apns, and push_token. PUT binds the token to the caller's own live app
+      sign-in (the session the token came through). A browser or password-token
+      request has no app session and gets VAL-001, the 400 the contract lists.
+      DELETE clears the token. Revoking a session clears it too, and listDeviceSessions
+      reports has_push. Not done: sending the ping (FCM/APNs credentials; the ping
+      carries no content, FR-101) and the app's call to register (firebase_messaging
+      needs native setup and a device).
+    acceptance_criteria:
+      - "app session binds, lists has_push, deletes; password token VAL-001; revoke clears"  # DONE — devices.test (real Keycloak)
+
+  - id: SEIP-P4-005
+    title: "P4 — readiness views: the area admin's per-school page (FR-057) and the app's coverage card (FR-053)"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-001]
+    decisions: [ADR-0016]
+    primary_paths:
+      - apps/web/src/pages/area/AreaCoveragePage.tsx
+      - apps/mobile/lib/src/coverage.dart
+      - apps/mobile/test/coverage_test.dart
+    notes: >
+      No API or contract change; both read getCoverage. On the web, "ความพร้อมรายโรงเรียน"
+      (area admin) shows the area total and a row per active school: staff count,
+      indicators with no evidence, waiting, validated. There is a ว9 / ว10 switch and
+      counts only. In the app, a card on the home screen shows indicators without
+      evidence, mappings waiting for the director, and open suggestions; offline or
+      without a person it stays hidden. Not done: an e2e for the area page (the e2e
+      fixtures have no area admin yet), and the next-deadline pin on the card (needs
+      cycle dates in the app).
+    acceptance_criteria:
+      - "app card counts gaps / waiting / open suggestions; hidden without a person"  # DONE — coverage_test
+      - "area page per school"                                                         # DONE — typecheck/lint; API covered by coverage.test
+
+  - id: SEIP-P4-006
+    title: "P4 — FR-064 committee comments / requests per indicator; the evaluatee replies (CCR-028)"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-002]
+    decisions: [CCR-028]
+    primary_paths:
+      - apps/api/src/routes/committee.ts
+      - packages/database/src/repositories/comments.ts
+      - prisma/migrations/20261014000500_assignment_comment/migration.sql
+      - apps/web/src/components/AssignmentComments.tsx
+      - apps/web/src/pages/AssignmentCommentsPage.tsx
+      - docs/reviews/CCR-028-committee-comments-per-indicator.md
+    notes: >
+      Additive: openapi 4.10.0, permissions 2.10.0, events 2.1.0. Plain text: no score,
+      no status change. The committee (while the round is open, and only for a role
+      the matrix grants committee — a seat alone is not a grant) and the director
+      post comment or request_info. The evaluatee replies only, to a comment on the
+      same indicator. The school admin reads. The event carries no body. Not done:
+      notifying the evaluatee. It needs a NotificationKind enum value, which
+      oasdiff rates as breaking (response-property-enum-value-added), so it awaits
+      the owner's decision (see the CCR). Same day: "การประเมินของฉัน" lists the
+      evaluatee's own assignments (cycles → rounds → listAssignments, filtered to
+      their personnel) and links to the comments page. e2e comments.spec: the
+      evaluatee replies to the director's seeded request; the director reads it in
+      a separate browser. Notification items became real links (href = in-app
+      route), which also fixed notifications.spec picking another test's item.
+    acceptance_criteria:
+      - "committee/director post; evaluatee reads and replies only; peer 403, stranger 404, off-committee PERM-003; closed round PERM-003; no body in the event"  # DONE — coverage.test
+      - "permission sweep covers both ops"     # DONE — test:security
+      - "evaluatee finds and replies in the web; director sees it"  # DONE — e2e comments.spec
+      - "notification to the evaluatee"        # DONE — owner decision A 2026-10-14: open enum, 4.11.0 / events 2.2.0; coverage.test (evaluatee ×2, the asker on reply, nobody else, idempotent)
+
+
+  - id: SEIP-P5-001
+    title: "P5 — FR-117 (portability) portable portfolio export (portfolio_portable): zip of accepted originals + manifest"
+    status: review              # 2026-10-14
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [ADR-0017]
+    primary_paths:
+      - prisma/migrations/20261014000600_export_package/migration.sql
+      - packages/database/src/repositories/exports.ts
+      - apps/worker/src/jobs/export-build.ts
+      - apps/api/src/routes/exports.ts
+      - apps/web/src/pages/ExportsPage.tsx
+    notes: >
+      No contract change: createExport / listExports / getExport / getExportDownloadUrl
+      were already in openapi 4.x and leave phase-gated.ts. export_package carries RLS
+      (person in scope or school in scope). The worker job export.build zips every
+      accepted, unblocked item's scanned files (evidence/NNN title/…) plus manifest.json
+      (schema seip.portfolio_portable v1, sha256 per file) and a Thai README. It
+      uploads to exports/<person>/<id>.zip and emits export.ready, which notifies the
+      person (kind export_ready, route /exports). Packages expire after 7 days, and
+      storage GC deletes their object. A download link is given only while the
+      package is ready. Someone else's export needs a school grant at a school where
+      the person is staff, plus step-up (min_acr other_person: 2), and is audited
+      (export_requested / export_downloaded). dpa_pack and pa2_workbook answer
+      VAL-002 until their rules data (DpaSlotProfile, the ก.ค.ศ. workbook layout) is
+      verified. listDpaSlotProfiles and getChanges stay phase-gated.
+    acceptance_criteria:
+      - "owner's zip has originals + manifest + README; blocked items excluded; peer RES-001; admin download audited; export_ready notification"  # DONE — exports.test
+      - "expired → EXP-002 and GC removes the object"            # DONE — exports.test
+      - "permission sweep covers the 4 ops; step-up on other_person"  # DONE — test:security, step-up.test
+      - "web page: create, poll, download"                      # DONE — e2e exports.spec
+      - "dpa_pack / pa2_workbook"                               # NOT STARTED — rules data unverified
+
+  - id: SEIP-P5-002
+    title: "P5 — FR-117 data-subject request register and the area DPO role (CCR-029)"
+    status: review              # 2026-10-15
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P5-001, SEIP-P1-010]
+    decisions: [CCR-029]
+    primary_paths:
+      - prisma/migrations/20261015000100_subject_request/migration.sql
+      - packages/database/src/repositories/subject-requests.ts
+      - apps/api/src/routes/subject-requests.ts
+      - apps/api/src/routes/areas.ts
+      - apps/web/src/pages/privacy/PrivacyRequestsPage.tsx
+      - apps/web/src/pages/privacy/DpoRequestsPage.tsx
+      - docs/reviews/CCR-029-dpo-role-and-subject-requests.md
+    notes: >
+      Owner decisions 2026-10-15: a new area-scoped dpo role, with Role made an open
+      enum (4.12.0, not 5.0.0); the first slice is the register plus export. The person
+      files any of six types. The area's DPO approves, rejects (with a reason) or
+      completes (with a note). Approving access or portability queues the person's
+      portfolio export, and the request completes itself on export.ready. Other types are
+      carried out by hand. due_at = +30 days, a warning only (NFR-PDPA-05 unverified).
+      The DPO reads no school data. The sweep proves it, and the "no grant, no foothold"
+      routes now answer PERM-001 for area roles. Not done: in-system erasure/correction,
+      revoking an appointment. (Due-date reminders added the same day: an hourly reminders.run worker job.)
+    acceptance_criteria:
+      - "person files; only they and their area's DPO see it; another area RES-001; area admin PERM-001"  # DONE — subject-requests.test
+      - "approve access → export queued → completed on export.ready; DPO cannot see the export"  # DONE — subject-requests.test
+      - "other types approve → complete with note; reject needs a reason; audit has no free text"  # DONE — subject-requests.test
+      - "area admin appoints / lists DPOs; step-up on appointDpo and decideSubjectRequest"  # DONE — subject-requests.test, step-up.test
+      - "dpo in the permission sweep on every operation"  # DONE — test:security
+      - "web: file + follow; DPO queue; appoint on the area page"  # DONE — e2e privacy-requests.spec
+      - "DPO reminded before the due date (7 d, 1 d, overdue), once per milestone"  # DONE 2026-10-15 — worker reminders.test (hourly reminders.run job, kind deadline)
+      - "carry out correction / erasure / restriction in the system"  # NOT STARTED — retention rules to design
+
+  - id: SEIP-P4-007
+    title: "P4 — FR-111 audit of non-owner evidence access; FR-047 mapping provenance labels"
+    status: review              # 2026-10-15
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-002]
+    decisions: []
+    primary_paths:
+      - apps/api/src/lib/evidence-access.ts
+      - apps/api/src/routes/evidence.ts
+      - apps/api/src/routes/committee.ts
+      - packages/database/src/audit.ts
+      - apps/web/src/lib/provenance.ts
+    notes: >
+      No contract change. FR-111: getEvidence and getEvidenceFileDownloadUrl write
+      evidence_viewed / evidence_file_downloaded when the caller is not the owner, and
+      listAssignmentEvidence writes committee_evidence_viewed. Each row names the actor
+      and the grant used (school / committee / area-r / via mapping), and carries ids
+      only: no title, no file name. The owner's own reads are not logged. FR-047: one
+      label everywhere, "AI เสนอ · ยืนยันโดยเจ้าของ" or "เจ้าของเพิ่มเอง", now also on
+      the committee view. No confidence is shown (FR-061). Not done: a screen for the
+      owner or the DPO to read the access log (FR-111 asks for the record; reading it
+      is US-21 audit export).
+    acceptance_criteria:
+      - "director / committee views audited with grant; owner not logged"  # DONE — coverage.test
+      - "non-owner download audited with file id, no file name"           # DONE — evidence-flow.test
+      - "provenance label on owner and committee views"                  # DONE — web unit provenance.test, typecheck
+
+  - id: SEIP-P4-008
+    title: "P4 — FR-054 search and filter the portfolio (CCR-030, 4.13.0)"
+    status: review              # 2026-10-15
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P1-001]
+    decisions: [CCR-030]
+    primary_paths:
+      - packages/database/src/repositories/evidence.ts
+      - apps/api/src/routes/evidence.ts
+      - apps/web/src/pages/EvidenceListPage.tsx
+    notes: >
+      Additive query parameters on listEvidence:
+      - q: title contains, case-insensitive
+      - kind
+      - performed_from / performed_to: overlap with the item's work-date span; undated
+        items drop out once a bound is set
+      - mapping_state: unmapped = no live mapping
+      - cycle_id: its dates bound the work date (FR-035); another school's or an
+        unknown cycle is VAL-002
+      All filters sit inside the grant-derived scope and the RLS backstop, so none
+      widens what a caller can list. The web list has a filter bar, and a filter that
+      matches nothing says so instead of showing the first-run empty state. Not done:
+      a cycle picker on the web (the API takes cycle_id), and filters in the app.
+    acceptance_criteria:
+      - "each filter alone and combined; overlap semantics; foreign cycle VAL-002; stranger finds nothing"  # DONE — evidence-search.test
+      - "web filter bar with a 'no match' state and clear"  # DONE — e2e evidence-search.spec
+
+  - id: SEIP-P4-009
+    title: "P4 — FR-065 read-only committee view in the app"
+    status: review              # 2026-10-15
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-P4-002]
+    decisions: []
+    primary_paths:
+      - apps/mobile/lib/src/committee.dart
+      - apps/mobile/test/committee_test.dart
+    notes: >
+      No contract or API change. An evaluator or director gets a "งานกรรมการ" button.
+      It lists the assignments of open and scoring rounds (cycles → rounds →
+      listAssignments; names from listPersonnel when the role may list, a generic label
+      otherwise), then the evaluatee's confirmed evidence per indicator in framework
+      order (listAssignmentEvidence + getFramework). Each item shows its provenance
+      (FR-047), its mapping status and its file count. There is no validate, return or
+      comment action; those stay on the web. A closed round (PERM-003) says access has
+      ended. Not done: opening the files in the app, and a device run.
+    acceptance_criteria:
+      - "offered to evaluator / director only"   # DONE — committee_test
+      - "open rounds only; framework order; provenance; read-only; PERM-003 message"  # DONE — committee_test
+
+  - id: SEIP-OPS-006
+    title: "Installable staging stack — fixes found by actually installing it, plus a deploy-smoke CI gate"
+    status: review              # 2026-10-17 — owner asked "แก้ไข พร้อม ติดตั้งให้ใช้งานได้จริง"
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-OPS-003, SEIP-OPS-004]
+    primary_paths:
+      - .dockerignore
+      - infra/docker/Dockerfile.api
+      - infra/docker/Dockerfile.worker
+      - infra/docker/Dockerfile.web
+      - infra/docker/nginx-web.conf.template
+      - docker-compose.staging.yml
+      - .env.staging.example
+      - apps/api/src/env.ts
+      - apps/api/src/index.ts
+      - apps/api/src/lib/s3.ts
+      - scripts/ops/smoke-install.mjs
+      - scripts/ops/deploy-remote.sh
+      - infra/caddy/Caddyfile
+      - .github/workflows/ci.yml
+      - .github/workflows/deploy.yml
+      - docs/project/INSTALL.th.md
+      - docs/project/ops-runbook.md
+    notes: >
+      No workflow had ever built infra/docker, and installing it turned up six
+      faults, each of which alone made the stack unusable or unsafe:
+      (1) no .dockerignore — COPY . . baked .env/.env.staging secrets, host
+      node_modules and backups into image layers; (2) the api listened on
+      127.0.0.1 inside its container, unreachable from web and the published port
+      (its TCP healthcheck from inside still passed) — now HOST, 0.0.0.0 in compose;
+      (3) presigned URLs were signed for http://seaweedfs:8333, a name no browser
+      resolves — now S3_PUBLIC_ENDPOINT (= SEIP_PUBLIC_ORIGIN) signs, and the web
+      container forwards /<bucket>/ to seaweedfs with Host intact (^~ so the
+      static-asset regex never captures an evidence .jpg); (4) web served the SPA
+      only, so without an edge proxy nothing could sign in — it now proxies /api/
+      too; (5) the runtime images lacked docs/contracts, which backend-shared reads
+      at import — api and worker crashed on boot; (6) assets/fonts for the PA PDF
+      was missing likewise. Also: an `ops` profile service runs seed /
+      provision-school / bootstrap-admin on the internal network (the runbook used
+      to say "from a one-shot container, or the host" and left it there).
+      No contract change (env and deployment only). Image builds cannot run in
+      the dev sandbox, so each Dockerfile stage was reproduced natively and the
+      gateway run in stock nginx; the deploy-smoke gate is the real-image proof.
+    acceptance_criteria:
+      - "no secrets / node_modules in the build context"  # DONE — .dockerignore
+      - "api reachable from other containers and the published port"  # DONE — HOST; deploy smoke
+      - "presigned upload + download work from the browser origin"  # DONE — presign-public-endpoint.test, smoke-install via gateway
+      - "api and worker runtime images boot"  # DONE locally (runtime-stage reproduction); CI deploy smoke
+      - "seed + first admin on a docker install without publishing the DB"  # DONE — ops service
+      - "CI builds the images and drives a fresh install end to end"  # DONE — Gate: deploy smoke green on 6ccbb54 (run 39025756527): 18 migrations, api on the container IP, invite→accept→upload via /seip-evidence/→clamav scan (423 then 200)→download
+      - "Thai install guide"  # DONE — docs/project/INSTALL.th.md
+      - "HTTPS edge without hand-made certificates"  # DONE — profile edge (Caddy, infra/caddy/Caddyfile)
+      - "one-click deploy to the owner's server"  # BUILT — .github/workflows/deploy.yml + scripts/ops/deploy-remote.sh (dry-run with stub docker); WAITING for the owner's GitHub environment seip-production (host, SSH key, known_hosts, domain, admin)

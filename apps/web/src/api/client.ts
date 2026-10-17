@@ -65,6 +65,25 @@ async function tryRefreshSession(): Promise<boolean> {
   }
 }
 
+// ── Cookie session (CCR-018). Signed in through Keycloak, the browser holds an
+// httpOnly session cookie the page cannot read, plus a readable CSRF cookie that
+// must be echoed as X-CSRF-Token on every write. No token ever reaches JS.
+export const WEB_SSO: boolean = import.meta.env.VITE_WEB_SSO === true;
+const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function csrfToken(): string | null {
+  const m = document.cookie.match(/(?:^|;\s*)__Host-seip-csrf=([^;]+)/);
+  return m ? m[1] : null;
+}
+
+/** Same-site URL that starts a Keycloak sign-in; `mfa` asks for the second factor. */
+export function webLoginHref(returnTo = '/', acr: 'pwd' | 'mfa' = 'pwd'): string {
+  return `/api/v1/auth/web/login?${new URLSearchParams({ return_to: returnTo, acr })}`;
+}
+
+/** Fired when the API answers AUTH-006, so the shell can offer the step-up. */
+export const STEP_UP_EVENT = 'seip:step-up';
+
 // A Request's body is consumed by the time onResponse sees it, so the retry
 // needs a clone taken BEFORE dispatch. Keyed on the request instance itself;
 // entries are removed in onResponse, so nothing outlives its round-trip.
@@ -74,6 +93,10 @@ const AUTH_PATHS = ['/auth/login', '/auth/refresh', '/auth/logout'];
 api.use({
   onRequest({ request }) {
     if (accessToken) request.headers.set('authorization', `Bearer ${accessToken}`);
+    else if (UNSAFE.has(request.method)) {
+      const csrf = csrfToken();
+      if (csrf) request.headers.set('x-csrf-token', csrf);
+    }
     if (currentSchoolId) request.headers.set('x-school-id', currentSchoolId);
     retryClones.set(request, request.clone());
     return request;
@@ -81,6 +104,10 @@ api.use({
   async onResponse({ request, response }) {
     const clone = retryClones.get(request);
     retryClones.delete(request);
+    if (response.status === 403) {
+      const body = (await response.clone().json().catch(() => null)) as { code?: string } | null;
+      if (body?.code === 'AUTH-006') window.dispatchEvent(new Event(STEP_UP_EVENT));
+    }
     if (response.status !== 401 || AUTH_PATHS.some((p) => request.url.includes(p))) {
       return response;
     }
@@ -112,6 +139,10 @@ export async function authorizedFetch(path: string, init: RequestInit = {}): Pro
   const url = path.startsWith('/api/') ? path : `/api/v1${path.startsWith('/') ? path : `/${path}`}`;
   const headers = new Headers(init.headers);
   if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
+  else if (UNSAFE.has((init.method ?? 'GET').toUpperCase())) {
+    const csrf = csrfToken();
+    if (csrf) headers.set('x-csrf-token', csrf);
+  }
   if (currentSchoolId) headers.set('x-school-id', currentSchoolId);
 
   let response = await fetch(url, { ...init, headers });

@@ -7,7 +7,7 @@ process.env.NODE_ENV = 'test';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../../prisma/client.mjs';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
 import {
@@ -17,8 +17,10 @@ import {
   resetLoginRateLimiterState,
   setLoginRateLimiter,
 } from '../dist/lib/login-rate-limit.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
 
-const prisma = new PrismaClient();
+const created = trackSchools();
+const prisma = createPrismaClient();
 let app;
 let email;
 const password = 'rate-limit-test-password-99';
@@ -37,16 +39,16 @@ before(async () => {
 
   email = `rate-${randomUUID()}@x.io`;
   const user = await prisma.userAccount.create({
-    data: {
+    data: { person: { create: { displayName: 'fixture' } },
       email,
       displayName: 'Rate',
       status: 'active',
       passwordHash: await argonHash(password),
     },
   });
-  const school = await prisma.school.create({
+  const school = created.add(await prisma.school.create({
     data: { code: `rate-${randomUUID()}`, name: 'Rate School' },
-  });
+  }));
   await prisma.schoolMembership.create({
     data: {
       userId: user.id,
@@ -60,6 +62,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   // Restore process singleton so other test files are not throttled (M4).
   restoreAfterSuite?.();
   setLoginRateLimiter(new LoginRateLimiter({

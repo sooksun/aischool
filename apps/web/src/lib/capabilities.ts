@@ -20,8 +20,22 @@ export type UiCapability =
   | 'viewReports'
   /** createReport */
   | 'createReports'
-  /** actOnMapping school-level confirm/reject (not teacher own-revoke) */
-  | 'governMappings';
+  /** actOnMapping validate / return (not the owner's own-revoke) */
+  | 'governMappings'
+  /** createEvidence / createUpload / completeUpload */
+  | 'submitEvidence'
+  /** listMembers / inviteMember / endMembership (CCR-014) */
+  | 'manageMembers'
+  /** listAreaSchools / createSchool / updateSchool / appointSchoolAdmin (CCR-021) */
+  | 'manageAreaSchools'
+  /** clearInjectionFlag (CCR-027) */
+  | 'clearInjectionFlags'
+  /** createSubjectRequest / listSubjectRequests (own) — FR-117, CCR-029 */
+  | 'fileSubjectRequests'
+  /** listSubjectRequests / decideSubjectRequest (dpo: area) */
+  | 'handleSubjectRequests'
+  /** listAreaDpos / appointDpo (CCR-029) */
+  | 'appointDpos';
 
 export type Capabilities = Record<UiCapability, boolean>;
 
@@ -38,8 +52,29 @@ export const CAPABILITY_ROLES: Record<UiCapability, readonly Role[]> = {
   viewReports: ['teacher', 'deputy', 'director', 'school_admin', 'evaluator', 'area_admin'],
   // createReport
   createReports: ['director', 'school_admin'],
-  // actOnMapping: director + school_admin (school scope)
-  governMappings: ['director', 'school_admin'],
+  // actOnMapping validate/return: director (school) + evaluator (committee).
+  // school_admin manages members, not evidence judgements (permissions 2.0.0).
+  governMappings: ['director', 'evaluator'],
+  // createEvidence, createUpload, completeUpload — every role that owns
+  // evidence. evaluator and area_admin are absent from the matrix row: they read
+  // others' evidence (committee / area-r) but never submit their own.
+  submitEvidence: ['teacher', 'deputy', 'director', 'school_admin'],
+  // listMembers, inviteMember, endMembership — school_admin alone. Deliberately
+  // NOT director: onboarding creates accounts and grants access to PDPA-scoped
+  // evidence, which CCR-014 kept to the one role whose contract description is
+  // "ผู้ดูแลระบบระดับโรงเรียน ... จัดการ ... บุคลากร".
+  manageMembers: ['school_admin'],
+  // listAreaSchools, createSchool, updateSchool, appointSchoolAdmin — the only
+  // writes an area-scoped role holds (permissions.yaml area_admin_writes).
+  manageAreaSchools: ['area_admin'],
+  // clearInjectionFlag (CCR-027): school_admin of the item's school, never the owner.
+  clearInjectionFlags: ['school_admin'],
+  // createSubjectRequest (own): every role that is a person at a school.
+  fileSubjectRequests: ['teacher', 'deputy', 'director', 'school_admin', 'evaluator'],
+  // decideSubjectRequest (dpo: area) — the DPO alone; not area_admin (CCR-029).
+  handleSubjectRequests: ['dpo'],
+  // listAreaDpos / appointDpo — area_admin_writes (CCR-029).
+  appointDpos: ['area_admin'],
 };
 
 const FALSE_CAPS: Capabilities = {
@@ -48,11 +83,34 @@ const FALSE_CAPS: Capabilities = {
   viewReports: false,
   createReports: false,
   governMappings: false,
+  submitEvidence: false,
+  manageMembers: false,
+  manageAreaSchools: false,
+  clearInjectionFlags: false,
+  fileSubjectRequests: false,
+  handleSubjectRequests: false,
+  appointDpos: false,
 };
 
-/** Pure: memberships → flags. Call once per user change (memoize in useAuth). */
+/**
+ * Affordances whose API routes exist only when FEATURE_SCORING=true (ADR-0017:
+ * v2 committee scoring + PA reports). With the flag off the server does not
+ * register submitMyScores / getAssignmentResults / the report ops, so the
+ * screens would be dead ends.
+ */
+export const V2_SCORING_CAPABILITIES: readonly UiCapability[] = ['scoreAsCommittee', 'viewReports', 'createReports'];
+
+/** Build-time switch, read from the same FEATURE_SCORING as the API (vite.config.ts). */
+export const FEATURE_SCORING: boolean = import.meta.env.VITE_FEATURE_SCORING === true;
+
+/**
+ * Pure: memberships → flags. Call once per user change (memoize in useAuth).
+ * `featureScoring` defaults to on so the role table can be tested on its own;
+ * useAuth passes the build's FEATURE_SCORING.
+ */
 export function capabilitiesFromMemberships(
   memberships: readonly Membership[] | null | undefined,
+  featureScoring = true,
 ): Capabilities {
   if (!memberships?.length) return { ...FALSE_CAPS };
 
@@ -63,6 +121,7 @@ export function capabilitiesFromMemberships(
   for (const cap of Object.keys(CAPABILITY_ROLES) as UiCapability[]) {
     out[cap] = CAPABILITY_ROLES[cap].some((r) => held.has(r));
   }
+  if (!featureScoring) for (const cap of V2_SCORING_CAPABILITIES) out[cap] = false;
   return out;
 }
 

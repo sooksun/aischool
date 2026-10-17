@@ -3,26 +3,34 @@
 // Regenerate: npm run codegen:contracts
 // Drift check: npm run gate:contracts (fails CI if this file disagrees with the source)
 
-export const EVENTS_VERSION = '1.1.0';
+export const EVENTS_VERSION = '2.3.0';
 
 export type EventType =
   | 'evidence.created'
   | 'evidence.file.registered'
   | 'evidence.file.scan_completed'
-  | 'evidence.mapping.suggested'
-  | 'evidence.mapping.confirmed'
-  | 'evidence.mapping.rejected'
-  | 'evidence.mapping.revoked'
+  | 'evidence.file.verified'
+  | 'analysis.completed'
+  | 'analysis.failed'
+  | 'mapping.owner_confirmed'
+  | 'mapping.validated'
+  | 'mapping.returned'
+  | 'mapping.revoked'
+  | 'export.ready'
   | 'assignment.created'
   | 'assignment.scores.submitted'
   | 'assignment.completed'
   | 'round.closed'
   | 'report.generated'
-  | 'ai.suggestion.created';
+  | 'ai.suggestion.created'
+  | 'assignment.comment.created'
+  | 'subject_request.created'
+  | 'subject_request.decided'
+  | 'report.approved';
 
 export interface Event_evidence_created {
   evidence_id: string;
-  owner_personnel_id: string;
+  owner_person_id: string;
   category_code: string;
 }
 
@@ -36,34 +44,60 @@ export interface Event_evidence_file_registered {
 export interface Event_evidence_file_scan_completed {
   evidence_id: string;
   file_id: string;
-  scan_status: 'clean' | 'blocked';
+  scan_status: 'clean' | 'unscanned' | 'blocked';
 }
 
-export interface Event_evidence_mapping_suggested {
+export interface Event_evidence_file_verified {
+  evidence_id: string;
+  file_id: string;
+  sha256_matched: boolean;
+}
+
+export interface Event_analysis_completed {
+  analysis_id: string;
+  evidence_id: string;
+  status: 'succeeded' | 'degraded';
+  suggestion_count: number;
+}
+
+export interface Event_analysis_failed {
+  analysis_id: string;
+  evidence_id: string;
+  error_code: string;
+}
+
+export interface Event_mapping_owner_confirmed {
   mapping_id: string;
   evidence_id: string;
   indicator_id: string;
-  mapping_source: 'human' | 'ai_suggested';
+  mapping_source: 'ai_accepted' | 'manual';
 }
 
-export interface Event_evidence_mapping_confirmed {
+export interface Event_mapping_validated {
   mapping_id: string;
   evidence_id: string;
   indicator_id: string;
-  confirmed_by_user_id: string;
+  validated_by_user_id: string;
+  validator_role: 'director' | 'committee';
 }
 
-export interface Event_evidence_mapping_rejected {
+export interface Event_mapping_returned {
   mapping_id: string;
   evidence_id: string;
   indicator_id: string;
-  rationale: string | null;
+  validated_by_user_id: string;
 }
 
-export interface Event_evidence_mapping_revoked {
+export interface Event_mapping_revoked {
   mapping_id: string;
   evidence_id: string;
   indicator_id: string;
+}
+
+export interface Event_export_ready {
+  export_id: string;
+  kind: 'dpa_pack' | 'pa2_workbook' | 'portfolio_portable';
+  person_id: string | null;
 }
 
 export interface Event_assignment_created {
@@ -103,25 +137,58 @@ export interface Event_report_generated {
 
 export interface Event_ai_suggestion_created {
   evidence_id: string;
-  mapping_ids: string[];
-  provider: 'local_heuristic';
+  analysis_id: string;
   suggestion_count: number;
+}
+
+export interface Event_assignment_comment_created {
+  assignment_id: string;
+  comment_id: string;
+  indicator_id: string;
+  kind: 'comment' | 'request_info' | 'reply';
+}
+
+export interface Event_subject_request_created {
+  request_id: string;
+  area_id: string;
+  request_type: string;
+}
+
+export interface Event_subject_request_decided {
+  request_id: string;
+  status: 'fulfilling' | 'approved' | 'completed' | 'rejected';
+}
+
+export interface Event_report_approved {
+  report_id: string;
+  cycle_id: string;
+  subject_personnel_id: string;
+  approver_user_id: string;
+  step_code: string;
 }
 
 export interface EventPayloadMap {
   'evidence.created': Event_evidence_created;
   'evidence.file.registered': Event_evidence_file_registered;
   'evidence.file.scan_completed': Event_evidence_file_scan_completed;
-  'evidence.mapping.suggested': Event_evidence_mapping_suggested;
-  'evidence.mapping.confirmed': Event_evidence_mapping_confirmed;
-  'evidence.mapping.rejected': Event_evidence_mapping_rejected;
-  'evidence.mapping.revoked': Event_evidence_mapping_revoked;
+  'evidence.file.verified': Event_evidence_file_verified;
+  'analysis.completed': Event_analysis_completed;
+  'analysis.failed': Event_analysis_failed;
+  'mapping.owner_confirmed': Event_mapping_owner_confirmed;
+  'mapping.validated': Event_mapping_validated;
+  'mapping.returned': Event_mapping_returned;
+  'mapping.revoked': Event_mapping_revoked;
+  'export.ready': Event_export_ready;
   'assignment.created': Event_assignment_created;
   'assignment.scores.submitted': Event_assignment_scores_submitted;
   'assignment.completed': Event_assignment_completed;
   'round.closed': Event_round_closed;
   'report.generated': Event_report_generated;
   'ai.suggestion.created': Event_ai_suggestion_created;
+  'assignment.comment.created': Event_assignment_comment_created;
+  'subject_request.created': Event_subject_request_created;
+  'subject_request.decided': Event_subject_request_decided;
+  'report.approved': Event_report_approved;
 }
 
 /** Envelope fields required on every emitted event (events.yaml #envelope). */

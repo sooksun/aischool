@@ -1,0 +1,79 @@
+# The web container: serves the SPA and is the single browser-facing origin of
+# the stack (rendered by the nginx image's envsubst step at start; only the
+# ${SEIP_*}/${S3_BUCKET} names below are substituted, nginx's own $vars are not).
+#
+#   /                 → the SPA (index.html fallback for client routes)
+#   /api/             → the api service
+#   /${S3_BUCKET}/    → the object store, for presigned uploads/downloads
+#
+# Why the store goes through here: the api signs URLs for S3_PUBLIC_ENDPOINT
+# (this origin). The signature covers the Host header, so the store must see
+# the Host the browser sent — $http_host, never the upstream's name — and the
+# path must reach it unchanged (no prefix stripping). Without this the browser
+# was handed http://seaweedfs:8333/… and every upload failed.
+#
+# TLS, rate limits and HSTS live in the edge proxy in front of this
+# (infra/nginx/seip-staging.conf.example, SEIP-OPS-004); this container is
+# also usable on its own at http://127.0.0.1:8080 for a first bring-up.
+
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    server_tokens off;
+
+    # Baseline headers even if this container is hit without the edge proxy.
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    # Docker's embedded DNS: resolve upstreams per request, so the gateway still
+    # starts (and recovers) when api or the store is restarting.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $seip_api ${SEIP_API_UPSTREAM};
+    set $seip_store ${SEIP_STORE_UPSTREAM};
+
+    # ^~ so the static-asset regex below never captures these (an evidence
+    # photo ends in .jpg too).
+    location ^~ /api/ {
+        proxy_pass http://$seip_api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # Keep the edge's chain when there is one; the api trusts it (TRUST_PROXY).
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_read_timeout 60s;
+        client_max_body_size 10m;
+    }
+
+    location ^~ /${S3_BUCKET}/ {
+        proxy_pass http://$seip_store;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        # The store may derive the signed host from these; an empty value drops them.
+        proxy_set_header X-Forwarded-Host "";
+        proxy_set_header X-Forwarded-Port "";
+        proxy_set_header X-Forwarded-Proto "";
+        # Single PUTs are ≤16 MiB and multipart parts are bounded by the signed
+        # Content-Length; stream them instead of spooling to disk.
+        client_max_body_size 0;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options nosniff always;
+        try_files $uri =404;
+    }
+}

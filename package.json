@@ -18,14 +18,19 @@
     "codegen:api-types": "npx --yes openapi-typescript@7 docs/contracts/openapi.yaml -o apps/web/src/api/schema.generated.ts",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate deploy",
-    "db:migrate:dev": "prisma migrate dev",
-    "db:seed": "prisma db seed",
-    "db:reset": "prisma migrate reset --force",
+    "db:migrate": "node --env-file-if-exists=.env scripts/db/migrate.mjs deploy",
+    "db:migrate:dev": "node --env-file-if-exists=.env scripts/db/migrate.mjs dev",
+    "db:seed": "node --env-file-if-exists=.env prisma/seed.mjs",
+    "db:reset": "node --env-file-if-exists=.env scripts/db/migrate.mjs reset --force",
+    "provision:school": "npm run build:libs && node --env-file-if-exists=.env scripts/ops/provision-school.mjs",
+    "bootstrap:admin": "npm run build:libs && node --env-file-if-exists=.env scripts/ops/bootstrap-admin.mjs",
+    "rescan:files": "npm run build:libs && node --env-file-if-exists=.env scripts/ops/rescan-files.mjs",
+    "backup": "node --env-file-if-exists=.env scripts/ops/backup.mjs",
+    "restore": "node --env-file-if-exists=.env scripts/ops/restore.mjs",
     "test:backend": "node --test \"tests/backend/*.test.mjs\"",
     "test:integration": "node --test \"tests/backend/*.test.mjs\"",
     "test:security": "npm run build:libs && npm run build --workspace apps/api && node --env-file-if-exists=.env --test \"tests/security/*.test.mjs\"",
-    "build:libs": "npm run build --workspace=packages/backend-shared && npm run build --workspace=packages/auth && npm run build --workspace=packages/database",
+    "build:libs": "prisma generate && npm run build --workspace=packages/backend-shared && npm run build --workspace=packages/auth && npm run build --workspace=packages/database",
     "build": "npm run build:libs && npm run build --workspaces --if-present",
     "typecheck": "npm run build:libs && npm run typecheck --workspaces --if-present",
     "lint": "npm run build:libs && npm run lint --workspaces --if-present",
@@ -34,19 +39,22 @@
     "test:e2e": "playwright test",
     "dev:api": "npm run dev --workspace apps/api",
     "dev:web": "npm run dev --workspace apps/web",
-    "dev:worker": "npm run build:libs && npm run build --workspace apps/worker && npm run start --workspace apps/worker"
-  },
-  "prisma": {
-    "seed": "node prisma/seed.mjs"
+    "dev:worker": "npm run build:libs && npm run build --workspace apps/worker && npm run start --workspace apps/worker",
+    "db:bootstrap": "psql -v ON_ERROR_STOP=1 -f scripts/db/bootstrap-roles.sql",
+    "test:storage": "node --env-file-if-exists=.env --test \"tests/storage/*.test.mjs\""
   },
   "dependencies": {
-    "@prisma/client": "^6.19.3"
+    "@prisma/client": "7.10.0"
   },
   "devDependencies": {
     "@node-rs/argon2": "^2.0.2",
     "@playwright/test": "^1.51.0",
     "js-yaml": "^4.3.0",
-    "pg": "^8.13.1",
-    "prisma": "^6.19.3"
+    "pg": "^8.23.1",
+    "prisma": "7.10.0"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0",
+    "mysql2": "^3.24.5"
   }
 }

@@ -1,60 +1,56 @@
-// Governed evidence<->indicator mappings. actOnMapping has the most nuanced grant
-// in permissions.yaml: teacher holds 'own-revoke' — narrower than a role check
-// alone can express (action must BE revoke, the mapping must still be 'suggested',
-// and the caller must own the evidence it points at).
+// Evidence ↔ indicator mappings, two tiers (ADR-0015, CCR-017).
+//
+//   createMapping   the OWNER adds a mapping by hand → owner_confirmed
+//   actOnMapping    revoke   — the owner, from any live state
+//                   validate — the director, or a committee member for the owner
+//                   return   — same validators, with a note the owner reads
+//
+// Nobody confirms a mapping on someone else's evidence, and nobody validates
+// their own. AI suggestions become mappings only when the owner accepts them
+// (acceptSuggestion, P3) — there is no "suggested" mapping state any more.
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
-  listMappingsForEvidence, createMapping, listMappings, getMappingForAction, getMappingById,
-  confirmMapping, rejectMapping, revokeMapping, getEvidenceDetail, getIndicatorById, writeAuditEvent,
-  listEvaluateePersonnelIdsForCommitteeMember, suggestMappingsLocalHeuristic, getCycleForRound,
+  listMappingsForEvidence, createOwnerMapping, listMappings, getMappingForAction,
+  validateMapping, returnMapping, revokeMapping, getEvidenceDetail, getIndicatorById,
+  writeAuditEvent, listEvaluateePersonIdsForCommitteeMember, isUniqueViolation,
 } from '@seip/database';
 import { ApiError, forbiddenAreaWrite, forbiddenRole } from '@seip/backend-shared';
-import { Prisma } from '@prisma/client';
 import { requireCurrentSchool } from '../plugins/auth.js';
-import { resolveGrant, requireOwnership, requireCommitteeAccessToPersonnel } from '../lib/permission-guard.js';
-
-function serializeMapping(m: { id: string; evidenceId: string; indicatorId: string; cycleId: string | null; mappingSource: string; status: string; rationale: string | null; mappedByUserId: string; confirmedByUserId: string | null; mappedAt: Date; confirmedAt: Date | null }) {
-  return {
-    id: m.id, evidence_id: m.evidenceId, indicator_id: m.indicatorId, cycle_id: m.cycleId,
-    mapping_source: m.mappingSource, status: m.status, rationale: m.rationale,
-    mapped_by_user_id: m.mappedByUserId, confirmed_by_user_id: m.confirmedByUserId,
-    mapped_at: m.mappedAt.toISOString(), confirmed_at: m.confirmedAt?.toISOString() ?? null,
-  };
-}
+import { resolveGrant, requireAcr } from '../lib/permission-guard.js';
+import { authorizeEvidence, isOwner, ownGrant } from '../lib/evidence-access.js';
+import { etag, idempotent, requireIfMatch, staleOrMissing } from '../lib/concurrency.js';
+import { serializeMapping } from './evidence.js';
 
 export const mappingRoutes: FastifyPluginAsync = async (app) => {
   app.get('/evidence/:evidenceId/mappings', { config: { operationId: 'listEvidenceMappings' } }, async (request) => {
     const auth = request.auth!;
-    const schoolId = requireCurrentSchool(auth);
     const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);
-    const grant = await resolveGrant('listEvidenceMappings', auth, schoolId);
-
-    const evidence = await getEvidenceDetail(schoolId, evidenceId);
+    const evidence = await getEvidenceDetail(evidenceId);
     if (!evidence) throw new ApiError('RES-001', 'Evidence not found');
-    if (grant === 'own') requireOwnership(auth, evidence.ownerPersonnelId);
-    if (grant === 'committee') await requireCommitteeAccessToPersonnel(schoolId, auth.userId, evidence.ownerPersonnelId);
-
-    const rows = await listMappingsForEvidence(schoolId, evidenceId);
-    return rows.map(serializeMapping);
+    await authorizeEvidence('listEvidenceMappings', auth, evidence);
+    return (await listMappingsForEvidence(evidenceId)).map(serializeMapping);
   });
 
   app.post('/evidence/:evidenceId/mappings', { config: { operationId: 'createMapping' } }, async (request, reply) => {
     const auth = request.auth!;
-    const schoolId = requireCurrentSchool(auth);
     const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);
-    const grant = await resolveGrant('createMapping', auth, schoolId);
-    if (grant === 'area-r') throw forbiddenAreaWrite();
-
-    const evidence = await getEvidenceDetail(schoolId, evidenceId);
-    if (!evidence) throw new ApiError('RES-001', 'Evidence not found');
-    if (grant === 'own') requireOwnership(auth, evidence.ownerPersonnelId);
-
     const body = z.object({
       indicator_id: z.string().uuid(),
-      cycle_id: z.string().uuid().nullable().optional(),
-      rationale: z.string().max(1000).nullable().optional(),
+      note: z.string().max(1000).nullable().optional(),
     }).parse(request.body);
+
+    const evidence = await getEvidenceDetail(evidenceId);
+    if (!evidence) throw new ApiError('RES-001', 'Evidence not found');
+    // The matrix grants createMapping as `own` only — authorizeEvidence lets
+    // nobody but the owner through.
+    await authorizeEvidence('createMapping', auth, evidence);
+    if (!evidence.ownerAcceptedAt) {
+      throw new ApiError('VAL-002', 'Accept this item first: it was uploaded on your behalf (CCR-024)');
+    }
+    // FR-051: the mapping belongs to the school the owner works at now — after a
+    // transfer, the new school's director validates it, not the old school's.
+    const schoolId = requireCurrentSchool(auth);
 
     const indicator = await getIndicatorById(body.indicator_id);
     if (!indicator) throw new ApiError('VAL-002', 'Unknown indicator_id');
@@ -62,155 +58,104 @@ export const mappingRoutes: FastifyPluginAsync = async (app) => {
       throw new ApiError('MAP-003', 'Workload-gate rows cannot be mapped to evidence');
     }
 
-    try {
-      const mapping = await createMapping(schoolId, {
-        evidenceId, indicatorId: body.indicator_id, cycleId: body.cycle_id ?? null,
-        mappedByUserId: auth.userId, rationale: body.rationale ?? null,
-      });
-      await writeAuditEvent({
-        schoolId, actorUserId: auth.userId, action: 'created', entityType: 'EvidenceIndicatorMapping',
-        entityId: mapping.id, after: mapping, requestId: request.id,
-      });
-      reply.status(201).send(serializeMapping(mapping));
-    } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        throw new ApiError('MAP-001', 'Active mapping already exists for this (evidence, indicator, cycle)');
+    await idempotent(request, reply, 'createMapping', async () => {
+      try {
+        const mapping = await createOwnerMapping({
+          evidenceId, schoolId, indicatorId: indicator.id,
+          frameworkVersionId: indicator.frameworkVersionId, ownerUserId: auth.userId,
+          source: 'manual', note: body.note ?? null, requestId: request.id,
+        });
+        await writeAuditEvent({
+          schoolId, actorUserId: auth.userId, action: 'owner_confirmed',
+          entityType: 'EvidenceIndicatorMapping', entityId: mapping.id, after: mapping, requestId: request.id,
+        });
+        return { status: 201, body: serializeMapping(mapping), headers: { ETag: etag(mapping.version) } };
+      } catch (e) {
+        if (isUniqueViolation(e)) {
+          throw new ApiError('MAP-001', 'A live mapping already exists for this (evidence, indicator, framework version)');
+        }
+        throw e;
       }
-      throw e;
-    }
-  });
-
-  app.post('/evidence/:evidenceId/mappings/suggest', { config: { operationId: 'suggestMappings' } }, async (request) => {
-    const auth = request.auth!;
-    const schoolId = requireCurrentSchool(auth);
-    const { evidenceId } = z.object({ evidenceId: z.string().uuid() }).parse(request.params);
-    const grant = await resolveGrant('suggestMappings', auth, schoolId);
-    if (grant === 'area-r') throw forbiddenAreaWrite();
-
-    const evidence = await getEvidenceDetail(schoolId, evidenceId);
-    if (!evidence) throw new ApiError('RES-001', 'Evidence not found');
-    if (grant === 'own') requireOwnership(auth, evidence.ownerPersonnelId);
-
-    if (evidence.status !== 'active' && evidence.status !== 'draft') {
-      throw new ApiError('AI-001', 'Evidence is not eligible for mapping suggestions');
-    }
-
-    const body = z.object({
-      cycle_id: z.string().uuid().nullable().optional(),
-      framework_version_id: z.string().uuid().nullable().optional(),
-      max_suggestions: z.number().int().min(1).max(20).optional(),
-    }).parse(request.body ?? {});
-
-    let frameworkVersionId = body.framework_version_id ?? null;
-    const cycleId = body.cycle_id ?? null;
-    if (cycleId) {
-      const cycle = await getCycleForRound(cycleId);
-      if (!cycle || cycle.schoolId !== schoolId) {
-        throw new ApiError('AI-001', 'cycle_id is not valid for this school');
-      }
-      if (!frameworkVersionId) frameworkVersionId = cycle.frameworkVersionId;
-    }
-    if (!frameworkVersionId) {
-      throw new ApiError('AI-001', 'framework_version_id or cycle_id is required to scope indicators');
-    }
-
-    const evidenceText = `${evidence.title} ${evidence.description ?? ''}`;
-    const { items, skippedActive } = await suggestMappingsLocalHeuristic({
-      schoolId,
-      evidenceId,
-      evidenceText,
-      frameworkVersionId,
-      cycleId,
-      mappedByUserId: auth.userId,
-      maxSuggestions: body.max_suggestions ?? 5,
-      requestId: request.id,
     });
-
-    await writeAuditEvent({
-      schoolId, actorUserId: auth.userId, action: 'ai_suggested', entityType: 'EvidenceIndicatorMapping',
-      entityId: evidenceId, after: { count: items.length, provider: 'local_heuristic' }, requestId: request.id,
-    });
-
-    return {
-      provider: 'local_heuristic' as const,
-      items: items.map(serializeMapping),
-      skipped_active: skippedActive,
-    };
   });
 
   app.get('/mappings', { config: { operationId: 'listMappings' } }, async (request) => {
     const auth = request.auth!;
     const schoolId = requireCurrentSchool(auth);
     const grant = await resolveGrant('listMappings', auth, schoolId);
-    // 'own'/'own-revoke' never appear in listMappings' grant set (teacher/deputy
-    // hold no rule for this operationId at all — resolveGrant already threw
-    // PERM-001 for them before reaching here).
-
     const q = z.object({
       indicator_id: z.string().uuid().optional(),
-      cycle_id: z.string().uuid().optional(),
-      status: z.enum(['suggested', 'confirmed', 'rejected', 'revoked']).optional(),
+      framework_version_id: z.string().uuid().optional(),
+      status: z.enum(['owner_confirmed', 'validated', 'returned', 'revoked']).optional(),
       page: z.coerce.number().int().min(1).default(1),
       page_size: z.coerce.number().int().min(1).max(100).default(20),
     }).parse(request.query);
 
-    const ownerPersonnelIdIn = grant === 'committee'
-      ? await listEvaluateePersonnelIdsForCommitteeMember(schoolId, auth.userId)
+    const ownerPersonIdIn = grant === 'committee'
+      ? await listEvaluateePersonIdsForCommitteeMember(auth.userId)
       : undefined;
-
     const { items, total } = await listMappings(schoolId, {
-      indicatorId: q.indicator_id, cycleId: q.cycle_id, status: q.status,
-      ownerPersonnelIdIn, page: q.page, pageSize: q.page_size,
+      indicatorId: q.indicator_id, frameworkVersionId: q.framework_version_id, status: q.status,
+      ownerPersonIdIn, page: q.page, pageSize: q.page_size,
     });
     return { items: items.map(serializeMapping), meta: { page: q.page, page_size: q.page_size, total } };
   });
 
-  app.patch('/mappings/:mappingId', { config: { operationId: 'actOnMapping' } }, async (request) => {
+  app.patch('/mappings/:mappingId', { config: { operationId: 'actOnMapping' } }, async (request, reply) => {
     const auth = request.auth!;
     const { mappingId } = z.object({ mappingId: z.string().uuid() }).parse(request.params);
     const body = z.object({
-      action: z.enum(['confirm', 'reject', 'revoke']),
-      rationale: z.string().max(1000).nullable().optional(),
+      action: z.enum(['revoke', 'validate', 'return']),
+      return_note: z.string().max(1000).nullable().optional(),
     }).parse(request.body);
 
     const mapping = await getMappingForAction(mappingId);
-    if (!mapping) throw new ApiError('RES-001', 'Mapping not found');
+    if (!mapping || mapping.evidence.deletedAt) throw new ApiError('RES-001', 'Mapping not found');
+    const ref = { ownerPersonId: mapping.evidence.ownerPersonId, originSchoolId: mapping.schoolId };
 
-    const grant = await resolveGrant('actOnMapping', auth, mapping.schoolId);
-    if (grant === 'own-revoke') {
-      // permissions.yaml: "owner may revoke their own suggested mapping only" —
-      // narrower than the DB layer allows (which also permits revoking 'confirmed'
-      // for school-level roles). All three conditions are enforced here, not just role.
-      if (body.action !== 'revoke') throw forbiddenRole();
-      if (!auth.personnel || auth.personnel.id !== mapping.evidence.ownerPersonnelId) throw forbiddenRole();
-      if (mapping.status !== 'suggested') throw new ApiError('MAP-002', 'Only a suggested mapping may be revoked by its owner');
-    } else if (grant === 'area-r') {
-      throw forbiddenAreaWrite();
-    }
-    // grant === 'school': any action, any status transition the DB layer allows.
-
-    let ok: boolean;
-    let action: string;
-    if (body.action === 'confirm') {
-      ok = await confirmMapping(mappingId, auth.userId);
-      action = 'confirmed';
-      if (!ok) throw new ApiError('MAP-002', 'Confirm rejected — mapping not in suggested state');
-    } else if (body.action === 'reject') {
-      ok = await rejectMapping(mappingId, body.rationale ?? null);
-      action = 'rejected';
-      if (!ok) throw new ApiError('MAP-002', 'Reject rejected — mapping not in suggested state');
+    let validatorRole: 'director' | 'committee' | null = null;
+    if (body.action === 'revoke') {
+      // Owner only (own-revoke), from wherever they are now.
+      if (!isOwner(auth, ref) || !ownGrant('actOnMapping', auth)) {
+        // No route to the evidence at all → RES-001 (existence not leaked);
+        // a route, but not the owner → PERM-001.
+        await authorizeEvidence('actOnMapping', auth, ref);
+        throw forbiddenRole();
+      }
     } else {
-      ok = await revokeMapping(mappingId);
-      action = 'revoked';
-      if (!ok) throw new ApiError('MAP-002', 'Mapping is not in a revocable state');
+      if (isOwner(auth, ref)) throw new ApiError('PERM-001', 'Nobody validates or returns a mapping on their own evidence');
+      const grant = await authorizeEvidence('actOnMapping', auth, ref);
+      if (grant === 'area-r') throw forbiddenAreaWrite();
+      if (grant === 'school') validatorRole = 'director';
+      else if (grant === 'committee') validatorRole = 'committee';
+      else throw forbiddenRole();
+      requireAcr(auth, 'actOnMapping', body.action);
+      if (body.action === 'return' && !body.return_note?.trim()) {
+        throw new ApiError('VAL-002', 'return_note is required when returning a mapping', [{ field: 'return_note', issue: 'required' }]);
+      }
+    }
+
+    const expectedVersion = requireIfMatch(request);
+    const res = body.action === 'revoke'
+      ? await revokeMapping(mappingId, expectedVersion, auth.userId, request.id)
+      : body.action === 'validate'
+        ? await validateMapping(mappingId, expectedVersion, { userId: auth.userId, role: validatorRole! }, request.id)
+        : await returnMapping(mappingId, expectedVersion, { userId: auth.userId, role: validatorRole! }, body.return_note!.trim(), request.id);
+    if (!res.ok) {
+      if (res.reason === 'state') {
+        throw new ApiError('MAP-002', body.action === 'revoke'
+          ? 'Mapping is already revoked'
+          : `Only an owner_confirmed mapping can be ${body.action === 'validate' ? 'validated' : 'returned'}`);
+      }
+      throw staleOrMissing(res.reason, 'Mapping');
     }
 
     await writeAuditEvent({
-      schoolId: mapping.schoolId, actorUserId: auth.userId, action, entityType: 'EvidenceIndicatorMapping',
-      entityId: mappingId, requestId: request.id,
+      schoolId: mapping.schoolId, actorUserId: auth.userId,
+      action: body.action === 'revoke' ? 'revoked' : body.action === 'validate' ? 'validated' : 'returned',
+      entityType: 'EvidenceIndicatorMapping', entityId: mappingId, before: mapping, after: res.row, requestId: request.id,
     });
-
-    const updated = await getMappingById(mappingId);
-    return serializeMapping(updated!);
+    reply.header('ETag', etag(res.row.version));
+    return serializeMapping(res.row);
   });
 };

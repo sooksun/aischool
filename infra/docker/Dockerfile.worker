@@ -1,4 +1,4 @@
-# SEIP worker image (SEIP-OPS-003) — async jobs against same Postgres + MinIO as API.
+# SEIP worker image (SEIP-OPS-003) — async jobs against the same PostgreSQL + S3 storage as the API.
 # Single process, multiple job types (scan, duration, outbox, GC, future reports/AI).
 
 FROM node:24-bookworm-slim AS deps
@@ -20,6 +20,10 @@ RUN npm run build:libs \
  && npm run build --workspace apps/worker
 
 FROM node:24-bookworm-slim AS runtime
+# FR-021: ffprobe measures video/audio length and resolution (MEDIA_PROBE=ffprobe).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
@@ -36,6 +40,9 @@ COPY --from=build /app/packages/backend-shared/dist packages/backend-shared/dist
 COPY --from=build /app/packages/auth/dist packages/auth/dist
 COPY --from=build /app/packages/database/dist packages/database/dist
 COPY --from=build /app/apps/worker/dist apps/worker/dist
+# backend-shared loads permissions.yaml at import; without it the worker
+# crashed on boot.
+COPY docs/contracts docs/contracts
 COPY packages/backend-shared/package.json packages/backend-shared/
 COPY packages/auth/package.json packages/auth/
 COPY packages/database/package.json packages/database/

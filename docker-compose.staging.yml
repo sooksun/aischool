@@ -1,5 +1,5 @@
-# SEIP staging stack (SEIP-OPS-003) — same architecture as on-prem (ADR-0005),
-# different config from dev. NO default secrets in this file: every credential
+# SEIP staging stack (SEIP-OPS-003) — the Thai-owned/self-hosted profile
+# (ADR-0011/0012/0013); production is RDS + S3 in ap-southeast-7. NO default secrets in this file: every credential
 # comes from the host environment or an env_file that is gitignored (SEC-REPO-1).
 #
 # Usage:
@@ -7,7 +7,7 @@
 #   2. docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --build
 #   3. Put nginx (infra/nginx/seip-staging.conf.example) in front for TLS.
 #
-# Services: postgres + minio + api + worker + web.
+# Services: postgres + seaweedfs + migrate + api + worker + web + clamav + backup.
 # Dev stack remains docker-compose.yml (throwaway credentials, host ports).
 # Do not copy staging secrets into the dev compose.
 
@@ -15,62 +15,82 @@ name: seip-staging
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg18
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-seip}
+      # Read by scripts/db/initdb-roles.sh on FIRST boot only (ADR-0012 §4).
+      SEIP_MIGRATOR_PASSWORD: ${SEIP_MIGRATOR_PASSWORD:?set SEIP_MIGRATOR_PASSWORD}
+      SEIP_APP_PASSWORD: ${SEIP_APP_PASSWORD:?set SEIP_APP_PASSWORD}
     volumes:
-      - seip_staging_pgdata:/var/lib/postgresql/data
-    # Staging: do not publish Postgres to the host by default. App containers
+      - seip_staging_pgdata:/var/lib/postgresql
+      - ./scripts/db/bootstrap-roles.sql:/seip/bootstrap-roles.sql:ro
+      - ./scripts/db/initdb-roles.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    # Staging: do not publish PostgreSQL to the host by default. App containers
     # reach it on the internal network. Uncomment for emergency DBA access only.
     # ports:
     #   - "127.0.0.1:5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d $${POSTGRES_DB:-seip}"]
       interval: 5s
       timeout: 5s
       retries: 12
     networks: [seip_internal]
 
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+  # S3-compatible storage (ADR-0013). The identity file is rendered from env at
+  # start so no secret is baked into the image or the repo.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
     restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
-    volumes:
-      - seip_staging_minio:/data
-    # Same rule as Postgres: keep S3 API off the public interface; nginx may
-    # proxy only if you intentionally need browser-side console (usually no).
-    # ports:
-    #   - "127.0.0.1:9000:9000"
-    #   - "127.0.0.1:9001:9001"
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-    networks: [seip_internal]
-
-  minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
-    depends_on:
-      minio:
-        condition: service_healthy
     environment:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
+    entrypoint: >
+      /bin/sh -c "
+      printf '{\"identities\":[{\"name\":\"seip\",\"credentials\":[{\"accessKey\":\"%s\",\"secretKey\":\"%s\"}],\"actions\":[\"Admin\",\"Read\",\"Write\",\"List\",\"Tagging\"]}]}' \"$$S3_ACCESS_KEY\" \"$$S3_SECRET_KEY\" > /tmp/s3.json &&
+      exec weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json -master.volumeSizeLimitMB=1024 -volume.max=0
+      "
+    volumes:
+      - seip_staging_seaweedfs:/data
+    # Keep the S3 API off the public interface. Presigned uploads from browsers
+    # need it reachable — publish it through nginx, never directly.
+    # ports:
+    #   - "127.0.0.1:8333:8333"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://127.0.0.1:8333/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [seip_internal]
+
+  storage-init:
+    image: chrislusf/seaweedfs:4.48
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    environment:
       S3_BUCKET: ${S3_BUCKET:-seip-evidence}
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 \"$$S3_ACCESS_KEY\" \"$$S3_SECRET_KEY\" &&
-      mc mb --ignore-existing \"local/$$S3_BUCKET\" &&
-      mc anonymous set none \"local/$$S3_BUCKET\" &&
+      echo \"s3.bucket.create -name $$S3_BUCKET\" | weed shell -master=seaweedfs:9333 2>&1 | grep -E 'created|exist' &&
       echo \"bucket $$S3_BUCKET ready (private)\"
       "
+    networks: [seip_internal]
+
+  # One-shot: apply migrations as seip_migrator (ADR-0012 §4), then exit. The api
+  # runs as seip_app, which cannot run DDL — and its runtime image has no prisma
+  # CLI, so `npx prisma` there would fetch whatever npm calls latest.
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+      target: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MIGRATE_DATABASE_URL: postgresql://seip_migrator:${SEIP_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}
     networks: [seip_internal]
 
   # Application processes — built from infra/docker Dockerfiles (same Node monorepo).
@@ -80,27 +100,36 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.api
+      # Explicit: Dockerfile.api's LAST stage is `migrate`, which a target-less
+      # build would pick — an api container that migrates and exits.
+      target: runtime
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      minio-init:
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
         condition: service_completed_successfully
     environment:
       NODE_ENV: production
       PORT: "3001"
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}?schema=public
+      # Loopback inside a container is unreachable from web and from the
+      # published port — the api must listen on all interfaces here.
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://seip_app:${SEIP_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET min 32 chars}
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: http://seaweedfs:8333
+      # Presigned URLs are followed by browsers, so they are signed for the
+      # public origin; web forwards /<bucket>/ from there to seaweedfs.
+      S3_PUBLIC_ENDPOINT: ${SEIP_PUBLIC_ORIGIN:?set SEIP_PUBLIC_ORIGIN (the URL users open, e.g. https://seip.school.ac.th)}
       S3_BUCKET: ${S3_BUCKET:-seip-evidence}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_REGION: ${S3_REGION:-us-east-1}
+      # v2 scoring + reports (ADR-0017); the web build takes the same value.
+      FEATURE_SCORING: ${FEATURE_SCORING:-false}
     # Bind localhost only if you must hit the API without nginx during bring-up.
     ports:
-      - "127.0.0.1:3001:3001"
+      - "${SEIP_API_BIND:-127.0.0.1:3001}:3001"
     healthcheck:
       # TCP check only — avoids depending on a /health route (not required by contract).
       test:
@@ -114,33 +143,58 @@ services:
       start_period: 40s
     networks: [seip_internal]
 
-  # Async jobs: virus-scan stub, duration probe, outbox dispatch, storage GC,
-  # and future report.generate / AI jobs (single worker process — WORKER-001).
+  # Malware scanning (ADR-0009). REQUIRED whenever SCAN_PROVIDER=clamav — with it
+  # unreachable, uploads stay `pending` and stay undownloadable by design: an
+  # unavailable security control is not a passing one.
+  # Needs ~1 GB RAM with signatures loaded, and freshclam keeps them current.
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    volumes:
+      - seip-clamav:/var/lib/clamav
+    healthcheck:
+      # clamdcheck, not a port probe: clamd accepts connections well before the
+      # signature database has finished loading.
+      test: ["CMD-SHELL", "clamdcheck.sh || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 12
+      start_period: 180s
+    networks: [seip_internal]
+
+  # Async jobs: malware scan (ADR-0009), outbox dispatch, storage GC,
+  # report.generate / AI jobs (single worker process — WORKER-001).
   worker:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.worker
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      minio-init:
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
         condition: service_completed_successfully
       api:
-        # Prefer migrations to finish in api container before worker hammers schema
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}?schema=public
-      S3_ENDPOINT: http://minio:9000
+      DATABASE_URL: postgresql://seip_app:${SEIP_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}
+      S3_ENDPOINT: http://seaweedfs:8333
       S3_BUCKET: ${S3_BUCKET:-seip-evidence}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_REGION: ${S3_REGION:-us-east-1}
       WORKER_POLL_MS: ${WORKER_POLL_MS:-2000}
       WORKER_GC_AFTER_DAYS: ${WORKER_GC_AFTER_DAYS:-7}
+      # ADR-0009. Defaults to clamav here: a staging/on-prem deployment serving
+      # real evidence should scan it. Set explicitly to `none` to opt out, and
+      # accept that files will read `unscanned` — there is no silent fallback.
+      SCAN_PROVIDER: ${SCAN_PROVIDER:-clamav}
+      CLAMAV_HOST: ${CLAMAV_HOST:-clamav}
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+      CLAMAV_MAX_BYTES: ${CLAMAV_MAX_BYTES:-26214400}
     # No host ports — worker is internal only
     networks: [seip_internal]
 
@@ -151,11 +205,106 @@ services:
       args:
         # Empty = same-origin /api via nginx (recommended staging/on-prem shape).
         VITE_API_BASE: ${VITE_API_BASE:-}
+        # Baked into the SPA; keep equal to the api's FEATURE_SCORING (ADR-0017).
+        FEATURE_SCORING: ${FEATURE_SCORING:-false}
     restart: unless-stopped
     depends_on:
       - api
+    environment:
+      # The one browser-facing origin (infra/docker/nginx-web.conf.template):
+      # the SPA, /api/ → api, /<bucket>/ → seaweedfs for presigned transfers.
+      SEIP_API_UPSTREAM: api:3001
+      SEIP_STORE_UPSTREAM: seaweedfs:8333
+      S3_BUCKET: ${S3_BUCKET:-seip-evidence}
     ports:
-      - "127.0.0.1:8080:80"
+      - "${SEIP_WEB_BIND:-127.0.0.1:8080}:80"
+    networks: [seip_internal]
+
+  # Optional HTTPS edge (profile "edge"): automatic certificates for
+  # SEIP_DOMAIN, in front of web. Skip it when the host already has a reverse
+  # proxy (infra/nginx/seip-staging.conf.example). Start with
+  #   docker compose … --profile edge up -d
+  edge:
+    profiles: [edge]
+    image: caddy:2.8
+    restart: unless-stopped
+    depends_on:
+      - web
+    environment:
+      # Required with this profile (Caddy refuses an empty site address);
+      # not interpolated as required so the stack works without it.
+      SEIP_DOMAIN: ${SEIP_DOMAIN:-}
+      SEIP_ACME_EMAIL: ${SEIP_ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - seip_staging_caddy_data:/data
+      - seip_staging_caddy_config:/config
+    networks: [seip_internal]
+
+  # Operator one-shots, never started by `up` (profile "ops"). Same image as
+  # `migrate` — it has the scripts and the pinned toolchain — but connects as
+  # seip_app (DML only), which is all seeding and bootstrap need:
+  #   docker compose -f docker-compose.staging.yml --env-file .env.staging run --rm ops node prisma/seed.mjs
+  #   … run --rm ops node scripts/ops/provision-school.mjs --code=SCH-001 --name="…"
+  #   … run --rm -e SEIP_ADMIN_PASSWORD ops node scripts/ops/bootstrap-admin.mjs --email=… --name="…" --school=SCH-001
+  ops:
+    profiles: [ops]
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+      target: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://seip_app:${SEIP_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}
+    command: ["node", "-e", "console.log('ops: pass a command, e.g. node prisma/seed.mjs')"]
+    networks: [seip_internal]
+
+  # Automated backups. Before this, ops-runbook §5 handed an operator two
+  # commands to type and hoped; the 2026-07-19 audit called that the largest
+  # unbounded downside in the system, since the same runbook calls evidence
+  # irreplaceable.
+  #
+  # Runs backup.mjs on a schedule, and backup.mjs restores every dump it takes
+  # into a scratch database before declaring success — an unverified backup is a
+  # hypothesis. It exits non-zero on a failed verify, so the container's restart
+  # and your log alerting both see it.
+  backup:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    environment:
+      # The migrator owns every table, so it can dump all of them; the verify
+      # step needs CREATEDB, which only the admin role has.
+      DATABASE_URL: postgresql://seip_migrator:${SEIP_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}
+      BACKUP_ADMIN_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}
+      S3_ENDPOINT: http://seaweedfs:8333
+      S3_BUCKET: ${S3_BUCKET:-seip-evidence}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      BACKUP_DIR: /backups
+      BACKUP_RETAIN_DAYS: ${BACKUP_RETAIN_DAYS:-14}
+      # Seconds between runs; default daily. A cron daemon would need a second
+      # process and its own logging story — a sleep loop in the entrypoint is
+      # visible in `docker logs` and has one failure mode.
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      # BIND MOUNT, not a named volume, on purpose: a backup that lives only
+      # inside the Docker installation it is backing up protects against very
+      # little. Point BACKUP_HOST_DIR at storage on a different disk, and copy it
+      # off the machine — see ops-runbook §5.
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
     networks: [seip_internal]
 
 networks:
@@ -164,4 +313,7 @@ networks:
 
 volumes:
   seip_staging_pgdata:
-  seip_staging_minio:
+  seip_staging_seaweedfs:
+  seip-clamav:
+  seip_staging_caddy_data:
+  seip_staging_caddy_config:

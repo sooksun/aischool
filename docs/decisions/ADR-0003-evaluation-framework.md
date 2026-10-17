@@ -3,6 +3,8 @@
 ## Status
 Accepted
 
+> ข้อ 3 amended by ADR-0017 (จำนวนกรรมการและเกณฑ์เป็นข้อมูล), 2026-10-12
+
 ## Context
 
 The team charter lists "evaluation indicator definitions" as a Protected Artifact, but no document defined which framework SEIP implements (OPEN-2 in `SPRINT-0.md`). Codex cannot model evidence→indicator mapping against an unknown indicator set, and the AI mapping engine has no target taxonomy.

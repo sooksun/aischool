@@ -7,11 +7,16 @@ process.env.NODE_ENV = 'test';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../../prisma/client.mjs';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
+import { replaceScoresAndRollup } from '@seip/database';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
+import { postEvidence } from '../../../tests/helpers/api-evidence.mjs';
 
-const prisma = new PrismaClient();
+const created = trackSchools();
+
+const prisma = createPrismaClient();
 let app;
 let school, frameworkId;
 let standardIndicatorAId, standardIndicatorBId, challengeIndicatorId, workloadIndicatorId;
@@ -23,14 +28,14 @@ before(async () => {
   ({ app } = await buildServer());
   await app.ready();
 
-  school = await prisma.school.create({ data: { code: `score-${randomUUID()}`, name: 'Scoring School' } });
+  school = created.add(await prisma.school.create({ data: { code: `score-${randomUUID()}`, name: 'Scoring School' } }));
   await prisma.rankLevel.upsert({
     where: { code: 'score_kru' }, create: { code: 'score_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 2 }, update: {},
   });
 
-  const fw = await prisma.frameworkVersion.create({
+  const fw = created.addFramework(await prisma.frameworkVersion.create({
     data: { code: `score-fw-${randomUUID()}`, roleFamily: 'teacher', legalRef: 'x', revisionYear: 9999, status: 'draft', effectiveFrom: new Date() },
-  });
+  }));
   frameworkId = fw.id;
   await prisma.scoreWeight.createMany({ data: [
     { frameworkVersionId: fw.id, weightKey: 'part1_total', weightValue: 60 },
@@ -48,7 +53,7 @@ before(async () => {
   async function makeUser(label, role) {
     const password = `${label}-password-1234`;
     const user = await prisma.userAccount.create({
-      data: { email: `score-${label}-${randomUUID()}@x.io`, displayName: label, status: 'active', passwordHash: await argonHash(password) },
+      data: { person: { create: { displayName: 'fixture' } }, email: `score-${label}-${randomUUID()}@x.io`, displayName: label, status: 'active', passwordHash: await argonHash(password) },
     });
     await prisma.schoolMembership.create({
       data: { userId: user.id, schoolId: school.id, role, membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
@@ -64,10 +69,10 @@ before(async () => {
 
   const teacherPassword = 'teacher-password-1234';
   teacherEvaluatee = await prisma.userAccount.create({
-    data: { email: `score-teacher-${randomUUID()}@x.io`, displayName: 'Teacher', status: 'active', passwordHash: await argonHash(teacherPassword) },
+    data: { person: { create: { displayName: 'fixture' } }, email: `score-teacher-${randomUUID()}@x.io`, displayName: 'Teacher', status: 'active', passwordHash: await argonHash(teacherPassword) },
   });
   const personnel = await prisma.personnelProfile.create({
-    data: { schoolId: school.id, userId: teacherEvaluatee.id, fullName: 'Teacher', positionRole: 'teacher', rankLevelCode: 'score_kru' },
+    data: { schoolId: school.id, userId: teacherEvaluatee.id, personId: teacherEvaluatee.personId, fullName: 'Teacher', positionRole: 'teacher', rankLevelCode: 'score_kru' },
   });
   teacherPersonnelId = personnel.id;
   await prisma.schoolMembership.create({
@@ -78,6 +83,7 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
 });
@@ -106,23 +112,45 @@ async function makeOpenRound(fiscalYear) {
   return { cycle, round: openRes.json() };
 }
 
-// WorkloadDeclaration's FK requires a real PerformanceAgreement (agreement_id) —
-// without one, the workload gate can structurally never be satisfied (SCORE-004
-// would fire forever). Every scoring-flow fixture needs one linked.
+// WorkloadDeclaration's FK requires a real PerformanceAgreement — without one the
+// workload gate can structurally never be satisfied (SCORE-004 would fire
+// forever), so every scoring fixture needs one.
+//
+// This used to be `prisma.performanceAgreement.create(...)`, a direct DB write,
+// because no operation could make one. That single line is why a fully green test
+// suite coexisted with a system where no score could be submitted through the API
+// at all (SEIP-BLOCK-002). CCR-015 added the operations; the fixture now goes
+// through them, so this file can no longer pass while the real flow is broken.
 async function makeAgreement(cycleId) {
-  const agreement = await prisma.performanceAgreement.create({
-    data: { schoolId: school.id, cycleId, personnelId: teacherPersonnelId, formVariant: 'PA1_s', status: 'submitted' },
+  const res = await app.inject({
+    method: 'POST', url: '/api/v1/agreements', headers: auth(teacherToken),
+    payload: {
+      cycle_id: cycleId,
+      personnel_id: teacherPersonnelId,
+      challenge: {
+        title: 'ยกระดับผลสัมฤทธิ์การอ่านของนักเรียนชั้น ป.3',
+        method_plan: 'ใช้ชุดกิจกรรมการอ่านเชิงรุกสัปดาห์ละ 2 คาบ ควบคู่กับการวัดผลรายบุคคล',
+        quantitative_target: 'นักเรียนร้อยละ 80 มีคะแนนการอ่านเพิ่มขึ้นอย่างน้อย 10%',
+        qualitative_target: 'นักเรียนมีเจตคติที่ดีต่อการอ่านและเลือกหนังสืออ่านเองได้',
+      },
+    },
   });
-  return agreement.id;
+  assert.equal(res.statusCode, 201, JSON.stringify(res.json()));
+  const submitted = await app.inject({
+    method: 'POST', url: `/api/v1/agreements/${res.json().id}/submit`, headers: auth(teacherToken),
+  });
+  assert.equal(submitted.statusCode, 200, JSON.stringify(submitted.json()));
+  return res.json().id;
 }
 
 async function makeAssignment(cycleId, roundId) {
-  const agreementId = await makeAgreement(cycleId);
+  // The agreement must exist BEFORE the assignment: createAssignment derives
+  // agreementId from (cycle, evaluatee) rather than accepting it (CCR-015).
+  await makeAgreement(cycleId);
   const res = await app.inject({
     method: 'POST', url: `/api/v1/rounds/${roundId}/assignments`, headers: auth(directorToken),
     payload: {
       evaluatee_personnel_id: teacherPersonnelId,
-      agreement_id: agreementId,
       committee: [
         { evaluator_user_id: director.id, committee_role: 'chair', seat_number: 1 },
         { evaluator_user_id: evaluator2.id, committee_role: 'member', seat_number: 2 },
@@ -167,6 +195,102 @@ test('createRound rejects a period outside the cycle bounds (CYCLE-003)', async 
   });
   assert.equal(badRound.statusCode, 422);
   assert.equal(badRound.json().code, 'CYCLE-003');
+});
+
+// CCR-013: IndicatorLevelDescription rows are keyed by (rank_level_code,
+// rubric_level). Without the evaluatee's rank on the assignment, a scoring client
+// cannot select the right expected-practice text and is pushed into inventing
+// generic labels — which is exactly what apps/web did, contradicting ADR-0003.
+// There is no personnel lookup operation, so this must come from the assignment.
+test('getAssignment exposes the evaluatee rank needed to select rubric level text', async () => {
+  const { cycle, round } = await makeOpenRound(3010);
+  const assignment = await makeAssignment(cycle.id, round.id);
+
+  const res = await app.inject({
+    method: 'GET', url: `/api/v1/assignments/${assignment.id}`, headers: auth(directorToken),
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(
+    res.json().evaluatee_rank_level_code, 'score_kru',
+    "must be the EVALUATEE's rank, not the caller's",
+  );
+});
+
+// Scores and the rollup derived from them must commit together. They used to be
+// separate awaits, so a failure in between left the new scores paired with the
+// PREVIOUS RoundResult — and total_percent feeds the STORED GENERATED
+// passed_individual_threshold column, so the database's own pass/fail verdict
+// would quietly contradict the scores behind it until someone resubmitted.
+//
+// Forced here by making the LAST write in the transaction (the audit row) fail on
+// a foreign key. If the transaction is real, the scores and rollup written before
+// it roll back too.
+test('a failure mid-submission rolls back scores AND rollup together', async () => {
+  const { cycle, round } = await makeOpenRound(3011);
+  const assignment = await makeAssignment(cycle.id, round.id);
+
+  await app.inject({
+    method: 'PUT', url: `/api/v1/assignments/${assignment.id}/my-scores`, headers: auth(directorToken),
+    payload: {
+      workload_met: true,
+      indicator_scores: [
+        { indicator_id: standardIndicatorAId, rubric_level: 4 },
+        { indicator_id: standardIndicatorBId, rubric_level: 4 },
+        { indicator_id: challengeIndicatorId, rubric_level: 4 },
+      ],
+    },
+  });
+
+  const evaluatorUserId = (await prisma.committeeMember.findFirstOrThrow({
+    where: { assignmentId: assignment.id, committeeRole: 'chair' },
+  })).evaluatorUserId;
+  const before = await prisma.roundResult.findUniqueOrThrow({
+    where: { assignmentId_evaluatorUserId: { assignmentId: assignment.id, evaluatorUserId } },
+  });
+  const scoresBefore = await prisma.indicatorScore.findMany({
+    where: { assignmentId: assignment.id, evaluatorUserId }, orderBy: { indicatorId: 'asc' },
+  });
+  assert.equal(Number(before.totalPercent), 100, 'setup: all level-4 scores rolls up to 100%');
+
+  await assert.rejects(
+    replaceScoresAndRollup(
+      assignment.id,
+      evaluatorUserId,
+      [
+        { indicatorId: standardIndicatorAId, rubricLevel: 1, comment: null },
+        { indicatorId: standardIndicatorBId, rubricLevel: 1, comment: null },
+        { indicatorId: challengeIndicatorId, rubricLevel: 1, comment: null },
+      ],
+      { part1Percent: 25, part2Percent: 25, totalPercent: 25, passedWorkloadGate: true },
+      {
+        // audit_event carries no FKs on purpose (rows must outlive the entities
+        // they describe), so the failure is forced with a NUL byte in `action`,
+        // which PostgreSQL text rejects (22021) — a write error at the LAST
+        // statement in the transaction, which is exactly where a non-atomic
+        // version would already have committed the scores and rollup.
+        schoolId: null, actorUserId: evaluatorUserId, action: 'bad\u0000action',
+        entityType: 'EvaluationAssignment', entityId: assignment.id,
+      },
+    ),
+    'the failing audit write must abort the whole submission',
+  );
+
+  const after = await prisma.roundResult.findUniqueOrThrow({
+    where: { assignmentId_evaluatorUserId: { assignmentId: assignment.id, evaluatorUserId } },
+  });
+  const scoresAfter = await prisma.indicatorScore.findMany({
+    where: { assignmentId: assignment.id, evaluatorUserId }, orderBy: { indicatorId: 'asc' },
+  });
+
+  assert.equal(Number(after.totalPercent), 100, 'rollup must not move');
+  assert.equal(
+    after.passedIndividualThreshold, true,
+    'the generated pass/fail column must still agree with the scores on disk',
+  );
+  assert.deepEqual(
+    scoresAfter.map((s) => s.rubricLevel), scoresBefore.map((s) => s.rubricLevel),
+    'the rewritten scores must be gone — no half-applied submission',
+  );
 });
 
 test('full committee scoring flow: 3 evaluators submit -> rollup computed -> overall pass', async () => {
@@ -270,10 +394,7 @@ test('committee grant on evidence: an assigned evaluator can read their evaluate
   const cat = await prisma.evidenceCategory.upsert({
     where: { code: `score-cat-${Date.now()}` }, create: { code: `score-cat-${Date.now()}`, labelTh: 'x', allowedMimeTypes: ['application/pdf'] }, update: {},
   });
-  const createEvidence = await app.inject({
-    method: 'POST', url: '/api/v1/evidence', headers: auth(teacherToken),
-    payload: { category_id: cat.id, title: 'committee visibility test' },
-  });
+  const createEvidence = await postEvidence(app, teacherToken, { category_id: cat.id, title: 'committee visibility test' });
   assert.equal(createEvidence.statusCode, 201);
   const evidence = createEvidence.json();
 
@@ -282,7 +403,7 @@ test('committee grant on evidence: an assigned evaluator can read their evaluate
 
   const outsider = await (async () => {
     const password = 'outsider-password-1234';
-    const user = await prisma.userAccount.create({ data: { email: `score-outsider-${randomUUID()}@x.io`, displayName: 'Outsider', status: 'active', passwordHash: await argonHash(password) } });
+    const user = await prisma.userAccount.create({ data: { person: { create: { displayName: 'fixture' } }, email: `score-outsider-${randomUUID()}@x.io`, displayName: 'Outsider', status: 'active', passwordHash: await argonHash(password) } });
     await prisma.schoolMembership.create({ data: { userId: user.id, schoolId: school.id, role: 'evaluator', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' } });
     const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: user.email, password } });
     return login.json().access_token;
@@ -336,9 +457,11 @@ test('committee seats require an eligible membership at the school, and the eval
 
   // A real account with NO membership at this school (exists, so the pre-existing
   // existence check passes — exactly the gap the audit found).
-  const foreign = await prisma.userAccount.create({
-    data: { email: `score-foreign-${randomUUID()}@x.io`, displayName: 'Foreign', status: 'active', passwordHash: 'x' },
-  });
+  // Tracked explicitly: this account has no membership anywhere by design, so
+  // school-scoped teardown cannot reach it.
+  const foreign = created.addUser(await prisma.userAccount.create({
+    data: { person: { create: { displayName: 'fixture' } }, email: `score-foreign-${randomUUID()}@x.io`, displayName: 'Foreign', status: 'active', passwordHash: 'x' },
+  }));
   const crossSchool = await app.inject({
     method: 'POST', url: `/api/v1/rounds/${round.id}/assignments`, headers: auth(directorToken),
     payload: committeeWith(foreign.id),

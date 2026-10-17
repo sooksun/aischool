@@ -8,12 +8,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export type E2eCreds = {
   teacher: { email: string; password: string };
   director: { email: string; password: string };
+  /** CCR-014: the bootstrap admin, the one identity created outside the API. */
+  admin: { email: string; password: string };
+  /** CCR-029: the DPO of the e2e school's area. */
+  dpo: { email: string; password: string };
   schoolId: string;
   teacherPersonnelId: string | null;
   cycleId: string | null;
   roundId: string | null;
   assignmentId: string | null;
   readyReportId: string | null;
+  /** CCR-018: the teacher's Keycloak login, or null when web sign-in is off. */
+  sso: { email: string; password: string; otpSecret: string } | null;
+  /** FR-019: a teacher with memberships at two schools. */
+  multiSchool: { email: string; password: string; schools: [string, string] };
 };
 
 export function loadE2eCreds(): E2eCreds {

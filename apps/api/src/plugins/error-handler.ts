@@ -6,15 +6,37 @@ import fp from 'fastify-plugin';
 import type { FastifyPluginAsync } from 'fastify';
 import { ZodError } from 'zod';
 import { ApiError } from '@seip/backend-shared';
+import { writeAuditEvent } from '@seip/database';
 import { Prisma } from '@prisma/client';
 
+/**
+ * Denials that permissions.yaml's notes promise an audit trail for: "Every deny
+ * path emits an AuditEvent with action=access_denied when the request carried a
+ * valid identity" (FR-095). PERM-* (role / tenancy / committee), AUTH-006 (step-up)
+ * and RES-001 — which is also how a cross-tenant read is answered, so it is the
+ * probing signal that matters most, even though it cannot be told apart from a
+ * genuinely missing id. Requests that never authenticated have no actor and are
+ * not audited here (the login limiter and the access log cover them).
+ */
+const AUDITED_DENIALS = /^(PERM-\d{3}|AUTH-006|RES-001)$/;
+
 export const errorHandlerPlugin: FastifyPluginAsync = fp(async (app) => {
-  app.setErrorHandler((err, request, reply) => {
+  app.setErrorHandler(async (err, request, reply) => {
     const requestId = request.id;
 
     if (err instanceof ApiError) {
-      reply.status(err.http).send(err.toBody(requestId));
-      return;
+      const auth = request.auth;
+      if (auth && AUDITED_DENIALS.test(err.code)) {
+        const operationId = request.routeOptions?.config?.operationId ?? 'unknown';
+        // Best effort: a failed audit write must not turn a 403 into a 500.
+        await writeAuditEvent({
+          schoolId: auth.currentSchoolId, actorUserId: auth.userId, action: 'access_denied',
+          entityType: 'Request', entityId: operationId,
+          after: { operationId, code: err.code, method: request.method, route: request.routeOptions?.url ?? null },
+          requestId,
+        }).catch((e) => request.log.warn({ err: e }, 'access_denied audit write failed'));
+      }
+      return reply.status(err.http).send(err.toBody(requestId));
     }
 
     if (err instanceof ZodError) {
