@@ -1,13 +1,16 @@
-// Read-only versioned taxonomy (ADR-0003). Every authenticated role can read it
-// (permissions.yaml: teacher..area_admin all get school/area-r) — no ownership
-// check needed, just authentication (handled by the global preHandler).
+// Read-only versioned taxonomy (ADR-0003). Every role can read it
+// (permissions.yaml: teacher..area_admin all get school/area-r), but a role it
+// must be: requireAnyGrant turns away an authenticated account with no live
+// membership (FR-095 — these three routes used to check authentication only).
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { listFrameworks, getFrameworkDetail, listEvidenceCategories } from '@seip/database';
 import { ApiError } from '@seip/backend-shared';
+import { requireAnyGrant } from '../lib/permission-guard.js';
 
 export const taxonomyRoutes: FastifyPluginAsync = async (app) => {
   app.get('/frameworks', { config: { operationId: 'listFrameworks' } }, async (request) => {
+    requireAnyGrant('listFrameworks', request.auth!);
     const q = z.object({
       role_family: z.enum(['teacher', 'administrator']).optional(),
       status: z.enum(['active', 'superseded', 'draft']).optional(),
@@ -21,6 +24,7 @@ export const taxonomyRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get('/frameworks/:frameworkId', { config: { operationId: 'getFramework' } }, async (request) => {
+    requireAnyGrant('getFramework', request.auth!);
     const params = z.object({ frameworkId: z.string().uuid() }).parse(request.params);
     const q = z.object({ include: z.string().optional() }).parse(request.query);
     const includeLevels = (q.include ?? '').split(',').includes('levels');
@@ -47,7 +51,8 @@ export const taxonomyRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  app.get('/evidence-categories', { config: { operationId: 'listEvidenceCategories' } }, async () => {
+  app.get('/evidence-categories', { config: { operationId: 'listEvidenceCategories' } }, async (request) => {
+    requireAnyGrant('listEvidenceCategories', request.auth!);
     const rows = await listEvidenceCategories();
     return rows.map((c) => ({
       id: c.id, code: c.code, label_th: c.labelTh, allowed_mime_types: c.allowedMimeTypes,

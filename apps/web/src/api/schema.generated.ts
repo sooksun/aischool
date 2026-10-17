@@ -45,6 +45,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/accept-invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the initial password for an invited account (CCR-014)
+         * @description The invite token in the body IS the credential — the invitee has no
+         *     password yet and therefore cannot hold a bearer token. Single-use: the
+         *     token is cleared in the same transaction that stores the password hash,
+         *     and the account moves `invited` → `active`.
+         *
+         *     Deliberately does NOT return a token pair. The caller logs in normally
+         *     afterwards, so SEC-AUTH-3 (`invited` accounts cannot authenticate) stays
+         *     enforced in exactly one place — `login`.
+         *
+         *     Unknown, expired and already-used tokens are indistinguishable (AUTH-005),
+         *     and the endpoint is throttled on the same limiter as login (SEC-AUTH-5),
+         *     because the token is guessable in principle.
+         */
+        post: operations["acceptInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a new password with a one-time reset token (CCR-022, FR-099)
+         * @description The reset token in the body IS the credential. Single-use and valid for 30 minutes. On success every session of the account ends — refresh tokens, browser sessions, app devices, and the account's SEIP ID sessions — and the SEIP ID password is set to the same value.
+         *
+         *     Unknown, expired and already-used tokens are indistinguishable (AUTH-008), and the endpoint is throttled like acceptInvite (SEC-AUTH-5). Returns 204; the person then signs in normally.
+         */
+        post: operations["completePasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -68,6 +121,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/web/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Start a browser sign-in through Keycloak (CCR-018, ADR-0014 §4)
+         * @description Redirects to the realm's authorization endpoint (code flow + PKCE) and sets a short-lived, signed `__Host-seip-oidc` cookie carrying state, nonce and verifier. `acr=mfa` asks for the second factor — the step-up after an AUTH-006.
+         */
+        get: operations["webLogin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/web/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Finish a browser sign-in (CCR-018)
+         * @description Checks state against the `__Host-seip-oidc` cookie, exchanges the code (confidential client, PKCE), verifies the ID token's nonce and the access token, then starts a server-side session: `__Host-seip` (httpOnly, 30 min idle, 8 h maximum) and `__Host-seip-csrf` (readable by the page, echoed as X-CSRF-Token). Any failure redirects to `/login?error=sso` rather than showing a JSON error in the browser.
+         */
+        get: operations["webCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/web/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End the browser session (CCR-018)
+         * @description Revokes the server-side session, ends the Keycloak session behind it and clears both cookies. Idempotent: 204 even without a live session.
+         */
+        post: operations["webLogout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -79,6 +192,280 @@ export interface paths {
         get: operations["getCurrentUser"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/personnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Personnel of the caller's school (CCR-014)
+         * @description Resolves personnel UUIDs to names. Readable by `evaluator` as well as
+         *     `director`/`school_admin` because a committee member must be able to see
+         *     who they are scoring — before v2.9 four screens rendered raw UUIDs as
+         *     primary user-facing text.
+         *
+         *     Returns identity needed to pick and display a person, not their evaluation
+         *     record — no scores, no agreements, no evidence.
+         */
+        get: operations["listPersonnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/files/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Files in my portfolio with these exact bytes (CCR-026, FR-012)
+         * @description Called with the SHA-256 the client computed, before any bytes are sent, so a duplicate costs no data. Only the caller's own live items, and only files whose bytes the server has verified. Empty when there is none.
+         */
+        get: operations["findMyDuplicateFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/personnel/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm my personnel profile at the current school (CCR-023, FR-099a)
+         * @description The person says the position, rank and rank date on file are right. Clears any correction request. RES-001 when the caller has no profile at the current school.
+         */
+        post: operations["confirmMyPersonnel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/personnel/correction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the school admin to correct my personnel profile (CCR-023, FR-099a) */
+        post: operations["requestPersonnelCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/personnel/{personnelId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a personnel profile (school admin, CCR-023)
+         * @description Changing position or rank clears the person's confirmation, so they confirm again; any edit clears a pending correction note. A rank that does not belong to the position's framework family is VAL-003. Audited. Takes effect for new agreements and cycles; ones already made keep the framework they were made with (FR-089).
+         */
+        patch: operations["updatePersonnel"];
+        trace?: never;
+    };
+    "/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Accounts holding a membership in the caller's school (school admin) */
+        get: operations["listMembers"];
+        put?: never;
+        /**
+         * Invite a person into the caller's school (school admin)
+         * @description Creates the `UserAccount` (status `invited`, no password), the
+         *     `SchoolMembership`, and — when `personnel` is present — the
+         *     `PersonnelProfile`, in one transaction.
+         *
+         *     The school is taken from the caller's own membership and is NOT a body
+         *     field. Accepting a client-supplied school id here would make this
+         *     operation a cross-tenant account factory.
+         *
+         *     `personnel` is optional because an external committee `evaluator` belongs
+         *     to the school without being evaluated by it — the same reason
+         *     `CurrentUser.personnel` is nullable (CCR-002).
+         *
+         *     The returned `invite_token` is shown **once** and is not retrievable
+         *     afterwards; the admin passes it to the invitee out of band. There is no
+         *     email dependency by design: an on-prem deployment (ADR-0005) may have no
+         *     SMTP relay at all.
+         *
+         *     Inviting an email that already holds a current membership in this school
+         *     is a conflict (RES-002), not a second membership.
+         */
+        post: operations["inviteMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/members/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite many staff at once from a list, with a result per row (CCR-019, FR-091)
+         * @description The web reads the school's CSV and sends its rows; each row is exactly a `MemberInvite` and goes through the same checks and the same transaction as `inviteMember`. Rows succeed or fail one by one: a bad row is reported with its error and the rest still go in. `dry_run: true` runs every check and writes nothing, so the admin can fix the file before anyone is invited. A row whose email repeats an earlier row in the same request is rejected (VAL-002).
+         *
+         *     Like `inviteMember`, the school is the caller's own, and invite tokens are returned once, here, and never again.
+         */
+        post: operations["importMembers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/areas/{areaId}/schools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The schools of one of the caller's areas (CCR-021, FR-090) */
+        get: operations["listAreaSchools"];
+        put?: never;
+        /**
+         * Add a school to one of the caller's areas (CCR-021)
+         * @description Replaces the operator CLI for the common case (scripts/ops/provision-school.mjs stays for bootstrapping). The school starts `active`. Its code is unique system-wide; a taken code is RES-002.
+         */
+        post: operations["createSchool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schools/{schoolId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename a school, or open / close it (CCR-021)
+         * @description Closing a school (`status: inactive`) ends access through every membership at it: its staff can no longer act for it, though their own portfolios stay theirs (ADR-0015). Area admins keep read access. Only an area admin of the school's area may call this; for anyone else the school does not exist (RES-001).
+         */
+        patch: operations["updateSchool"];
+        trace?: never;
+    };
+    "/schools/{schoolId}/admins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Appoint a school admin at a school of the caller's area (CCR-021)
+         * @description Exactly an inviteMember with role `school_admin` at that school — same checks, same one-time invite token — made by the area admin rather than by the school. This is how a new school gets its first admin.
+         */
+        post: operations["appointSchoolAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/members/{membershipId}/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a one-time password reset for a member (school admin, CCR-022)
+         * @description For a member who forgot their password or is locked out and has no verified email or phone (FR-099). Returns a single-use token, valid for 30 minutes, shown once; the admin hands it over in person or as a QR code. Issuing a new one cancels any earlier unused one. Audited.
+         *
+         *     Not for the caller's own account, and not for an account that has never set a password (re-invite instead) — both VAL-002. The account's second factor in SEIP ID is untouched, so a step-up still needs the person's own device.
+         */
+        post: operations["issuePasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/members/{membershipId}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a membership, revoking access to this school (school admin)
+         * @description Sets `effective_to` to today. Offboarding, not deletion — evaluation
+         *     history stays intact and attributable.
+         *
+         *     There is deliberately no way to backdate: `effective_to` records when
+         *     access was actually revoked, and a past date would assert access ended
+         *     earlier than it did.
+         *
+         *     Idempotent — ending an already-ended membership returns it unchanged.
+         */
+        post: operations["endMembership"];
         delete?: never;
         options?: never;
         head?: never;
@@ -249,49 +636,6 @@ export interface paths {
         patch: operations["updateEvidence"];
         trace?: never;
     };
-    "/evidence/{evidenceId}/files/initiate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Phase 1: validate metadata and obtain an upload target
-         * @description Validates content type / size / (video) duration against the evidence category
-         *     (UPL-001..003) **before** bytes move. Returns a provider-agnostic upload target
-         *     (presigned URL or equivalent). Client uploads bytes directly to storage,
-         *     then calls the complete endpoint.
-         */
-        post: operations["initiateFileUpload"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/evidence/{evidenceId}/files/{fileId}/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Phase 2: confirm bytes uploaded; register file and enqueue virus scan
-         * @description Emits `evidence.file.registered`; scan result arrives via `evidence.file.scan_completed` (events.yaml). File is served only when scan_status=clean (UPL-006).
-         */
-        post: operations["completeFileUpload"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/evidence/{evidenceId}/files/{fileId}/download-url": {
         parameters: {
             query?: never;
@@ -302,13 +646,55 @@ export interface paths {
         /**
          * Issue a short-lived download URL for one clean evidence file
          * @description Lazy download (CCR-010 / cleanup H2). Call only when the user intends to
-         *     download — `getEvidence` and `completeFileUpload` never presign object
-         *     storage. Requires `scan_status=clean` (UPL-006); pending/blocked return
-         *     UPL-006. Same tenancy grants as `getEvidence`. Never returns `storage_uri`.
+         *     download — `getEvidence` and `completeUpload` never presign object
+         *     storage. Requires `scan_status` to be `clean` or `unscanned` (CCR-012 —
+         *     unscanned means no scanner ran, which is disclosed rather than blocked);
+         *     `pending`/`blocked` return UPL-006. Same tenancy grants as `getEvidence`.
+         *     Never returns `storage_uri`.
          */
         get: operations["getEvidenceFileDownloadUrl"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evidence/{evidenceId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The owner accepts an item uploaded on their behalf (CCR-024, FR-019)
+         * @description Only the owner. Idempotent — accepting an accepted item returns it unchanged. To decline, the owner deletes it (deleteEvidence).
+         */
+        post: operations["acceptEvidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evidence/{evidenceId}/injection-flag/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A school admin clears the "may contain hidden instructions" flag (CCR-027, FR-028)
+         * @description After looking at the item, a school admin of the item's school clears the flag for its current content. A later analysis of changed content can flag it again. The owner cannot clear their own item. Idempotent; audited.
+         */
+        post: operations["clearInjectionFlag"];
         delete?: never;
         options?: never;
         head?: never;
@@ -327,28 +713,6 @@ export interface paths {
         put?: never;
         /** Map evidence to an indicator (human proposal; status=suggested until confirmed) */
         post: operations["createMapping"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/evidence/{evidenceId}/mappings/suggest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Suggest indicator mappings for evidence (local heuristic; ADR-0007)
-         * @description Creates zero or more mappings with mapping_source=ai_suggested and
-         *     status=suggested. Never auto-confirms. On-prem only — no foreign LLM
-         *     while ADR-0005 holds. Empty suggestions return 200 with items=[].
-         */
-        post: operations["suggestMappings"];
         delete?: never;
         options?: never;
         head?: never;
@@ -387,6 +751,105 @@ export interface paths {
         head?: never;
         /** Confirm, reject, or revoke a mapping (governance action, audited) */
         patch: operations["actOnMapping"];
+        trace?: never;
+    };
+    "/agreements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Performance agreements visible to the caller
+         * @description A teacher sees their own; a director or school_admin sees the school's; an
+         *     evaluator sees those of the people they sit on a committee for.
+         */
+        get: operations["listAgreements"];
+        put?: never;
+        /**
+         * File a performance agreement for a cycle (แบบ PA1)
+         * @description One agreement per (cycle, personnel) — a second attempt is AGR-001, not a
+         *     second row. The challenge is written as part of the agreement rather than
+         *     through its own endpoint: it has no independent lifecycle, and an agreement
+         *     with an orphan challenge is not a state worth modelling.
+         *
+         *     Starts in `draft`. Content stays editable until `submitAgreement`.
+         */
+        post: operations["createAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agreements/{agreementId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One agreement with its ประเด็นท้าทาย */
+        get: operations["getAgreement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a draft agreement and its challenge
+         * @description Draft only. Once submitted, the content is frozen (AGR-002): editing a
+         *     submitted agreement would let an evaluatee rewrite the targets they are
+         *     about to be scored against, and editing an acknowledged one would rewrite
+         *     what the director signed.
+         */
+        patch: operations["updateAgreement"];
+        trace?: never;
+    };
+    "/agreements/{agreementId}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a draft agreement for the director to acknowledge
+         * @description draft → submitted, and the content freezes. Requires a challenge to exist —
+         *     submitting an agreement with no ประเด็นท้าทาย would hand the committee an
+         *     empty 40% to score, which is the defect this whole contract version exists
+         *     to close (AGR-002).
+         */
+        post: operations["submitAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agreements/{agreementId}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Director acknowledges a submitted agreement (ผอ. เห็นชอบ)
+         * @description submitted → acknowledged. Never available to the evaluatee, even though
+         *     they hold `own` on the agreement — acknowledging your own commitments is
+         *     not a signature.
+         */
+        post: operations["acknowledgeAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/rounds/{roundId}/assignments": {
@@ -511,6 +974,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports/{reportId}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The decision trail for a report (CCR-016)
+         * @description Grants match `getReport` rather than the narrower write grants: a subject
+         *     who can read their own result but not who endorsed it would be a strange
+         *     kind of transparency.
+         *
+         *     Append-only — there is no operation that edits or removes a decision, and
+         *     that is what makes the signature mean anything.
+         */
+        get: operations["listReportApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/{reportId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Endorse a generated report (ผอ. ลงนาม)
+         * @description `pending_approval` → `approved`, recording an Approval row with the actor
+         *     and timestamp.
+         *
+         *     **Requires the report's round to be closed** (RPT-003). Scores only freeze
+         *     when a round closes (SCORE-002), so approving earlier would timestamp a
+         *     signature against numbers that can still change — the document would later
+         *     contradict its own data with nothing to show for it. Reports with
+         *     `round_id = null` are cycle-level and skip the check; there is no round to
+         *     freeze.
+         *
+         *     The evaluatee may never approve their own report, even where their role
+         *     holds the grant — a director is an evaluatee too under ว10, and
+         *     `permissions.yaml` cannot express "any grant except over yourself".
+         */
+        post: operations["approveReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/{reportId}/return": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Return a report for rework (ส่งกลับให้แก้ไข)
+         * @description `pending_approval` → `draft`, so the report can be regenerated once
+         *     whatever was wrong is fixed.
+         *
+         *     `comment` is REQUIRED here, unlike on approve: sending a result back with
+         *     no stated reason gives the person who has to fix it nothing to act on.
+         *
+         *     Note there is no "reject". A report renders scores that already exist, so
+         *     marking one rejected while that data stands unchanged would be a
+         *     contradiction rather than a state — if the result itself is wrong, the
+         *     remedy is to reopen the round and rescore. `ApprovalDecision.rejected`
+         *     stays unused on purpose (CCR-016 decision 2).
+         */
+        post: operations["returnReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reports/{reportId}/pdf": {
         parameters: {
             query?: never;
@@ -525,6 +1075,524 @@ export interface paths {
          *     Layout is SEIP structure-faithful PA1/PA2/PA3 form, not the Protected Artifact plate.
          */
         get: operations["getReportPdf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Open an upload session for an evidence file (single PUT ≤16 MiB, S3 multipart above) */
+        post: operations["createUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/uploads/{uploadId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Upload session state, including the parts already received (server ListParts) */
+        get: operations["getUpload"];
+        put?: never;
+        post?: never;
+        /** Abort an upload session (AbortMultipartUpload) */
+        delete: operations["abortUpload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/uploads/{uploadId}/part-urls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Presign UploadPart URLs (15 min) for the listed part numbers */
+        post: operations["signUploadParts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/uploads/{uploadId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete the upload; the server lists parts, completes, and queues verification */
+        post: operations["completeUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evidence/{evidenceId}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-run analysis (it runs automatically after verify + scan). At most once per 10 min. */
+        post: operations["requestEvidenceAnalysis"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analyses/{analysisId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Analysis progress */
+        get: operations["getEvidenceAnalysis"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evidence/{evidenceId}/segments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Locator targets for viewers (pages, transcript, keyframes) */
+        get: operations["listEvidenceSegments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/evidence/{evidenceId}/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** AI suggestions for this evidence, with validated locators */
+        get: operations["listEvidenceSuggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/suggestions/{suggestionId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept → mapping (owner_confirmed, source ai_accepted). Owner only. */
+        post: operations["acceptSuggestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/suggestions/accept-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** "ยอมรับทั้งหมดที่ชัดเจน" — accept clear suggestions on gate-passed indicators */
+        post: operations["acceptSuggestions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/suggestions/{suggestionId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject with a reason (feeds calibration) */
+        post: operations["rejectSuggestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sync/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Delta sync since a cursor (offline clients) */
+        get: operations["getChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** In-app inbox (source of truth for every channel) */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark notifications read */
+        post: operations["markNotificationsRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notification-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Channel preferences */
+        get: operations["getNotificationPreferences"];
+        /** Replace channel preferences */
+        put: operations["updateNotificationPreferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's device sessions */
+        get: operations["listDeviceSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/devices/current/push-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Bind a push token to the current device session */
+        put: operations["registerPushToken"];
+        post?: never;
+        /** Remove the current session's push token */
+        delete: operations["removePushToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/devices/{deviceSessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a device session (effective ≤60 s; deletes its push token) */
+        delete: operations["revokeDeviceSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Indicator coverage for a person, school or area */
+        get: operations["getCoverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignmentId}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Committee view: the evaluatee's confirmed evidence per indicator */
+        get: operations["listAssignmentEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignmentId}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Comments and requests for more information per indicator, with replies (CCR-028, FR-064)
+         * @description Text only — no score and no status change. The committee (while the round is open), the school's director and school admin, and the evaluatee read them.
+         */
+        get: operations["listAssignmentComments"];
+        put?: never;
+        /**
+         * A committee member or the director comments or asks for more; the evaluatee replies (CCR-028)
+         * @description The committee (while the round is open) and the director post `comment` or `request_info`, or reply to a reply. The evaluatee posts only `reply`, to a comment on their own assignment.
+         */
+        post: operations["createAssignmentComment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dpa-slot-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** DPA request types and their slots (versioned data) */
+        get: operations["listDpaSlotProfiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subject-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data-subject requests — the caller's own, or (for a DPO) their area's
+         * @description A person sees only their own requests. A DPO sees the requests of every area where they hold the `dpo` role, oldest due first. Never evidence content.
+         */
+        get: operations["listSubjectRequests"];
+        put?: never;
+        /**
+         * File a data-subject request about the caller's own data (FR-117)
+         * @description The request belongs to the caller's person and goes to the DPO of the current school's area. `due_at` is 30 days after receipt by default (NFR-PDPA-05, unverified — a warning, never a block). A school with no area has no DPO to receive it: VAL-002.
+         */
+        post: operations["createSubjectRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subject-requests/{requestId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One data-subject request */
+        get: operations["getSubjectRequest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subject-requests/{requestId}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The DPO approves, rejects or completes a request (FR-117)
+         * @description `approve` on `access` / `portability` queues the person's portfolio export (portfolio_portable) and moves the request to `fulfilling`; it becomes `completed` by itself when the export is ready. The export is the person's: the DPO cannot download it. `approve` on any other type moves it to `approved` — the change is made by hand, then `complete` closes it with a note. `reject` needs a reason (`note`). A transition from the wrong status is VAL-002. Audited.
+         */
+        post: operations["decideSubjectRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/areas/{areaId}/dpos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The DPOs of one of the caller's areas (CCR-029) */
+        get: operations["listAreaDpos"];
+        put?: never;
+        /**
+         * Appoint the DPO of one of the caller's areas (CCR-029)
+         * @description An area-scoped `dpo` membership, invited like appointSchoolAdmin — the same one-time invite token, null when the account already has a password. The DPO's grants are the subject-request register only. Another area is RES-001.
+         */
+        post: operations["appointDpo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's exports (and, for admins, their school's) */
+        get: operations["listExports"];
+        put?: never;
+        /** Start an export; pre-flight runs first */
+        post: operations["createExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/exports/{exportId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export status and pre-flight results */
+        get: operations["getExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/exports/{exportId}/download-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Short-lived download URL for a ready export */
+        get: operations["getExportDownloadUrl"];
         put?: never;
         post?: never;
         delete?: never;
@@ -550,8 +1618,17 @@ export interface components {
         };
         /** @enum {string} */
         RoleFamily: "teacher" | "administrator";
-        /** @enum {string} */
-        Role: "teacher" | "director" | "deputy" | "evaluator" | "school_admin" | "area_admin";
+        /**
+         * @description Open enum (CCR-029, owner decision 2026-10-15): the server may add a role in a minor version. Clients must accept a role they do not know and offer it no affordances. `dpo` (area-scoped) handles data-subject requests only.
+         * @enum {string}
+         */
+        Role: "teacher" | "director" | "deputy" | "evaluator" | "school_admin" | "area_admin" | "dpo";
+        /**
+         * @description `invited` — created but has never set a password; cannot authenticate
+         *     (SEC-AUTH-3). `disabled` — deactivated; also cannot authenticate.
+         * @enum {string}
+         */
+        UserStatus: "active" | "disabled" | "invited";
         /** @enum {string} */
         EvaluationKind: "pa" | "dpa";
         /** @enum {string} */
@@ -560,13 +1637,16 @@ export interface components {
         RoundStatus: "planned" | "open" | "scoring" | "closed";
         /** @enum {string} */
         EvidenceStatus: "draft" | "active" | "archived" | "rejected";
-        /** @enum {string} */
-        MappingStatus: "suggested" | "confirmed" | "rejected" | "revoked";
         /**
-         * @description ai_suggested set only by suggestMappings (ADR-0007 local_heuristic)
+         * @description Two-tier confirmation (ADR-0015). The owner confirms (`owner_confirmed`); the director or an assigned committee member then `validated` or `returned` it. `revoked` frees the (evidence, indicator, framework version) slot. There is no `suggested` state: AI output lives in Suggestion until the owner accepts it.
          * @enum {string}
          */
-        MappingSource: "human" | "ai_suggested";
+        MappingStatus: "owner_confirmed" | "validated" | "returned" | "revoked";
+        /**
+         * @description `ai_accepted` — created by acceptSuggestion(s); `manual` — created by createMapping.
+         * @enum {string}
+         */
+        MappingSource: "ai_accepted" | "manual";
         /** @enum {string} */
         ReportStatus: "draft" | "pending_approval" | "approved" | "issued" | "superseded";
         /**
@@ -574,8 +1654,20 @@ export interface components {
          * @enum {string}
          */
         ReportTemplateCode: "PA1_s" | "PA1_bs" | "PA2_s" | "PA2_bs" | "PA3_s" | "PA3_bs";
-        /** @enum {string} */
-        ScanStatus: "pending" | "clean" | "blocked";
+        /**
+         * @description `pending` — queued, the worker has not processed the file yet.
+         *     `clean` — a scanner ran and found nothing.
+         *     `unscanned` — the file was processed but NO scanner ran, so the platform
+         *     makes no claim about its contents (CCR-012). This is the state on any
+         *     deployment without a malware scanner wired in. It is served like `clean`
+         *     — the distinction is disclosure, not restriction — and clients are
+         *     expected to surface it so nobody reads silence as a clean bill of health.
+         *     `blocked` — quarantined: a scanner rejected it, or the stored object did
+         *     not match the declared byte_size. Never served (UPL-006).
+         *     `sanitised` — 4.0.0: the original failed or skipped scanning but a content-disarmed rendition (CDR) was produced and is what gets served (ADR-0018).
+         * @enum {string}
+         */
+        ScanStatus: "pending" | "clean" | "sanitised" | "unscanned" | "blocked";
         RubricLevel: number;
         LoginRequest: {
             /** Format: email */
@@ -598,6 +1690,11 @@ export interface components {
         CurrentUser: {
             /** Format: uuid */
             id: string;
+            /**
+             * Format: uuid
+             * @description The person this account belongs to (ADR-0015) — the owner key of evidence (owner_person_id). Added in CCR-024 so a client can tell its own items.
+             */
+            person_id?: string | null;
             /** Format: email */
             email: string;
             display_name: string;
@@ -612,16 +1709,200 @@ export interface components {
                  * @example teacher_chamnankan
                  */
                 rank_level_code: string;
+                full_name?: string;
+                /** Format: date */
+                rank_since?: string | null;
+                /**
+                 * Format: date-time
+                 * @description Null until the person confirms the profile (FR-099a); the web asks them to.
+                 */
+                confirmed_at?: string | null;
+                correction_note?: string | null;
             };
+            /** @description The memberships in effect now (CCR-020). An ended or future-dated membership is not listed, the same way the API ignores it for access. */
             memberships: {
                 role: components["schemas"]["Role"];
                 /** @enum {string} */
                 membership_scope: "school" | "area";
                 /** Format: uuid */
                 school_id?: string | null;
+                /** @description CCR-020. Set when `school_id` is set, so a client can let the person choose a school by name. */
+                school_name?: string | null;
                 /** Format: uuid */
                 area_id?: string | null;
             }[];
+        };
+        /** @description Enough to identify and display a person; not their evaluation record. */
+        PersonnelSummary: {
+            /** Format: uuid */
+            id: string;
+            full_name: string;
+            employee_code?: string | null;
+            position_role: components["schemas"]["RoleFamily"];
+            /**
+             * @description วิทยฐานะ tier code — same vocabulary as CurrentUser.personnel.rank_level_code
+             * @example teacher_kru
+             * @example teacher_chamnankan
+             */
+            rank_level_code: string;
+            /**
+             * Format: date
+             * @description When the current วิทยฐานะ was granted.
+             */
+            rank_since?: string | null;
+            /**
+             * Format: date-time
+             * @description When the person confirmed this profile. Cleared when an admin changes position or rank.
+             */
+            confirmed_at?: string | null;
+            /** @description What the person asked to have corrected; cleared when the admin edits the profile. */
+            correction_note?: string | null;
+            /** @enum {string} */
+            status: "active" | "inactive";
+        };
+        DuplicateFile: {
+            /** Format: uuid */
+            evidence_id: string;
+            /** Format: uuid */
+            file_id: string;
+            title: string;
+            /** Format: date-time */
+            uploaded_at: string;
+        };
+        PersonnelCorrectionRequest: {
+            note: string;
+        };
+        PersonnelPatch: {
+            full_name?: string;
+            employee_code?: string | null;
+            position_role?: components["schemas"]["RoleFamily"];
+            rank_level_code?: string;
+            /** Format: date */
+            rank_since?: string | null;
+        };
+        /** @description One person's membership in the caller's school, with their account state. */
+        Member: {
+            /** Format: uuid */
+            membership_id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** Format: email */
+            email: string;
+            display_name: string;
+            role: components["schemas"]["Role"];
+            user_status: components["schemas"]["UserStatus"];
+            /** Format: date */
+            effective_from: string;
+            /**
+             * Format: date
+             * @description Null while the membership is current. Set by endMembership.
+             */
+            effective_to?: string | null;
+            /** @description Present when this member is also evaluatee-capable personnel. Null for an external evaluator (CCR-002 shape). */
+            personnel?: null | components["schemas"]["PersonnelSummary"];
+        };
+        /**
+         * @description No `school_id` — the school is the caller's own. A body-supplied school
+         *     would turn this into a cross-tenant account factory, so the field does
+         *     not exist rather than being validated away.
+         */
+        MemberInvite: {
+            /**
+             * Format: email
+             * @description Stored lowercase; the server lowercases before insert (a CHECK constraint compares the value against its own lowercase form as BINARY).
+             */
+            email: string;
+            display_name: string;
+            role: components["schemas"]["Role"];
+            personnel?: components["schemas"]["MemberInvitePersonnel"];
+        };
+        AreaSchool: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            /** Format: uuid */
+            area_id: string;
+            /** @enum {string} */
+            status: "active" | "inactive";
+        };
+        AreaSchoolCreate: {
+            /** @description Usually the ministry school code. Unique across the system. */
+            code: string;
+            name: string;
+        };
+        AreaSchoolPatch: {
+            name?: string;
+            /** @enum {string} */
+            status?: "active" | "inactive";
+        };
+        SchoolAdminAppointment: {
+            /** Format: email */
+            email: string;
+            display_name: string;
+        };
+        MemberImport: {
+            rows: components["schemas"]["MemberInvite"][];
+            /** @default false */
+            dry_run: boolean;
+        };
+        MemberImportRowResult: {
+            /** @description 1-based index into `rows`. */
+            row: number;
+            /**
+             * @description `invited` — written; `would_invite` — a dry run found nothing wrong; `rejected` — see `error`, nothing written for this row.
+             * @enum {string}
+             */
+            status: "invited" | "would_invite" | "rejected";
+            member?: components["schemas"]["Member"];
+            /** @description As in MemberInviteResult — once, here only. Null when the account already had a password. */
+            invite_token?: string | null;
+            /** Format: date-time */
+            invite_expires_at?: string | null;
+            error?: components["schemas"]["Error"];
+        };
+        MemberImportResult: {
+            dry_run: boolean;
+            results: components["schemas"]["MemberImportRowResult"][];
+        };
+        /** @description The invite token appears here and nowhere else, ever. */
+        MemberInviteResult: {
+            member: components["schemas"]["Member"];
+            /**
+             * @description Single-use secret. Only its hash is stored, so this value cannot be
+             *     recovered after this response — re-invite if it is lost. Deliver it
+             *     out of band; never log it (SEC-AUTH-1 applies to any credential).
+             *
+             *     **Null when the invited email already belongs to an account that has
+             *     a password.** That case is a real one — a teacher moving schools, or
+             *     an external evaluator serving two — and it grants the new membership
+             *     without issuing a credential. Issuing one would let any school_admin
+             *     take over any account in the system by "inviting" its email: an
+             *     admin-triggered password reset wearing an onboarding hat. The person
+             *     simply logs in with the password they already have.
+             */
+            invite_token: string | null;
+            /**
+             * Format: date-time
+             * @description Null exactly when `invite_token` is null.
+             */
+            invite_expires_at: string | null;
+        };
+        /** @description The reset token appears here and nowhere else, ever. */
+        PasswordResetIssued: {
+            /** @description Single-use secret. Only its hash is stored. */
+            reset_token: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        PasswordResetComplete: {
+            reset_token: string;
+            password: string;
+        };
+        AcceptInviteRequest: {
+            invite_token: string;
+            /** @description Chosen by the invitee. The inviting admin never sees or sets it. */
+            password: string;
         };
         Framework: {
             /** Format: uuid */
@@ -767,10 +2048,6 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            school_id: string;
-            /** Format: uuid */
-            owner_personnel_id: string;
-            /** Format: uuid */
             uploaded_by_user_id?: string;
             /** Format: uuid */
             category_id: string;
@@ -782,31 +2059,132 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             /**
+             * Format: date-time
+             * @description When the owner accepted the item (CCR-024). Set at creation when the owner uploads it; null for an item a school admin uploaded on their behalf until the owner accepts it (acceptEvidence). A null item cannot be mapped, so it does not count in the portfolio.
+             */
+            owner_accepted_at?: string | null;
+            /** @description FR-028 / CCR-027: the latest analysis found signs of hidden instructions aimed at the AI (hidden or invisible text, instruction-like wording). While set, no suggestion is batch-acceptable and the committee sees a badge. The owner cannot clear it; a school admin can (clearInjectionFlag), with an audit row. Absent or false when nothing was found or the flag was cleared for this content. */
+            injection_suspected?: boolean;
+            /** @description Why the item was flagged (CCR-027). Empty when not flagged. */
+            injection_reasons?: ("hidden_characters" | "instruction_text" | "tiny_text")[];
+            /**
              * @description Aggregate of attached files (CCR-009). null when there are no files.
-             *     Worst-of order: pending > blocked > clean. Present on list and detail so
+             *     Worst-of order: pending > blocked > unscanned > clean. Present on list and detail so
              *     clients never need N+1 detail fetches for list badges.
              */
             scan_status?: null | components["schemas"]["ScanStatus"];
-        };
-        EvidenceCreate: {
             /**
              * Format: uuid
-             * @description Defaults to the caller's own personnel profile; admins may set another owner
+             * @description The person who owns the portfolio item (ADR-0015). Survives school transfers.
              */
-            owner_personnel_id?: string | null;
+            owner_person_id: string;
+            /**
+             * Format: uuid
+             * @description The ESA (สพท.) acting as PDPA controller for this item. Null only while the origin school has no ESA assigned (dev fixtures); production provisioning requires one.
+             */
+            controller_area_id: string | null;
+            /**
+             * Format: uuid
+             * @description The school the owner belonged to when the item was created. Informational; access comes from grants, not from this field.
+             */
+            origin_school_id: string;
+            kind: components["schemas"]["EvidenceKind"];
+            /**
+             * Format: uri
+             * @description kind=link only, http(s) only (else VAL-001). SEIP stores the URL and its description; linked content is never fetched or analysed (ADR-0017 out of scope).
+             */
+            link_url?: string | null;
+            /** @description kind=note only. */
+            note_text?: string | null;
+            /** Format: date */
+            performed_from?: string | null;
+            /** Format: date */
+            performed_to?: string | null;
+            performed_date_source?: components["schemas"]["PerformedDateSource"] | null;
+            academic_year_be?: number | null;
+            /** @enum {integer|null} */
+            semester?: 1 | 2 | null;
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            contains_learners: "unknown" | "yes" | "no";
+            /**
+             * Format: uuid
+             * @description The offline client's id for this item; UNIQUE per owner, so an outbox replay cannot duplicate it.
+             */
+            client_uuid?: string | null;
+            /** @description Optimistic-concurrency version; also returned as the ETag header. */
+            version: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        EvidenceCreate: {
             /** Format: uuid */
             category_id: string;
             title: string;
             description?: string | null;
             /** Format: date-time */
             captured_at?: string | null;
+            /**
+             * Format: uuid
+             * @description Defaults to the caller. Only school_admin may create on behalf of another person in their school.
+             */
+            owner_person_id?: string | null;
+            kind: components["schemas"]["EvidenceKind"];
+            /**
+             * Format: uri
+             * @description kind=link only, http(s) only (else VAL-001). SEIP stores the URL and its description; linked content is never fetched or analysed (ADR-0017 out of scope).
+             */
+            link_url?: string | null;
+            /** @description kind=note only. */
+            note_text?: string | null;
+            /** Format: date */
+            performed_from?: string | null;
+            /** Format: date */
+            performed_to?: string | null;
+            academic_year_be?: number | null;
+            /** @enum {integer|null} */
+            semester?: 1 | 2 | null;
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            contains_learners: "unknown" | "yes" | "no";
+            /** Format: uuid */
+            client_uuid: string;
         };
         EvidencePatch: {
+            /**
+             * Format: uuid
+             * @description Owner only (CCR-024): move the item to another school the owner is a current member of, in the same สพท. (controller). Another สพท. is VAL-002 (ADR-0015 §5). Audited as moved. Mappings already made keep their school.
+             */
+            origin_school_id?: string;
             title?: string;
             description?: string | null;
             status?: components["schemas"]["EvidenceStatus"];
             /** Format: date-time */
             captured_at?: string | null;
+            /**
+             * Format: uri
+             * @description kind=link only, http(s) only (else VAL-001). SEIP stores the URL and its description; linked content is never fetched or analysed (ADR-0017 out of scope).
+             */
+            link_url?: string | null;
+            /** @description kind=note only. */
+            note_text?: string | null;
+            /** Format: date */
+            performed_from?: string | null;
+            /** Format: date */
+            performed_to?: string | null;
+            academic_year_be?: number | null;
+            /** @enum {integer|null} */
+            semester?: 1 | 2 | null;
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            contains_learners: "unknown" | "yes" | "no";
+            performed_date_source?: components["schemas"]["PerformedDateSource"] | null;
         };
         EvidenceDetail: components["schemas"]["Evidence"] & {
             files: components["schemas"]["EvidenceFile"][];
@@ -831,6 +2209,28 @@ export interface components {
             download_url?: string | null;
             /** Format: date-time */
             uploaded_at: string;
+            role: components["schemas"]["FileRole"];
+            /** Format: uuid */
+            parent_file_id?: string | null;
+            /**
+             * Format: date-time
+             * @description Set when the worker re-hashed the stored object and it matched checksum_sha256. Clients delete a local copy only after this is set and scan_status is clean or sanitised.
+             */
+            sha256_verified_at?: string | null;
+            /**
+             * Format: uuid
+             * @description CCR-026 (FR-012): another of the owner's items already holds these exact bytes, confirmed by the server's re-hash. A warning, not a refusal — the person decides whether to keep both.
+             */
+            duplicate_of_evidence_id?: string | null;
+            duration_ms?: number | null;
+            page_count?: number | null;
+            width?: number | null;
+            height?: number | null;
+            /**
+             * @description Lifecycle of the original and its renditions.
+             * @enum {string}
+             */
+            media_state: "uploading" | "verifying" | "processing" | "ready" | "failed";
         };
         FileDownloadUrl: {
             /**
@@ -841,51 +2241,6 @@ export interface components {
             /** Format: date-time */
             expires_at: string;
         };
-        FileUploadInitiate: {
-            content_type: string;
-            byte_size: number;
-            checksum_sha256: string;
-            original_filename: string;
-            /**
-             * @description Video categories: send when the client can read it (enables fail-fast UPL-003
-             *     before bytes move); null is always allowed — the server-side probe after upload
-             *     is the authoritative UPL-003 enforcement (CCR-002).
-             */
-            duration_seconds?: number | null;
-        };
-        FileUploadTarget: {
-            /** Format: uuid */
-            file_id: string;
-            /** @description Provider-agnostic presigned target */
-            upload_url: string;
-            /** @enum {string} */
-            method: "PUT" | "POST";
-            headers?: {
-                [key: string]: string;
-            };
-            /** Format: date-time */
-            expires_at: string;
-        };
-        /**
-         * @description Widened by CCR-004 (v2.0.0 — BREAKING, see the file header note on why a
-         *     major bump was correct here): the original v1.0.0 shape assumed a
-         *     server-side upload session remembering initiate's declared metadata, which
-         *     this API doesn't implement. The client resends content_type/byte_size/
-         *     original_filename/duration_seconds alongside the checksum so complete can
-         *     rebuild the same storage key and re-validate. See docs/reviews/CCR-004-*.md
-         *     for the accepted limitation this carries (no server-side re-read of the
-         *     actual uploaded bytes yet).
-         */
-        FileUploadComplete: {
-            /** @description Must equal the initiate value (UPL-005) */
-            checksum_sha256: string;
-            /** @description Must equal the initiate value — re-validated against the category (CCR-004) */
-            content_type: string;
-            byte_size: number;
-            original_filename: string;
-            /** @description Same nullable/probe-authoritative semantics as FileUploadInitiate (CCR-002) */
-            duration_seconds?: number | null;
-        };
         Mapping: {
             /** Format: uuid */
             id: string;
@@ -893,56 +2248,42 @@ export interface components {
             evidence_id: string;
             /** Format: uuid */
             indicator_id: string;
-            /** Format: uuid */
-            cycle_id?: string | null;
             mapping_source: components["schemas"]["MappingSource"];
             status: components["schemas"]["MappingStatus"];
-            rationale?: string | null;
             /** Format: uuid */
-            mapped_by_user_id?: string;
+            framework_version_id: string;
             /** Format: uuid */
-            confirmed_by_user_id?: string | null;
+            ai_suggestion_id?: string | null;
+            /** @description Owner's note (manual mappings). */
+            note?: string | null;
+            /** Format: uuid */
+            owner_confirmed_by_user_id: string;
             /** Format: date-time */
-            mapped_at: string;
+            owner_confirmed_at: string;
+            /** Format: uuid */
+            validated_by_user_id?: string | null;
             /** Format: date-time */
-            confirmed_at?: string | null;
+            validated_at?: string | null;
+            /** @enum {string|null} */
+            validator_role?: "director" | "committee" | null;
+            /** @description Why a validator returned it. Separate from the owner note, so a return never overwrites it. */
+            return_note?: string | null;
+            /** @description The locators the owner accepted, frozen at confirmation time. */
+            locator_snapshot?: components["schemas"]["Locator"][] | null;
+            version: number;
         };
+        /** @description Manual mapping by the owner; created directly as owner_confirmed. framework_version_id is derived from the indicator. */
         MappingCreate: {
             /** Format: uuid */
             indicator_id: string;
-            /** Format: uuid */
-            cycle_id?: string | null;
-            rationale?: string | null;
+            note?: string | null;
         };
-        /** @description Optional filters for local_heuristic suggest (ADR-0007) */
-        MappingSuggestRequest: {
-            /**
-             * Format: uuid
-             * @description Attach suggested mappings to this cycle when set
-             */
-            cycle_id?: string | null;
-            /**
-             * Format: uuid
-             * @description Limit candidate indicators to this framework; defaults to cycle's framework when cycle_id set
-             */
-            framework_version_id?: string | null;
-            /** @default 5 */
-            max_suggestions: number;
-        };
-        MappingSuggestResult: {
-            /**
-             * @description Always local_heuristic under ADR-0007
-             * @enum {string}
-             */
-            provider: "local_heuristic";
-            items: components["schemas"]["Mapping"][];
-            /** @description Count of candidate indicators skipped because an active mapping already exists */
-            skipped_active?: number;
-        };
+        /** @description revoke — owner only. validate / return — director or an assigned committee member, step-up (acr ≥ 2) required. */
         MappingAction: {
             /** @enum {string} */
-            action: "confirm" | "reject" | "revoke";
-            rationale?: string | null;
+            action: "revoke" | "validate" | "return";
+            /** @description Required when action=return. */
+            return_note?: string | null;
         };
         Assignment: {
             /** Format: uuid */
@@ -964,15 +2305,115 @@ export interface components {
             committee_role: "chair" | "member";
             seat_number: number;
         };
+        /**
+         * @description `draft` — editable by the evaluatee. `submitted` — content frozen, awaiting
+         *     the director. `acknowledged` — ผอ. เห็นชอบ; this is what a committee scores
+         *     against.
+         * @enum {string}
+         */
+        AgreementStatus: "draft" | "submitted" | "acknowledged";
+        /**
+         * @description ประเด็นท้าทาย — one per agreement, matching the single challenge on the PA1
+         *     form. The three text fields are what indicators C.1 / C.2.1 / C.2.2 rate
+         *     (20 / 10 / 10 points), so they are the evidence behind 40% of the result.
+         */
+        AgreementChallenge: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The framework's วิธีดำเนินการ indicator (T-C.1 / A-C.1) — the anchor this challenge is filed under.
+             */
+            indicator_id: string;
+            /** @description ประเด็นท้าทาย เรื่อง … — the subject of the challenge. */
+            title: string;
+            /** @description วิธีดำเนินการ — scored by C.1 (20 points). */
+            method_plan: string;
+            /** @description ผลลัพธ์เชิงปริมาณ — the target C.2.1 is scored against (10 points). */
+            quantitative_target?: string | null;
+            /** @description ผลลัพธ์เชิงคุณภาพ — the target C.2.2 is scored against (10 points). */
+            qualitative_target?: string | null;
+            /** @description กลุ่มเป้าหมาย — not scored. */
+            target_group?: string | null;
+            /** @description ช่วงเวลาดำเนินการ — not scored. */
+            period_note?: string | null;
+        };
+        AgreementChallengeInput: {
+            title: string;
+            method_plan: string;
+            quantitative_target?: string | null;
+            qualitative_target?: string | null;
+            target_group?: string | null;
+            period_note?: string | null;
+        };
+        Agreement: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            school_id: string;
+            /** Format: uuid */
+            cycle_id: string;
+            /** Format: uuid */
+            personnel_id: string;
+            /**
+             * @description /ส for teachers (ว9), /บส for administrators (ว10). Derived from the personnel's position_role, not chosen by the client.
+             * @enum {string}
+             */
+            form_variant: "PA1_s" | "PA1_bs";
+            status: components["schemas"]["AgreementStatus"];
+            /** Format: date-time */
+            submitted_at?: string | null;
+        };
+        AgreementDetail: components["schemas"]["Agreement"] & {
+            /** @description Null while still being drafted; required before the agreement can be submitted. */
+            challenge?: null | components["schemas"]["AgreementChallenge"];
+        };
+        /**
+         * @description No `school_id` and no `form_variant` — both are derived (the school from
+         *     the caller's membership, the variant from the personnel's position_role).
+         *     `personnel_id` is required rather than implied because a school_admin may
+         *     file on behalf of staff, but it is validated against the caller's school
+         *     and against the `own` grant for an evaluatee filing their own.
+         */
+        AgreementCreate: {
+            /** Format: uuid */
+            cycle_id: string;
+            /** Format: uuid */
+            personnel_id: string;
+            /** @description Optional at creation so an agreement can be started and finished later; required by the time it is submitted. */
+            challenge?: components["schemas"]["AgreementChallengeInput"];
+        };
+        /** @description Draft only (AGR-002). Omitted fields are left unchanged. */
+        AgreementPatch: {
+            challenge?: components["schemas"]["AgreementChallengeInput"];
+        };
+        /**
+         * @description No `agreement_id` (removed in 3.0.0, CCR-015). PerformanceAgreement is
+         *     unique per (cycle, personnel) and the assignment knows both, so the server
+         *     derives it. It used to be accepted from the body and passed through
+         *     unvalidated, which let one person's assignment be attached to another
+         *     person's agreement — and since workload_declaration is unique per
+         *     (agreement, round), that made the ภาระงาน gate read and write the wrong
+         *     person's row.
+         */
         AssignmentCreate: {
             /** Format: uuid */
             evaluatee_personnel_id: string;
-            /** Format: uuid */
-            agreement_id?: string | null;
             /** @description Exactly 3 per ว9/ว10 (SCORE-001) — one chair, two members */
             committee: components["schemas"]["CommitteeMember"][];
         };
         AssignmentDetail: components["schemas"]["Assignment"] & {
+            /**
+             * @description The evaluatee's ประเด็นท้าทาย, read-only (CCR-015). This is the
+             *     whole point of contract v3.0: indicators C.1 / C.2.1 / C.2.2 carry
+             *     40% of the result and rate the method and targets recorded here, so
+             *     without it the committee was scoring free text they had never seen.
+             *
+             *     Null when the evaluatee has no agreement for this cycle yet — the
+             *     scoring UI must say so rather than render an empty field, because
+             *     "no challenge filed" and "challenge left blank" are different facts.
+             */
+            challenge?: null | components["schemas"]["AgreementChallenge"];
             workload_gate_declared: boolean;
             workload_met?: boolean | null;
             /**
@@ -986,6 +2427,15 @@ export interface components {
              *     to load taxonomy for scoring — no graph walk over cycles/rounds.
              */
             framework_version_id: string;
+            /**
+             * @description วิทยฐานะ of the person being evaluated (CCR-013). IndicatorLevel rows
+             *     are keyed by (rank_level_code, rubric_level), so without this a client
+             *     cannot tell which rank's expected-practice text applies and is forced
+             *     to invent generic rubric labels — which is what apps/web did. There is
+             *     no personnel lookup operation, so this cannot be resolved client-side.
+             * @example apply_adapt
+             */
+            evaluatee_rank_level_code: string;
         };
         ScoreSubmission: {
             /** @description Chair may declare the workload gate in the same call (SCORE-004) */
@@ -1082,6 +2532,53 @@ export interface components {
         ReportDetail: components["schemas"]["Report"] & {
             payload: components["schemas"]["ReportPayload"];
             section_refs: components["schemas"]["ReportSectionRef"][];
+            /**
+             * @description Decision trail, oldest first (CCR-016). Empty until someone acts.
+             *     Present on the detail response so a client does not need a second
+             *     call just to render "who signed this and when".
+             */
+            approvals?: components["schemas"]["Approval"][];
+        };
+        /** @description One recorded decision on a report. Append-only. */
+        Approval: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            report_id: string;
+            /** Format: uuid */
+            approver_user_id: string;
+            /**
+             * @description Which step in the approval sequence this decision belongs to. Always
+             *     `director` today — SEIP has one step, and a configurable chain would be
+             *     a workflow engine built for a workflow that does not exist yet
+             *     (CCR-016 decision 1). A second step later is additive: a new value here
+             *     and a rule about ordering, no migration.
+             * @example director
+             */
+            step_code: string;
+            /**
+             * @description `rejected` is absent by design, not by omission — see returnReport.
+             *     `pending` is not emitted either: a row is only written when a decision
+             *     is actually taken.
+             * @enum {string}
+             */
+            decision: "approved" | "returned";
+            comment?: string | null;
+            /**
+             * Format: date-time
+             * @description Nullable because the column must accommodate a `pending` row. Nothing
+             *     writes one — a row is only created when a decision is actually taken —
+             *     so in practice this is always set. Typed honestly rather than asserting
+             *     a timestamp the schema does not guarantee.
+             */
+            decided_at: string | null;
+        };
+        ApprovalDecisionInput: {
+            comment?: string | null;
+        };
+        /** @description Unlike approve, a reason is required — see returnReport. */
+        ApprovalReturnInput: {
+            comment: string;
         };
         ReportPayload: {
             /**
@@ -1157,6 +2654,501 @@ export interface components {
             items: components["schemas"]["Report"][];
             meta: components["schemas"]["PageMeta"];
         };
+        /** @enum {string} */
+        EvidenceKind: "file" | "link" | "note";
+        /**
+         * @description Only `original` is uploaded by clients; every other role is a server-made rendition.
+         * @enum {string}
+         */
+        FileRole: "original" | "review_720p" | "audio_16k" | "audio_proxy" | "keyframe" | "poster" | "ocr_pdf" | "blurred" | "redacted" | "dpa_ready";
+        /** @enum {string} */
+        PerformedDateSource: "teacher" | "exif" | "ai_suggested_confirmed";
+        /** @description Where in a file the support was found. Only server-validated locators are ever returned. */
+        Locator: {
+            /** Format: uuid */
+            segment_id: string;
+            /** @enum {string} */
+            kind: "page" | "time" | "frame" | "bbox";
+            page?: number | null;
+            t_start_ms?: number | null;
+            t_end_ms?: number | null;
+            frame_ms?: number | null;
+            /** @description x, y, w, h as fractions of the page/frame. */
+            bbox?: number[] | null;
+            /** @description Verbatim text the server validated against the segment (ai.validate). */
+            quote?: string | null;
+            match_span?: number[] | null;
+        };
+        /** @enum {string} */
+        SegmentKind: "page_block" | "transcript" | "keyframe" | "image_caption" | "sheet_range" | "note" | "link_text";
+        Segment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            evidence_file_id: string;
+            kind: components["schemas"]["SegmentKind"];
+            locator: components["schemas"]["Locator"];
+            /** @description Redacted text for non-owners; full text for the owner. */
+            text?: string | null;
+            confidence?: number | null;
+        };
+        SegmentPage: {
+            items: components["schemas"]["Segment"][];
+            next_cursor: string | null;
+        };
+        /**
+         * @description `degraded` — finished on the heuristic floor (GPU unavailable or the evidence type is gated off); suggestions carry provisional=true.
+         * @enum {string}
+         */
+        AnalysisStatus: "queued" | "extracting" | "perceiving" | "mapping" | "validating" | "succeeded" | "degraded" | "failed";
+        Analysis: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            evidence_id: string;
+            status: components["schemas"]["AnalysisStatus"];
+            stage?: string | null;
+            provisional: boolean;
+            eta_seconds?: number | null;
+            queue_position?: number | null;
+            /** @description Stable error code when status=failed. */
+            error_code?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            finished_at?: string | null;
+        };
+        /** @enum {string} */
+        SuggestionStatus: "open" | "accepted" | "rejected" | "superseded" | "needs_review";
+        /**
+         * @description Calibrated confidence band. Only `clear` suggestions on indicators whose pre-tick gate passed may be batch-accepted.
+         * @enum {string}
+         */
+        SuggestionBand: "clear" | "likely" | "possible";
+        Suggestion: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            evidence_id: string;
+            /** Format: uuid */
+            indicator_id: string;
+            indicator_code: string;
+            /** Format: uuid */
+            framework_version_id: string;
+            /** @enum {string} */
+            support?: "supports" | "partially_supports";
+            band: components["schemas"]["SuggestionBand"];
+            locators: components["schemas"]["Locator"][];
+            provisional: boolean;
+            /** @description Human-readable model/pack label, e.g. "SEIP-Q fast". Never a vendor endpoint. */
+            model_label?: string | null;
+            prompt_version?: string | null;
+            /** @description True when band=clear AND the indicator's pre-tick gate has passed. */
+            batch_acceptable?: boolean;
+            /** @description OWNER ONLY — null for every other caller. */
+            calibrated_p?: number | null;
+            /** @description OWNER ONLY — null for every other caller. */
+            rationale_th?: string | null;
+            status: components["schemas"]["SuggestionStatus"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        SuggestionPage: {
+            items: components["schemas"]["Suggestion"][];
+            analysis?: components["schemas"]["Analysis"] | null;
+        };
+        /** @enum {string} */
+        SuggestionRejectReason: "not_relevant" | "wrong_indicator" | "weak_evidence" | "wrong_period" | "duplicate" | "other";
+        SuggestionReject: {
+            reason_code: components["schemas"]["SuggestionRejectReason"];
+            note?: string | null;
+        };
+        SuggestionBatchAccept: {
+            suggestion_ids: string[];
+        };
+        SuggestionBatchResult: {
+            accepted: components["schemas"]["Mapping"][];
+            skipped: {
+                /** Format: uuid */
+                suggestion_id: string;
+                /** @description AI-003 / AI-004 / MAP-001 */
+                code: string;
+            }[];
+        };
+        /** @enum {string} */
+        UploadProtocol: "single_put" | "s3_multipart";
+        UploadCreate: {
+            /** Format: uuid */
+            evidence_id: string;
+            filename: string;
+            content_type: string;
+            byte_size: number;
+            checksum_sha256: string;
+            /** @description When the client can read it — lets the server warn before bytes move. */
+            duration_ms?: number | null;
+        };
+        PresignedRequest: {
+            url: string;
+            /** @enum {string} */
+            method: "PUT";
+            headers?: {
+                [key: string]: string;
+            };
+            /** Format: date-time */
+            expires_at: string;
+        };
+        UploadSession: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            evidence_id: string;
+            /** Format: uuid */
+            file_id: string;
+            protocol: components["schemas"]["UploadProtocol"];
+            byte_size: number;
+            /** @description 16 MiB for s3_multipart; equals byte_size for single_put. */
+            part_size: number;
+            part_count: number;
+            /** @enum {string} */
+            status: "open" | "completing" | "completed" | "aborted" | "expired";
+            /** Format: date-time */
+            expires_at: string;
+            /** @description Present only for protocol=single_put. */
+            single_put?: components["schemas"]["PresignedRequest"] | null;
+            /** @description Server-side ListParts; a resume starts at the first missing part. */
+            parts_received: number[];
+        };
+        UploadPartUrlsRequest: {
+            part_numbers: number[];
+            /** @description Optional base64 SHA-256 of each part, in the same order as part_numbers. When sent, each presigned request signs x-amz-checksum-sha256 and the store refuses a part whose bytes do not match. Whole-object integrity is always re-checked by the worker against checksum_sha256. */
+            checksums_sha256?: string[] | null;
+        };
+        /** @description Each part PUT must send x-amz-checksum-sha256 (included in headers). */
+        UploadPartUrls: {
+            parts: {
+                part_number: number;
+                request: components["schemas"]["PresignedRequest"];
+            }[];
+        };
+        /** @description The server lists the parts and supplies their ETags to CompleteMultipartUpload — clients never read ETag headers. */
+        UploadComplete: {
+            part_count: number;
+        };
+        /** @enum {string} */
+        SyncEntity: "evidence" | "evidence_file" | "analysis" | "suggestion" | "mapping" | "notification";
+        /** @description For op=upsert exactly the property named by `entity` carries the current row; for op=delete all entity properties are null. */
+        SyncChange: {
+            entity: components["schemas"]["SyncEntity"];
+            /** @enum {string} */
+            op: "upsert" | "delete";
+            /** Format: uuid */
+            id: string;
+            version?: number | null;
+            /** Format: date-time */
+            updated_at: string;
+            evidence?: components["schemas"]["Evidence"] | null;
+            evidence_file?: components["schemas"]["EvidenceFile"] | null;
+            analysis?: components["schemas"]["Analysis"] | null;
+            suggestion?: components["schemas"]["Suggestion"] | null;
+            mapping?: components["schemas"]["Mapping"] | null;
+            notification?: components["schemas"]["Notification"] | null;
+        };
+        /** @description Ordered by (updated_at, id). On conflict the server wins. */
+        SyncChanges: {
+            changes: components["schemas"]["SyncChange"][];
+            next_cursor: string;
+            has_more: boolean;
+        };
+        /**
+         * @description PDPA rights (REG-28, unverified). `access` = a copy; `portability` = a machine-readable copy.
+         * @enum {string}
+         */
+        SubjectRequestType: "access" | "portability" | "correction" | "erasure" | "restriction" | "objection";
+        /** @enum {string} */
+        SubjectRequestStatus: "received" | "fulfilling" | "approved" | "completed" | "rejected";
+        SubjectRequestCreate: {
+            request_type: components["schemas"]["SubjectRequestType"];
+            /** @description What the person asks for, in their own words. */
+            details?: string | null;
+        };
+        SubjectRequestDecision: {
+            /** @enum {string} */
+            action: "approve" | "reject" | "complete";
+            /** @description Required for `reject` (the legal reason) and for `complete`. */
+            note?: string | null;
+        };
+        SubjectRequest: {
+            /** Format: uuid */
+            id: string;
+            request_type: components["schemas"]["SubjectRequestType"];
+            status: components["schemas"]["SubjectRequestStatus"];
+            /** Format: uuid */
+            person_id: string;
+            requester_display_name: string;
+            /**
+             * Format: uuid
+             * @description The school the request was filed from.
+             */
+            school_id: string;
+            /** Format: uuid */
+            area_id: string;
+            details?: string | null;
+            /** Format: date-time */
+            received_at: string;
+            /** Format: date-time */
+            due_at: string;
+            /** @description Open past `due_at` — a warning (the 30-day figure is unverified). */
+            overdue: boolean;
+            decision_note?: string | null;
+            /** Format: date-time */
+            decided_at?: string | null;
+            /** Format: date-time */
+            completed_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The portfolio export made for an approved access / portability request.
+             */
+            export_id?: string | null;
+        };
+        SubjectRequestPage: {
+            items: components["schemas"]["SubjectRequest"][];
+            next_cursor?: string;
+        };
+        AreaDpo: {
+            /** Format: uuid */
+            membership_id: string;
+            /** Format: uuid */
+            user_id: string;
+            email: string;
+            display_name: string;
+            user_status: components["schemas"]["UserStatus"];
+            /** Format: date */
+            effective_from: string;
+        };
+        DpoAppointmentResult: {
+            dpo: components["schemas"]["AreaDpo"];
+            /** @description Single-use, shown once; null when the account already has a password (as MemberInviteResult). */
+            invite_token: string | null;
+            /** Format: date-time */
+            invite_expires_at: string | null;
+        };
+        /**
+         * @description Open enum (CCR-028 owner decision A, 2026-10-14): the server may add a kind in a minor version. Clients must accept a kind they do not know and show the notification by its title_th / route.
+         * @enum {string}
+         */
+        NotificationKind: "suggestions_ready" | "processing_failed" | "mapping_returned" | "mapping_validated" | "deadline" | "export_ready" | "transfer_approved" | "committee_comment" | "subject_request_received" | "subject_request_updated";
+        Notification: {
+            /** Format: uuid */
+            id: string;
+            kind: components["schemas"]["NotificationKind"];
+            title_th: string;
+            body_th?: string | null;
+            /** @description In-app route to open, e.g. /evidence/{id}/suggestions. */
+            route?: string | null;
+            entity_type?: string | null;
+            /** Format: uuid */
+            entity_id?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            read_at?: string | null;
+        };
+        NotificationPage: {
+            items: components["schemas"]["Notification"][];
+            next_cursor: string | null;
+            unread_count: number;
+        };
+        /** @description Mark the listed ids, or everything when all=true. */
+        NotificationsRead: {
+            ids?: string[];
+            /** @default false */
+            all: boolean;
+        };
+        /** @description Push carries no content — only a sync ping (ADR-0016 §7). The ESA may disable push entirely, in which case push is always false. */
+        NotificationPreferences: {
+            push: boolean;
+            email: boolean;
+            quiet_hours?: {
+                start: string;
+                end: string;
+            };
+        };
+        DeviceSession: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            platform: "web" | "android" | "ios";
+            app_version?: string | null;
+            label?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            current: boolean;
+            has_push?: boolean;
+        };
+        PushTokenRegister: {
+            /** @enum {string} */
+            provider: "fcm" | "apns";
+            token: string;
+        };
+        IndicatorCoverage: {
+            /** Format: uuid */
+            indicator_id: string;
+            indicator_code: string;
+            owner_confirmed: number;
+            validated: number;
+            returned: number;
+            open_suggestions: number;
+            eligibility_warnings?: components["schemas"]["RuleWarning"][];
+        };
+        RuleWarning: {
+            code: string;
+            message_th: string;
+            /** @description false → the rule has not been checked against the source instrument yet; shown as a warning only (ADR-0017 §5). */
+            rule_verified: boolean;
+        };
+        CoverageReport: {
+            /** @enum {string} */
+            subject_type: "person" | "school" | "area";
+            /** Format: uuid */
+            subject_id: string;
+            /** Format: uuid */
+            framework_version_id: string;
+            indicators: components["schemas"]["IndicatorCoverage"][];
+            /** @description school/area scope only — counts, never names (DPO readiness dashboards). */
+            people_count?: number | null;
+        };
+        /** @description What a committee member sees per indicator. Carries no AI confidence or rationale (ADR-0015). */
+        AssignmentEvidenceItem: {
+            /** Format: uuid */
+            indicator_id: string;
+            mapping: components["schemas"]["Mapping"];
+            evidence: components["schemas"]["Evidence"];
+            /** @description Review renditions the committee may open (grant scope view_derivative unless view_original was granted). */
+            files: components["schemas"]["EvidenceFile"][];
+        };
+        /** @description CCR-028 (FR-064). Plain text; carries no score. */
+        AssignmentComment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            assignment_id: string;
+            /** Format: uuid */
+            indicator_id: string;
+            /** @enum {string} */
+            kind: "comment" | "request_info" | "reply";
+            body: string;
+            /** Format: uuid */
+            parent_id?: string | null;
+            /** Format: uuid */
+            author_user_id: string;
+            /** @enum {string} */
+            author_role: "committee" | "director" | "evaluatee";
+            /** Format: date-time */
+            created_at: string;
+        };
+        AssignmentCommentCreate: {
+            /** Format: uuid */
+            indicator_id: string;
+            /** @enum {string} */
+            kind: "comment" | "request_info" | "reply";
+            body: string;
+            /**
+             * Format: uuid
+             * @description Required for `reply`; the comment being answered (same indicator).
+             */
+            parent_id?: string | null;
+        };
+        AssignmentEvidencePage: {
+            items: components["schemas"]["AssignmentEvidenceItem"][];
+            next_cursor?: string | null;
+        };
+        DpaSlot: {
+            slot_code: string;
+            label_th: string;
+            order: number;
+            accepted_mime: string[];
+            max_bytes?: number | null;
+            max_duration_s?: number | null;
+            max_files?: number | null;
+            original_required: boolean;
+            indicator_codes: string[];
+        };
+        DpaSlotProfile: {
+            /** Format: uuid */
+            id: string;
+            /** @description e.g. 9.1.1, 9.2.1 and the administrator variants. */
+            request_type: string;
+            version: number;
+            verified: boolean;
+            source_ref?: string | null;
+            slots: components["schemas"]["DpaSlot"][];
+        };
+        /** @enum {string} */
+        ExportKind: "dpa_pack" | "pa2_workbook" | "portfolio_portable";
+        ExportCreate: {
+            kind: components["schemas"]["ExportKind"];
+            /**
+             * Format: uuid
+             * @description Defaults to the caller. Exporting another person's data needs step-up (acr ≥ 2).
+             */
+            person_id?: string | null;
+            /** @description dpa_pack only — selects the DpaSlotProfile. */
+            request_type?: string | null;
+            /** @description dpa_pack only — overrides the default slot filling derived from owner-confirmed mappings. */
+            slot_assignments?: {
+                slot_code: string;
+                evidence_ids: string[];
+            }[] | null;
+            /**
+             * Format: uuid
+             * @description pa2_workbook only.
+             */
+            assignment_id?: string | null;
+        };
+        PreflightIssue: {
+            code: string;
+            message_th: string;
+            /** @enum {string} */
+            severity: "error" | "warning";
+            slot_code?: string | null;
+            /** Format: uuid */
+            evidence_id?: string | null;
+            rule_verified: boolean;
+        };
+        ExportPackage: {
+            /** Format: uuid */
+            id: string;
+            kind: components["schemas"]["ExportKind"];
+            /** Format: uuid */
+            person_id?: string | null;
+            /** @enum {string} */
+            status: "queued" | "preflight_failed" | "building" | "ready" | "failed" | "expired";
+            preflight: components["schemas"]["PreflightIssue"][];
+            byte_size?: number | null;
+            sha256?: string | null;
+            /** Format: date-time */
+            expires_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ExportPage: {
+            items: components["schemas"]["ExportPackage"][];
+            next_cursor?: string | null;
+        };
+        /**
+         * @description Omit for a member who is not evaluated by this school (an external
+         *     committee `evaluator`). When present, `rank_level_code` must belong to
+         *     the same role family as `position_role` — a mismatch selects the wrong
+         *     framework's rubric and is rejected with VAL-003.
+         */
+        MemberInvitePersonnel: {
+            full_name: string;
+            employee_code?: string | null;
+            position_role: components["schemas"]["RoleFamily"];
+            rank_level_code: string;
+        };
     };
     responses: {
         /** @description AUTH-* — missing/expired/invalid credentials */
@@ -1168,7 +3160,7 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description PERM-* — role or tenancy denial */
+        /** @description PERM-* — role or tenancy denial · AUTH-006 when the operation needs step-up authentication (acr ≥ 2) · AUTH-007 when a cookie-session write lacks a matching X-CSRF-Token */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
@@ -1213,16 +3205,62 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description RES-004 — If-Match is stale (the resource changed since it was read) */
+        PreconditionFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description RES-005 — If-Match is required for this write */
+        PreconditionRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description AUTH-004 / AI-002 — throttled; see Retry-After */
+        TooManyRequests: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
+        AreaId: string;
+        SchoolIdPath: string;
+        /** @description Double-submit token for a cookie session (CCR-018); the value of the `__Host-seip-csrf` cookie. */
+        CsrfToken: string;
         FrameworkId: string;
         CycleId: string;
         RoundId: string;
         EvidenceId: string;
         AssignmentId: string;
         ReportId: string;
+        MembershipId: string;
+        AgreementId: string;
         Page: number;
         PageSize: number;
+        UploadId: string;
+        AnalysisId: string;
+        SuggestionId: string;
+        SubjectRequestId: string;
+        ExportId: string;
+        DeviceSessionId: string;
+        /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+        IdempotencyKey: string;
+        /** @description The `version` the client last read, as a quoted ETag (e.g. `"7"`). Stale → 412 RES-004; missing → 428 RES-005. */
+        IfMatch: string;
+        /** @description Opaque cursor from the previous page; omit for the first page. */
+        Cursor: string;
+        Limit: number;
     };
     requestBodies: never;
     headers: never;
@@ -1282,6 +3320,72 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    acceptInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Password set; the account is now active and may log in */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description AUTH-004 — too many attempts (SEC-AUTH-5) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    completePasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetComplete"];
+            };
+        };
+        responses: {
+            /** @description Password set; every earlier session has ended */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description AUTH-004 — too many attempts (SEC-AUTH-5) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -1305,6 +3409,81 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    webLogin: {
+        parameters: {
+            query?: {
+                /** @description Same-site path to land on afterwards. Must start with a single `/`; anything else falls back to `/`. */
+                return_to?: string;
+                acr?: "pwd" | "mfa";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To the Keycloak authorization endpoint */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description SYS-003 — web sign-in is not configured on this deployment (no Keycloak realm) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    webCallback: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To `return_to` on success, `/login?error=sso` otherwise */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webLogout: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Double-submit token for a cookie session (CCR-018); the value of the `__Host-seip-csrf` cookie. */
+                "X-CSRF-Token"?: components["parameters"]["CsrfToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signed out */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
     getCurrentUser: {
         parameters: {
             query?: never;
@@ -1324,6 +3503,385 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listPersonnel: {
+        parameters: {
+            query?: {
+                /** @description Defaults to active only; pass `all` to include former personnel. */
+                status?: "active" | "inactive" | "all";
+                /** @description Filter to one framework family (ว9 teacher vs ว10 administrator). */
+                position_role?: components["schemas"]["RoleFamily"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Personnel of the caller's school */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonnelSummary"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    findMyDuplicateFiles: {
+        parameters: {
+            query: {
+                checksum_sha256: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matches, newest first (possibly none) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DuplicateFile"][];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    confirmMyPersonnel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Confirmed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonnelSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    requestPersonnelCorrection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonnelCorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Recorded; the profile is no longer confirmed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonnelSummary"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updatePersonnel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                personnelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonnelPatch"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonnelSummary"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listMembers: {
+        parameters: {
+            query?: {
+                /** @description Defaults to current memberships (no effective_to in the past). */
+                status?: "current" | "all";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Members */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    inviteMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberInvite"];
+            };
+        };
+        responses: {
+            /** @description Invited — `invite_token` is returned exactly once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberInviteResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    importMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberImport"];
+            };
+        };
+        responses: {
+            /** @description One result per row, in request order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberImportResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listAreaSchools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                areaId: components["parameters"]["AreaId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Schools in the area, open and closed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaSchool"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createSchool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                areaId: components["parameters"]["AreaId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AreaSchoolCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaSchool"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateSchool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schoolId: components["parameters"]["SchoolIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AreaSchoolPatch"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaSchool"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    appointSchoolAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schoolId: components["parameters"]["SchoolIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchoolAdminAppointment"];
+            };
+        };
+        responses: {
+            /** @description Invited — `invite_token` is returned exactly once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberInviteResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    issuePasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                membershipId: components["parameters"]["MembershipId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reset issued */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResetIssued"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    endMembership: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                membershipId: components["parameters"]["MembershipId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Membership ended */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     listFrameworks: {
@@ -1568,11 +4126,22 @@ export interface operations {
     listEvidence: {
         parameters: {
             query?: {
-                owner_personnel_id?: string;
+                owner_person_id?: string;
                 category_id?: string;
                 status?: components["schemas"]["EvidenceStatus"];
                 /** @description Only evidence having an active mapping to this indicator */
                 mapped_to_indicator_id?: string;
+                /** @description Title contains this text, case-insensitive (FR-054). */
+                q?: string;
+                kind?: components["schemas"]["EvidenceKind"];
+                /** @description Work date on or after this day (overlap with performed_from..performed_to). An item with no work date is left out once either bound is given. */
+                performed_from?: string;
+                /** @description Work date on or before this day. */
+                performed_to?: string;
+                /** @description `unmapped` — no live mapping at all; otherwise at least one live mapping in that status. */
+                mapping_state?: "unmapped" | "owner_confirmed" | "validated" | "returned";
+                /** @description Work date within this evaluation cycle (FR-035 binds by work date). A cycle of a school the caller does not belong to is VAL-002. */
+                cycle_id?: string;
                 page?: components["parameters"]["Page"];
                 page_size?: components["parameters"]["PageSize"];
             };
@@ -1592,12 +4161,16 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     createEvidence: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -1607,6 +4180,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Idempotent replay of an earlier create with the same key and body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Evidence"];
+                };
+            };
             /** @description Created */
             201: {
                 headers: {
@@ -1648,7 +4230,10 @@ export interface operations {
     deleteEvidence: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description The `version` the client last read, as a quoted ETag (e.g. `"7"`). Stale → 412 RES-004; missing → 428 RES-005. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
             path: {
                 evidenceId: components["parameters"]["EvidenceId"];
             };
@@ -1666,12 +4251,17 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            428: components["responses"]["PreconditionRequired"];
         };
     };
     updateEvidence: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description The `version` the client last read, as a quoted ETag (e.g. `"7"`). Stale → 412 RES-004; missing → 428 RES-005. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
             path: {
                 evidenceId: components["parameters"]["EvidenceId"];
             };
@@ -1695,68 +4285,9 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
             422: components["responses"]["UnprocessableEntity"];
-        };
-    };
-    initiateFileUpload: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                evidenceId: components["parameters"]["EvidenceId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FileUploadInitiate"];
-            };
-        };
-        responses: {
-            /** @description Upload target issued */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FileUploadTarget"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["UnprocessableEntity"];
-        };
-    };
-    completeFileUpload: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                evidenceId: components["parameters"]["EvidenceId"];
-                fileId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FileUploadComplete"];
-            };
-        };
-        responses: {
-            /** @description File registered (scan pending) */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvidenceFile"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["PreconditionRequired"];
         };
     };
     getEvidenceFileDownloadUrl: {
@@ -1794,6 +4325,56 @@ export interface operations {
             };
         };
     };
+    acceptEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evidenceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Evidence"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    clearInjectionFlag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evidenceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared (or was not flagged) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Evidence"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listEvidenceMappings: {
         parameters: {
             query?: never;
@@ -1821,7 +4402,10 @@ export interface operations {
     createMapping: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 evidenceId: components["parameters"]["EvidenceId"];
             };
@@ -1833,6 +4417,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Idempotent replay of an earlier create with the same key and body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mapping"];
+                };
+            };
             /** @description Created (status=suggested until confirmed) */
             201: {
                 headers: {
@@ -1849,41 +4442,11 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
-    suggestMappings: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                evidenceId: components["parameters"]["EvidenceId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["MappingSuggestRequest"];
-            };
-        };
-        responses: {
-            /** @description Suggestions created (may be empty) */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MappingSuggestResult"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["UnprocessableEntity"];
-        };
-    };
     listMappings: {
         parameters: {
             query?: {
                 indicator_id?: string;
-                cycle_id?: string;
+                framework_version_id?: string;
                 status?: components["schemas"]["MappingStatus"];
                 page?: components["parameters"]["Page"];
                 page_size?: components["parameters"]["PageSize"];
@@ -1909,7 +4472,10 @@ export interface operations {
     actOnMapping: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description The `version` the client last read, as a quoted ETag (e.g. `"7"`). Stale → 412 RES-004; missing → 428 RES-005. */
+                "If-Match": components["parameters"]["IfMatch"];
+            };
             path: {
                 mappingId: string;
             };
@@ -1928,6 +4494,169 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Mapping"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            412: components["responses"]["PreconditionFailed"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["PreconditionRequired"];
+        };
+    };
+    listAgreements: {
+        parameters: {
+            query?: {
+                cycle_id?: string;
+                status?: components["schemas"]["AgreementStatus"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agreements */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agreement"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgreementCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agreement detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgreementPatch"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    submitAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Submitted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    acknowledgeAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agreementId: components["parameters"]["AgreementId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementDetail"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -2152,6 +4881,92 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listReportApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Decisions, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    approveReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ApprovalDecisionInput"];
+            };
+        };
+        responses: {
+            /** @description Approved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    returnReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: components["parameters"]["ReportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalReturnInput"];
+            };
+        };
+        responses: {
+            /** @description Returned to draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportDetail"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
     getReportPdf: {
         parameters: {
             query?: never;
@@ -2176,6 +4991,1022 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    createUpload: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadCreate"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadSession"];
+                };
+            };
+            /** @description Session opened */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadSession"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadSession"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    abortUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Aborted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    signUploadParts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadPartUrlsRequest"];
+            };
+        };
+        responses: {
+            /** @description Presigned part requests */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadPartUrls"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    completeUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadComplete"];
+            };
+        };
+        responses: {
+            /** @description File registered; media_state=verifying */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceFile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    requestEvidenceAnalysis: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evidenceId: components["parameters"]["EvidenceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Analysis"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    getEvidenceAnalysis: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysisId: components["parameters"]["AnalysisId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Analysis */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Analysis"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listEvidenceSegments: {
+        parameters: {
+            query?: {
+                kind?: components["schemas"]["SegmentKind"];
+                /** @description Opaque cursor from the previous page; omit for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                evidenceId: components["parameters"]["EvidenceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Segments */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SegmentPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listEvidenceSuggestions: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["SuggestionStatus"];
+            };
+            header?: never;
+            path: {
+                evidenceId: components["parameters"]["EvidenceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Suggestions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestionPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    acceptSuggestion: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                suggestionId: components["parameters"]["SuggestionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mapping"];
+                };
+            };
+            /** @description Mapping created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mapping"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    acceptSuggestions: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestionBatchAccept"];
+            };
+        };
+        responses: {
+            /** @description Per-item result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestionBatchResult"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    rejectSuggestion: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                suggestionId: components["parameters"]["SuggestionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestionReject"];
+            };
+        };
+        responses: {
+            /** @description Rejected */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Suggestion"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getChanges: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from the previous page; omit for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Changes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncChanges"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description SYNC-001 — cursor too old; resync from scratch */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: {
+                unread?: boolean;
+                /** @description Opaque cursor from the previous page; omit for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Notifications */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    markNotificationsRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationsRead"];
+            };
+        };
+        responses: {
+            /** @description Marked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getNotificationPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Preferences */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferences"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateNotificationPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPreferences"];
+            };
+        };
+        responses: {
+            /** @description Preferences */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferences"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listDeviceSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sessions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceSession"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    registerPushToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushTokenRegister"];
+            };
+        };
+        responses: {
+            /** @description Registered */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    removePushToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    revokeDeviceSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deviceSessionId: components["parameters"]["DeviceSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getCoverage: {
+        parameters: {
+            query: {
+                subject_type: "person" | "school" | "area";
+                subject_id: string;
+                framework_version_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Coverage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageReport"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listAssignmentEvidence: {
+        parameters: {
+            query?: {
+                indicator_id?: string;
+                /** @description Opaque cursor from the previous page; omit for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Evidence per indicator */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentEvidencePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listAssignmentComments: {
+        parameters: {
+            query?: {
+                indicator_id?: string;
+            };
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentComment"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createAssignmentComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignmentId: components["parameters"]["AssignmentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignmentCommentCreate"];
+            };
+        };
+        responses: {
+            /** @description Posted */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentComment"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listDpaSlotProfiles: {
+        parameters: {
+            query?: {
+                request_type?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Profiles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DpaSlotProfile"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listSubjectRequests: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["SubjectRequestStatus"];
+                /** @description Opaque cursor from the previous page; omit for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Requests */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequestPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createSubjectRequest: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubjectRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequest"];
+                };
+            };
+            /** @description Filed */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequest"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getSubjectRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                requestId: components["parameters"]["SubjectRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Request */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequest"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    decideSubjectRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                requestId: components["parameters"]["SubjectRequestId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubjectRequestDecision"];
+            };
+        };
+        responses: {
+            /** @description Decided */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectRequest"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    listAreaDpos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                areaId: components["parameters"]["AreaId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current DPO appointments */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AreaDpo"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    appointDpo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                areaId: components["parameters"]["AreaId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchoolAdminAppointment"];
+            };
+        };
+        responses: {
+            /** @description Appointed — `invite_token` is returned exactly once */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DpoAppointmentResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listExports: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from the previous page; omit for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exports */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createExport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated UUID. The server stores (actor, key, request hash, response) for 24 h and replays the original response for a retry with the same body; a different body with the same key fails IDEMP-001. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportCreate"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportPackage"];
+                };
+            };
+            /** @description Queued (or preflight_failed) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportPackage"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Export */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportPackage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getExportDownloadUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileDownloadUrl"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
 }

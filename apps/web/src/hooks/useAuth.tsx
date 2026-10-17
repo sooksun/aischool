@@ -13,10 +13,16 @@
 // 15-minute expiry no longer logs the user out: client.ts transparently rotates
 // the pair via /auth/refresh on the first 401 and replays the request, and
 // logout() revokes server-side, so a stolen refresh token dies with the session.
+//
+// CCR-018 adds the cookie session (sign-in through Keycloak, ADR-0014 §4): no
+// token reaches JS at all. On start-up with no stored token the provider asks
+// /auth/me; the browser sends the httpOnly cookie by itself. The token path above
+// stays until the API stops issuing its own tokens (end of P1).
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, unwrap, setAccessToken, setRefreshToken, setCurrentSchoolId, registerSessionHooks } from '../api/client';
+import { api, unwrap, setAccessToken, setRefreshToken, setCurrentSchoolId, registerSessionHooks, WEB_SSO } from '../api/client';
 import type { components } from '../api/schema.generated';
-import { capabilitiesFromMemberships, type Capabilities } from '../lib/capabilities';
+import { capabilitiesFromMemberships, FEATURE_SCORING, type Capabilities } from '../lib/capabilities';
+import { pickSchool, rememberSchool, rememberedSchool, schoolOptions, type SchoolOption } from '../lib/schoolContext';
 
 type CurrentUser = components['schemas']['CurrentUser'];
 type Role = components['schemas']['Role'];
@@ -31,6 +37,9 @@ interface AuthState {
    * these instead of ad-hoc role arrays. Not a substitute for permissions.yaml.
    */
   capabilities: Capabilities;
+  /** FR-019: the schools this person can act for; more than one → they choose. */
+  schools: SchoolOption[];
+  selectSchool: (schoolId: string) => void;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -53,14 +62,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
   const applySchoolContext = useCallback((u: CurrentUser) => {
-    const schoolMemberships = u.memberships.filter((m) => m.membership_scope === 'school' && m.school_id);
-    // Same "implicit if exactly one" rule as CCR-003's server-side resolution —
-    // the client picks the same way the server would, so 99% of users (a single-
-    // school teacher) never see a school picker.
-    const resolved = schoolMemberships.length === 1 ? (schoolMemberships[0].school_id ?? null) : null;
+    // Same "implicit if exactly one" rule as CCR-003's server-side resolution, so
+    // most people (a single-school teacher) never see a picker; with several,
+    // the school used last on this browser (FR-019), else none until they pick.
+    const resolved = pickSchool(schoolOptions(u.memberships), rememberedSchool(u.id));
     setSchoolId(resolved);
     setCurrentSchoolId(resolved);
   }, []);
+
+  const selectSchool = useCallback((id: string) => {
+    if (!user || !schoolOptions(user.memberships).some((o) => o.id === id)) return;
+    rememberSchool(user.id, id);
+    setSchoolId(id);
+    setCurrentSchoolId(id);
+  }, [user]);
+
+  const schools = useMemo(() => (user ? schoolOptions(user.memberships) : []), [user]);
 
   const refreshCurrentUser = useCallback(async () => {
     const u = unwrap(await api.GET('/auth/me', {}));
@@ -85,9 +102,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => registerSessionHooks({});
   }, []);
 
+  // 'session' = signed in through Keycloak with the BFF cookie (CCR-018).
+  const [mode, setMode] = useState<'token' | 'session' | null>(null);
+
   useEffect(() => {
     const stored = sessionStorage.getItem(STORAGE_KEY);
-    if (!stored) { setLoading(false); return; }
+    if (!stored) {
+      if (!WEB_SSO) { setLoading(false); return; }
+      // No token: maybe a cookie session. A 401 here just means "not signed in".
+      refreshCurrentUser()
+        .then(() => setMode('session'))
+        .catch(() => undefined)
+        .finally(() => setLoading(false));
+      return;
+    }
+    setMode('token');
     setAccessToken(stored);
     setRefreshToken(sessionStorage.getItem(REFRESH_STORAGE_KEY));
     refreshCurrentUser()
@@ -101,28 +130,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.setItem(REFRESH_STORAGE_KEY, tokens.refresh_token);
     setAccessToken(tokens.access_token);
     setRefreshToken(tokens.refresh_token);
+    setMode('token');
     await refreshCurrentUser();
   }, [refreshCurrentUser]);
 
   const logout = useCallback(() => {
-    // Server-side revocation first (CCR-008) — best-effort: local state clears
-    // regardless, and an unreachable server just leaves a token that ages out.
-    const refresh = sessionStorage.getItem(REFRESH_STORAGE_KEY);
-    void api.POST('/auth/logout', { body: refresh ? { refresh_token: refresh } : undefined }).catch(() => {});
+    if (mode === 'session') {
+      // Revokes the session and the Keycloak session behind it; the client
+      // middleware adds X-CSRF-Token. Best-effort, like the token path below.
+      void api.POST('/auth/web/logout', {}).catch(() => {});
+    } else {
+      // Server-side revocation first (CCR-008) — best-effort: local state clears
+      // regardless, and an unreachable server just leaves a token that ages out.
+      const refresh = sessionStorage.getItem(REFRESH_STORAGE_KEY);
+      void api.POST('/auth/logout', { body: refresh ? { refresh_token: refresh } : undefined }).catch(() => {});
+    }
+    setMode(null);
     clearStoredSession();
     setCurrentSchoolId(null);
     setUser(null);
     setSchoolId(null);
-  }, []);
+  }, [mode]);
 
   const capabilities = useMemo(
-    () => capabilitiesFromMemberships(user?.memberships),
+    () => capabilitiesFromMemberships(user?.memberships, FEATURE_SCORING),
     [user],
   );
 
   const value = useMemo(
-    () => ({ user, loading, schoolId, capabilities, login, logout }),
-    [user, loading, schoolId, capabilities, login, logout],
+    () => ({ user, loading, schoolId, capabilities, schools, selectSchool, login, logout }),
+    [user, loading, schoolId, capabilities, schools, selectSchool, login, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

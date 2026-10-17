@@ -1,0 +1,28 @@
+# Build context for infra/docker/* (COPY . . in the build stages).
+# Without this file every image layer carried the host's node_modules and —
+# worse — .env / .env.staging with real credentials, plus local backups.
+
+# Secrets and local state (SEC-REPO-1, PDPA: uploads/backups never ship)
+.env
+.env.*
+!.env.example
+!.env.staging.example
+backups/
+uploads/
+
+# Rebuilt inside the image
+node_modules/
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+
+# Not needed to build or run the server images
+.git/
+.github/
+.claude/
+.ai-team/
+test-results/
+playwright-report/
+apps/mobile/
+clients/dart/
+*.log

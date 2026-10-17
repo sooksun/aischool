@@ -25,7 +25,7 @@ test.describe('depth: evidence upload', () => {
     });
 
     // Details — pick a PDF-capable category
-    await expect(page.getByText(/หมวดหลักฐาน|แผนการ/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('#category-label')).toBeVisible({ timeout: 15_000 });
     const lessonPlan = page.getByRole('radio', { name: /แผนการจัดการเรียนรู้/ });
     if (await lessonPlan.isVisible().catch(() => false)) {
       await lessonPlan.click();
@@ -49,6 +49,49 @@ test.describe('depth: evidence upload', () => {
   });
 });
 
+test.describe('depth: two-tier mapping (ADR-0015, CCR-017)', () => {
+  test('teacher maps an indicator at upload; director validates it on the evidence page', async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page, creds.teacher.email, creds.teacher.password);
+    await expectLoggedInShell(page);
+    await page.getByRole('link', { name: 'ส่งหลักฐานใหม่' }).click();
+    await page.locator('#file-input').setInputFiles({
+      name: 'e2e-mapped.pdf', mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n'),
+    });
+    await expect(page.locator('#category-label')).toBeVisible({ timeout: 15_000 });
+    const lessonPlan = page.getByRole('radio', { name: /แผนการจัดการเรียนรู้/ });
+    if (await lessonPlan.isVisible().catch(() => false)) await lessonPlan.click();
+    else await page.getByRole('radio').first().click();
+    await page.locator('#title-input').fill('E2E mapped evidence');
+    await page.getByRole('button', { name: 'ถัดไป' }).click();
+
+    // Pick the first indicator chip — the owner's confirmation (tier 1).
+    const chips = page.getByRole('group', { name: 'ตัวชี้วัด' }).getByRole('button');
+    await expect(chips.first()).toBeVisible({ timeout: 15_000 });
+    await chips.first().click();
+    await page.getByRole('button', { name: 'ถัดไป' }).click();
+    await page.getByRole('button', { name: 'ยืนยันส่ง' }).click();
+    await expect(page.getByText(/ส่งหลักฐานสำเร็จ/)).toBeVisible({ timeout: 45_000 });
+    const idText = await page.getByText(/รหัสหลักฐาน/).textContent();
+    const evidenceId = idText!.split(':').pop()!.trim();
+
+    // The owner sees it awaiting validation, with their own revoke affordance.
+    await page.goto(`/evidence/${evidenceId}`);
+    await expect(page.getByText(/เจ้าของยืนยันแล้ว/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'รับรอง' })).toHaveCount(0);
+
+    // Tier 2: the director validates.
+    await page.context().clearCookies();
+    await page.evaluate(() => sessionStorage.clear());
+    await login(page, creds.director.email, creds.director.password);
+    await expect(page.getByRole('link', { name: 'รายงาน PA' })).toBeVisible({ timeout: 20_000 });
+    await page.goto(`/evidence/${evidenceId}`);
+    await page.getByRole('button', { name: 'รับรอง' }).click();
+    await expect(page.getByText(/รับรองแล้ว/)).toBeVisible({ timeout: 15_000 });
+  });
+});
+
 test.describe('depth: session refresh (SEC-002 / CCR-008)', () => {
   test('corrupted access token is rotated via refresh; shell stays usable', async ({ page }) => {
     await login(page, creds.teacher.email, creds.teacher.password);
@@ -61,7 +104,11 @@ test.describe('depth: session refresh (SEC-002 / CCR-008)', () => {
       sessionStorage.setItem('seip.access_token', 'eyJhbGciOiJIUzI1NiJ9.e30.invalid');
     });
 
-    // Next authenticated navigation triggers API → 401 → refresh → retry
+    // client.ts holds tokens in memory (cleanup B3) — corrupted sessionStorage
+    // only takes effect when AuthProvider re-hydrates on a full page load.
+    // Reload: restore hydrates the garbage token → /auth/me 401 → refresh →
+    // rotated pair persisted via onRefreshed → shell renders.
+    await page.reload();
     await page.getByRole('link', { name: 'รายงาน PA' }).click();
     await expect(page).toHaveURL(/\/reports/);
     await expect(page.getByRole('heading', { name: /รายงาน/ })).toBeVisible({ timeout: 20_000 });
@@ -84,19 +131,44 @@ test.describe('depth: create report + PDF', () => {
     await page.getByRole('button', { name: '+ สร้างรายงาน' }).click();
     await expect(page.getByRole('heading', { name: /สร้างรายงานใหม่/ })).toBeVisible();
 
-    // Cycle select — prefer E2E Smoke Cycle
+    // Cycle select — prefer E2E Smoke Cycle (selectOption label must be a
+    // string, not a regex — resolve the option's value first)
     const cycleSelect = page.locator('select').first();
-    await cycleSelect.selectOption({ label: /E2E Smoke Cycle/ });
-    await page.locator('input[placeholder="personnel profile uuid"]').fill(creds.teacherPersonnelId!);
-    await page.getByRole('button', { name: 'สร้างและจัดทำรายงาน' }).click();
+    const cycleValue = await cycleSelect
+      .locator('option', { hasText: 'E2E Smoke Cycle' })
+      .first()
+      .getAttribute('value');
+    await cycleSelect.selectOption(cycleValue!);
 
-    // Form closes; list reloads (new draft may appear)
+    // A name picker since CCR-014, not a uuid text box (listPersonnel).
+    const subjectSelect = page.locator('select').nth(1);
+    await expect(subjectSelect.locator('option')).not.toHaveCount(1); // more than the placeholder
+    await subjectSelect.selectOption(creds.teacherPersonnelId!);
+
+    const created = page.waitForResponse(
+      (r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/reports'),
+    );
+    await page.getByRole('button', { name: 'สร้างและจัดทำรายงาน' }).click();
+    const res = await created;
+
+    // The form closing proves only that the form closed — the 2026-07-19 audit
+    // flagged the previous version of this assertion for passing on a silently
+    // failing create. Assert the create succeeded and the new report is listed
+    // (newest first, so it is on the first page however many already exist —
+    // counting rows broke once a reused database held more than one page).
+    expect(res.status(), await res.text()).toBe(201);
+    const { id } = (await res.json()) as { id: string };
     await expect(page.getByRole('button', { name: '+ สร้างรายงาน' })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(`main a[href="/reports/${id}"]`)).toBeVisible({ timeout: 15_000 });
   });
 
   test('director downloads draft/review PDF for ready report', async ({ page }) => {
     test.skip(!creds.readyReportId, 'global-setup did not seed ready report');
     await login(page, creds.director.email, creds.director.password);
+    // Wait for the logged-in shell BEFORE goto: login() resolves on click, and
+    // navigating away mid-login tears the page down before the token pair is
+    // persisted — the reloaded page would bounce to /login.
+    await expectLoggedInShell(page);
     await page.goto(`/reports/${creds.readyReportId}`);
     await expect(page.getByRole('button', { name: /ดาวน์โหลด PDF/ })).toBeEnabled({ timeout: 20_000 });
 
@@ -130,7 +202,8 @@ test.describe('depth: committee scoring', () => {
     await expect(page.getByRole('heading', { name: /ให้คะแนน/ })).toBeVisible({ timeout: 20_000 });
 
     // Workload gate (chair) — then every indicator radiogroup → level ~3
-    await page.getByRole('radio', { name: 'ผ่านเกณฑ์ภาระงาน' }).check();
+    // exact: true — substring matching would also hit "ไม่ผ่านเกณฑ์ภาระงาน"
+    await page.getByRole('radio', { name: 'ผ่านเกณฑ์ภาระงาน', exact: true }).check();
 
     const groups = page.locator('[role="radiogroup"][aria-label^="ระดับคะแนน"]');
     const n = await groups.count();

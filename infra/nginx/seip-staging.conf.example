@@ -6,9 +6,9 @@
 #   - upstream hostnames if not using docker compose network aliases
 #
 # Architecture (ADR-0005):
-#   Client ──TLS──► edge nginx ──► web:80 (SPA)
+#   Client ──TLS──► edge nginx ──► web:80 (SPA + /seip-evidence/ → seaweedfs)
 #                         └──/api/──► api:3001
-#   api/web talk to postgres + minio only on the internal compose network.
+#   api/web talk to postgres + seaweedfs only on the internal compose network.
 #
 # Do NOT commit real certificates or private keys (SEC-REPO-1).
 #
@@ -65,7 +65,7 @@ server {
     # CSP: start report-only; tighten once UI asset inventory is stable.
     # add_header Content-Security-Policy-Report-Only "default-src 'self'; img-src 'self' data: blob:; connect-src 'self';" always;
 
-    # Uploads go direct to MinIO via presigned URL — not through this proxy body.
+    # Presigned uploads pass through here to the store (location ^~ /seip-evidence/ below); size is bounded by the signed Content-Length.
     client_max_body_size 0;
 
     # Hide nginx version
@@ -97,6 +97,20 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
+    }
+
+    # Presigned uploads/downloads (S3_PUBLIC_ENDPOINT = this origin). The web
+    # container forwards this path to seaweedfs; the signature covers Host, so
+    # pass the browser's Host through unchanged and stream the body. Rename the
+    # path if you changed S3_BUCKET.
+    location ^~ /seip-evidence/ {
+        proxy_pass http://seip_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
     }
 
     location / {

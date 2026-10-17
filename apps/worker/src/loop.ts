@@ -5,17 +5,21 @@ import {
   markJobFailed,
   markJobTerminalFailed,
   enqueueWorkerJob,
+  remindDueSubjectRequests,
 } from '@seip/database';
 import type { Env } from './env.js';
 import { processFileJob, type FileProcessPayload } from './jobs/file-process.js';
 import { processStorageGc } from './jobs/storage-gc.js';
 import { processReportGenerate, type ReportGeneratePayload } from './jobs/report-generate.js';
 import { dispatchOutboxBatch } from './jobs/outbox-dispatch.js';
+import { processEvidenceAnalyze, type EvidenceAnalyzePayload } from './jobs/evidence-analyze.js';
+import { processExportBuild, type ExportBuildPayload } from './jobs/export-build.js';
 
 let gcScheduled = false;
 
 export interface RunOnceOptions {
-  /** When true (default), ensure a storage.gc job is queued once per process. */
+  /** When true (default), ensure the hourly maintenance jobs (storage.gc,
+   * reminders.run) are queued once per process. */
   scheduleGc?: boolean;
 }
 
@@ -37,6 +41,8 @@ export async function runOnce(
       payload: {},
       availableAt: new Date(),
     });
+    // FR-100: due-date reminders for data-subject requests (CCR-029), hourly.
+    await enqueueWorkerJob({ jobType: 'reminders.run', payload: {}, availableAt: new Date() });
     gcScheduled = true;
   }
 
@@ -55,6 +61,13 @@ export async function runOnce(
           payload: {},
           availableAt: new Date(Date.now() + 60 * 60 * 1000),
         });
+      } else if (job.jobType === 'reminders.run') {
+        await remindDueSubjectRequests();
+        await enqueueWorkerJob({ jobType: 'reminders.run', payload: {}, availableAt: new Date(Date.now() + 60 * 60 * 1000) });
+      } else if (job.jobType === 'export.build') {
+        await processExportBuild(env, s3, job.payload as unknown as ExportBuildPayload);
+      } else if (job.jobType === 'evidence.analyze') {
+        await processEvidenceAnalyze(env, s3, job.payload as unknown as EvidenceAnalyzePayload);
       } else if (job.jobType === 'report.generate') {
         const payload = job.payload as unknown as ReportGeneratePayload;
         await processReportGenerate(payload);
@@ -64,10 +77,19 @@ export async function runOnce(
       await markJobDone(job.id);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (job.attempts >= 8) {
-        await markJobTerminalFailed(job.id, msg);
-      } else {
-        await markJobFailed(job.id, msg);
+      // Recording the failure must never itself fail the cycle. The mark*
+      // helpers no longer throw for a missing row, but this loop's whole reason
+      // for existing is that one bad job cannot stop the others — so the
+      // handler gets the same guarantee it gives.
+      try {
+        if (job.attempts >= 8) {
+          await markJobTerminalFailed(job.id, msg);
+        } else {
+          await markJobFailed(job.id, msg);
+        }
+      } catch (inner) {
+        console.warn(`[worker] could not record failure for job ${job.id}: `
+          + `${inner instanceof Error ? inner.message : String(inner)}`);
       }
     }
   }

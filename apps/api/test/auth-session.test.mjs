@@ -6,12 +6,15 @@ process.env.NODE_ENV = 'test';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../../prisma/client.mjs';
 import { hash as argonHash } from '@node-rs/argon2';
 import { hashRefreshToken } from '@seip/auth';
 import { buildServer } from '../dist/server.js';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
 
-const prisma = new PrismaClient();
+const created = trackSchools();
+
+const prisma = createPrismaClient();
 let app;
 let email;
 const password = 'session-test-password-1234';
@@ -22,15 +25,16 @@ before(async () => {
 
   email = `session-${randomUUID()}@x.io`;
   const user = await prisma.userAccount.create({
-    data: { email, displayName: 'Session', status: 'active', passwordHash: await argonHash(password) },
+    data: { person: { create: { displayName: 'fixture' } }, email, displayName: 'Session', status: 'active', passwordHash: await argonHash(password) },
   });
-  const school = await prisma.school.create({ data: { code: `session-${randomUUID()}`, name: 'Session School' } });
+  const school = created.add(await prisma.school.create({ data: { code: `session-${randomUUID()}`, name: 'Session School' } }));
   await prisma.schoolMembership.create({
     data: { userId: user.id, schoolId: school.id, role: 'teacher', membershipScope: 'school', effectiveFrom: new Date('2020-01-01'), status: 'active' },
   });
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds());
   await app.close();
   await prisma.$disconnect();
 });
@@ -121,9 +125,11 @@ test('refresh rejects garbage (AUTH-001), expired tokens (AUTH-002), and logout 
   const victim = await login();
   const attackerEmail = `session-attacker-${randomUUID()}@x.io`;
   const attackerPassword = 'attacker-password-1234';
-  await prisma.userAccount.create({
-    data: { email: attackerEmail, displayName: 'Attacker', status: 'active', passwordHash: await argonHash(attackerPassword) },
-  });
+  // Tracked explicitly: deliberately a member of nothing, so school-scoped
+  // teardown cannot reach it.
+  created.addUser(await prisma.userAccount.create({
+    data: { person: { create: { displayName: 'fixture' } }, email: attackerEmail, displayName: 'Attacker', status: 'active', passwordHash: await argonHash(attackerPassword) },
+  }));
   const attackerLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: attackerEmail, password: attackerPassword } });
   assert.equal(attackerLogin.statusCode, 200);
   const attacker = attackerLogin.json();

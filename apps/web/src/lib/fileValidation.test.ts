@@ -51,8 +51,19 @@ describe('validateDuration', () => {
     expect(result.messageTh).toContain('นาที');
   });
 
-  test('null duration (unreadable client-side) is never rejected — CCR-002: server probe is authoritative', () => {
-    expect(validateDuration(null, inspirationVideoCategory).ok).toBe(true);
+  // Was: "null is never rejected — the server probe is authoritative". That probe
+  // never existed; the worker only estimated duration from byte size, so a null
+  // sailed past every check. initiate now returns VAL-002 for a capped category
+  // with no declared duration (2026-07-18 audit), and catching it here turns a
+  // generic "ข้อมูลไม่ถูกต้องตามเงื่อนไข" into something the teacher can act on.
+  test('null duration is rejected for a capped category, with an actionable message', () => {
+    const result = validateDuration(null, inspirationVideoCategory);
+    expect(result.ok).toBe(false);
+    expect(result.messageTh).toMatch(/ความยาว/);
+  });
+
+  test('null duration is still fine when the category has no cap', () => {
+    expect(validateDuration(null, lessonPlanCategory).ok).toBe(true);
   });
 
   test('a category with no duration limit never rejects', () => {

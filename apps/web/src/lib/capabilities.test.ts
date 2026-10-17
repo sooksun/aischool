@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capabilitiesFromMemberships, CAPABILITY_ROLES } from './capabilities';
+import { capabilitiesFromMemberships, CAPABILITY_ROLES, V2_SCORING_CAPABILITIES } from './capabilities';
 import type { components } from '../api/schema.generated';
 
 type Role = components['schemas']['Role'];
@@ -45,6 +45,7 @@ describe('capabilitiesFromMemberships', () => {
     expect(c.viewReports).toBe(true);
     expect(c.manageCycles).toBe(false);
     expect(c.createReports).toBe(false);
+    expect(c.governMappings).toBe(true);
   });
 
   it('area_admin: view reports (listReports area-r), not create', () => {
@@ -61,8 +62,76 @@ describe('capabilitiesFromMemberships', () => {
     expect(c.manageCycles).toBe(false);
   });
 
+  // submitEvidence drives the "+ ส่งหลักฐาน" nav entry. It must mirror the
+  // createEvidence row in permissions.yaml — showing it to a role the API will
+  // reject is a dead end, hiding it from a role that owns evidence is the
+  // discoverability bug this capability was added to fix.
+  it('submitEvidence: exactly the roles createEvidence grants', () => {
+    for (const role of ['teacher', 'deputy', 'director', 'school_admin'] as Role[]) {
+      expect(capabilitiesFromMemberships([m(role)]).submitEvidence).toBe(true);
+    }
+    for (const role of ['evaluator', 'area_admin'] as Role[]) {
+      expect(capabilitiesFromMemberships([m(role)]).submitEvidence).toBe(false);
+    }
+    expect(capabilitiesFromMemberships([]).submitEvidence).toBe(false);
+  });
+
+  // manageMembers gates onboarding, which creates accounts and grants access to
+  // PDPA-scoped evidence. permissions.yaml gives listMembers/inviteMember/
+  // endMembership to school_admin ALONE — not director, despite director holding
+  // nearly every other school-wide grant. Showing the nav entry to a director
+  // would be a dead end at PERM-001, so this asymmetry is asserted, not assumed.
+  it('clearInjectionFlags: school_admin only (CCR-027)', () => {
+    expect(capabilitiesFromMemberships([m('school_admin')]).clearInjectionFlags).toBe(true);
+    expect(capabilitiesFromMemberships([m('director')]).clearInjectionFlags).toBe(false);
+    expect(capabilitiesFromMemberships([m('teacher')]).clearInjectionFlags).toBe(false);
+  });
+
+  it('manageMembers: school_admin only — notably NOT director', () => {
+    expect(capabilitiesFromMemberships([m('school_admin')]).manageMembers).toBe(true);
+    for (const role of ['teacher', 'deputy', 'director', 'evaluator', 'area_admin'] as Role[]) {
+      expect(capabilitiesFromMemberships([m(role)]).manageMembers).toBe(false);
+    }
+    expect(capabilitiesFromMemberships([]).manageMembers).toBe(false);
+  });
+
+  it('manageAreaSchools: area_admin only (CCR-021)', () => {
+    expect(capabilitiesFromMemberships([m('area_admin')]).manageAreaSchools).toBe(true);
+    for (const role of ['teacher', 'deputy', 'director', 'evaluator', 'school_admin'] as Role[]) {
+      expect(capabilitiesFromMemberships([m(role)]).manageAreaSchools).toBe(false);
+    }
+  });
+
+  // ADR-0017: with FEATURE_SCORING off the API does not register the v2 routes,
+  // so their screens must disappear rather than fail on every call.
+  it('FEATURE_SCORING off: hides the v2 scoring and report affordances only', () => {
+    const all = [m('director'), m('evaluator'), m('school_admin')];
+    const on = capabilitiesFromMemberships(all, true);
+    const off = capabilitiesFromMemberships(all, false);
+    for (const cap of V2_SCORING_CAPABILITIES) {
+      expect(on[cap]).toBe(true);
+      expect(off[cap]).toBe(false);
+    }
+    for (const cap of Object.keys(on) as (keyof typeof on)[]) {
+      if (!V2_SCORING_CAPABILITIES.includes(cap)) expect(off[cap]).toBe(on[cap]);
+    }
+    expect(off.manageCycles).toBe(true);
+    expect(off.governMappings).toBe(true);
+  });
+
+  it('CCR-029: a dpo handles requests only — no evidence, no school data, cannot file', () => {
+    const caps = capabilitiesFromMemberships([
+      { school_id: null, area_id: 'a1', role: 'dpo', membership_scope: 'area' } as never,
+    ]);
+    expect(caps.handleSubjectRequests).toBe(true);
+    expect(caps.fileSubjectRequests).toBe(false);
+    expect(caps.submitEvidence).toBe(false);
+    expect(caps.manageAreaSchools).toBe(false);
+    expect(caps.appointDpos).toBe(false);
+  });
+
   it('CAPABILITY_ROLES lists only known Role values', () => {
-    const known: Role[] = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin'];
+    const known: Role[] = ['teacher', 'director', 'deputy', 'evaluator', 'school_admin', 'area_admin', 'dpo'];
     for (const roles of Object.values(CAPABILITY_ROLES)) {
       for (const r of roles) {
         expect(known).toContain(r);

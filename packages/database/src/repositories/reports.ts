@@ -121,7 +121,7 @@ export async function generateReportPayload(reportId: string) {
   const report = await prisma.report.findUnique({
     where: { id: reportId },
     include: {
-      subject: { select: { id: true, fullName: true, positionRole: true, rankLevelCode: true } },
+      subject: { select: { id: true, personId: true, fullName: true, positionRole: true, rankLevelCode: true } },
       cycle: {
         select: {
           id: true,
@@ -137,19 +137,21 @@ export async function generateReportPayload(reportId: string) {
   });
   if (!report) return null;
 
-  // Confirmed mappings for this subject in the cycle (evidence owner = subject)
+  // Validated mappings of the subject's portfolio against the cycle's framework
+  // version (CCR-017: mappings are keyed on the framework version and the
+  // portfolio belongs to the person). `validated` is the governance-confirmed
+  // tier — the 3.x `confirmed` meaning.
   const mappings = await prisma.evidenceIndicatorMapping.findMany({
     where: {
-      schoolId: report.schoolId,
-      cycleId: report.cycleId,
-      status: 'confirmed',
-      evidence: { ownerPersonnelId: report.subjectPersonnelId },
+      frameworkVersionId: report.cycle.frameworkVersionId,
+      status: 'validated',
+      evidence: { ownerPersonId: report.subject.personId, deletedAt: null },
     },
     include: {
       evidence: { select: { id: true, title: true, categoryId: true } },
       indicator: { select: { id: true, code: true, nameTh: true } },
     },
-    orderBy: { confirmedAt: 'asc' },
+    orderBy: { validatedAt: 'asc' },
   });
 
   // Assignment results for subject in cycle (optionally scoped to round)
@@ -203,7 +205,7 @@ export async function generateReportPayload(reportId: string) {
       indicator_id: m.indicatorId,
       indicator_code: m.indicator.code,
       indicator_name_th: m.indicator.nameTh,
-      confirmed_at: m.confirmedAt?.toISOString() ?? null,
+      confirmed_at: m.validatedAt?.toISOString() ?? null,
     })),
     assignments: assignments.map((a) => ({
       assignment_id: a.id,

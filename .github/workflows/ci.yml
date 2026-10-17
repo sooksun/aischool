@@ -101,6 +101,50 @@ jobs:
             echo "::notice::dependency-audit not yet armed — arms when a lockfile lands"
           fi
 
+  dart-client:
+    name: "Gate: dart client"
+    runs-on: ubuntu-latest
+    # ADR-0016 §3: the Flutter app's client is generated from the same OpenAPI
+    # contract as the web types (swagger_parser). This proves the contract still
+    # generates, builds and analyses as Dart, and that the payloads the app leans
+    # on (sync batches, suggestions, upload sessions) decode. During P0 it targets
+    # the 4.0.0 draft (clients/dart/seip_api/swagger_parser.yaml).
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.13.5
+      - name: Generate, analyse, test
+        working-directory: clients/dart/seip_api
+        run: |
+          dart pub get
+          tool/generate.sh
+          dart analyze --fatal-infos
+          dart test
+
+  mobile:
+    name: "Gate: mobile"
+    runs-on: ubuntu-latest
+    # ADR-0016: the Flutter app builds against the generated client and its
+    # widget tests pass. (Device/emulator runs are not part of CI.)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7
+          channel: stable
+      - name: Generate the API client the app depends on
+        working-directory: clients/dart/seip_api
+        run: |
+          dart pub get
+          tool/generate.sh
+      - name: Analyse and test
+        working-directory: apps/mobile
+        run: |
+          flutter pub get
+          flutter analyze --fatal-infos
+          flutter test
+
   # ---------- SELF-ARMING gates (activate when their subject exists) ----------
   format:
     name: "Gate: format"
@@ -149,70 +193,66 @@ jobs:
   integration:
     name: "Gate: integration tests"
     runs-on: ubuntu-latest
-    # These tests hit a real database (+ MinIO, since SEIP-API-001), so this gate
-    # provides both. Runs on a MIGRATED + SEEDED database — distinct from
+    # These tests hit a real database (+ S3 storage, since SEIP-API-001), so this
+    # gate provides both — PostgreSQL 18 as seip_app, SeaweedFS (ADR-0012/0013). Runs on a MIGRATED + SEEDED database — distinct from
     # migration-validation, which runs the same DB-level suite on a from-zero,
     # unseeded DB. Together: migrations apply cleanly AND the seed produces a
     # working dataset the tests still pass against AND the real API/DB/storage
     # wiring works end-to-end (apps/api's evidence-flow.test.mjs).
     #
-    # MinIO is NOT a `services:` entry (see the "Start MinIO" step below) — a
-    # services container can't be given a command, and minio/minio's default
-    # CMD just prints usage instead of starting the server; it requires an
-    # explicit `server /data` argument. Verified locally: `--entrypoint sh`
-    # (the previous approach here) overrides startup with a no-op shell that
-    # exits immediately, so the server process never runs at all.
+    # SeaweedFS is NOT a `services:` entry: a services container can't mount a
+    # checked-out file (its S3 identity config) or be given a command, so
+    # scripts/ci/start-seaweedfs.sh starts it after checkout.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg18
         env:
-          POSTGRES_USER: seip
-          POSTGRES_PASSWORD: seip_ci
+          POSTGRES_PASSWORD: seip_ci_root
           POSTGRES_DB: seip
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U seip -d seip"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -U postgres -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
-      S3_ENDPOINT: http://localhost:9000
+      # ADR-0012 §4: tests and the app run as seip_app; migrations as seip_migrator.
+      DATABASE_URL: postgresql://seip_app:seip_app_dev@localhost:5432/seip
+      MIGRATE_DATABASE_URL: postgresql://seip_migrator:seip_migrator_dev@localhost:5432/seip
+      S3_ENDPOINT: http://localhost:8333
       S3_BUCKET: seip-evidence
       S3_ACCESS_KEY: seip_ci
       S3_SECRET_KEY: seip_ci_only_change_me
       S3_REGION: us-east-1
       JWT_SECRET: ci-only-secret-not-a-real-credential-min32
+      # v2 committee scoring + reports (ADR-0017) stay frozen in product but are
+      # exercised here, so the frozen code keeps passing its tests (CCR-017).
+      FEATURE_SCORING: "true"
+      # ADR-0014: the dev realm, for apps/api/test/step-up.test.mjs (which fails
+      # rather than skips when CI=true and this is missing).
+      KEYCLOAK_ISSUER: http://localhost:8180/realms/seip
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
-          for i in $(seq 1 20); do
-            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
-              echo "minio healthy"; exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::minio did not become healthy in time"
-          docker logs minio
-          exit 1
+      - name: Start Keycloak (ADR-0014; boots while the job installs)
+        run: scripts/ci/keycloak.sh start
+      - name: Start SeaweedFS (S3 API, ADR-0013)
+        run: scripts/ci/start-seaweedfs.sh
+      - name: Create seip_migrator / seip_app (ADR-0012 §4)
+        run: scripts/ci/bootstrap-db.sh
       - name: Run if package.json defines scripts.test:integration
         run: |
           ARMED=$(node -e "try{const s=require('./package.json').scripts||{};process.stdout.write(s['test:integration']?'true':'false')}catch{process.stdout.write('false')}")
           if [ "$ARMED" != "true" ]; then
             echo "::notice::integration gate not yet armed — arms when scripts.test:integration is defined"; exit 0; fi
           npm ci
-          npx --yes prisma@6 migrate deploy
-          npx --yes prisma@6 generate
+          node scripts/db/migrate.mjs deploy
+          npx prisma generate
           node prisma/seed.mjs
           npm run test:integration
-      - name: "Create the MinIO bucket (GH Actions services has no init-container equivalent)"
+      - name: Build api + worker (and confirm the bucket through the app's own S3 client)
         run: |
           npm run build:libs
           npm run build --workspace apps/api
@@ -221,11 +261,17 @@ jobs:
           # apps/api test step dies on ERR_MODULE_NOT_FOUND. Broken since the
           # REPORTS-AI merge; found while fixing the red develop runs (SEC-002).
           npm run build --workspace apps/worker
-          node scripts/ci/ensure-minio-bucket.mjs
+          node scripts/ci/ensure-bucket.mjs
+      - name: S3 conformance (ADR-0013 §4) — multipart, checksums, ListParts resume, Object Lock
+        run: npm run test:storage
+      - name: Wait for Keycloak
+        run: scripts/ci/keycloak.sh wait
       - name: apps/api evidence-workflow integration tests
         run: npm run test:integration --workspace apps/api
       - name: packages/database repository integration tests
         run: npm run test:integration --workspace packages/database
+      - name: Install ffmpeg (FR-021 — the worker measures video/audio with ffprobe)
+        run: command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
       - name: apps/worker outbox/scan/duration/GC integration tests
         run: npm run test:integration --workspace apps/worker
 
@@ -245,18 +291,19 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg18
         env:
-          POSTGRES_USER: seip
-          POSTGRES_PASSWORD: seip_ci
+          POSTGRES_PASSWORD: seip_ci_root
           POSTGRES_DB: seip
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U seip -d seip"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -U postgres -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
+      # ADR-0012 §4: tests and the app run as seip_app; migrations as seip_migrator.
+      DATABASE_URL: postgresql://seip_app:seip_app_dev@localhost:5432/seip
+      MIGRATE_DATABASE_URL: postgresql://seip_migrator:seip_migrator_dev@localhost:5432/seip
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -267,108 +314,113 @@ jobs:
         run: |
           if [ -f prisma/schema.prisma ]; then echo "armed=true" >> "$GITHUB_OUTPUT"
           else echo "::notice::migration gate not yet armed — arms when prisma/schema.prisma lands"; fi
+      - name: Install (pinned prisma CLI from the lockfile, not npx latest)
+        if: steps.arm.outputs.armed == 'true'
+        run: npm ci
       - name: Validate schema
         if: steps.arm.outputs.armed == 'true'
-        run: npx --yes prisma@6 validate
-      - name: Apply migrations up (proves the up-path against a real Postgres)
+        run: npx prisma validate
+      - name: Create seip_migrator / seip_app (ADR-0012 §4)
         if: steps.arm.outputs.armed == 'true'
-        run: npx --yes prisma@6 migrate deploy
+        run: scripts/ci/bootstrap-db.sh
+      - name: Apply migrations up as seip_migrator — not a superuser (ADR-0012)
+        if: steps.arm.outputs.armed == 'true'
+        run: node scripts/db/migrate.mjs deploy
         # No `migrate diff` drift check on purpose: the constraints migration adds
-        # generated columns, CHECKs, partial indexes and triggers that Prisma's schema
-        # language cannot represent, so diff(schema, migrations) always reports a
-        # difference. The constraint tests below verify those objects exist and bite,
-        # which is stronger than a structural diff would be anyway.
+        # a generated column, CHECKs, partial indexes, triggers and a REVOKE that
+        # Prisma's schema language cannot represent, so diff(schema, migrations)
+        # always reports a difference. The constraint tests below verify those
+        # objects exist and bite, which is stronger than a structural diff.
       - name: Constraint tests (the ว9/ว10 DB rules actually bite)
         if: steps.arm.outputs.armed == 'true'
-        run: |
-          npm install --no-save pg@8
-          npm run test:backend
+        run: npm run test:backend
 
   permission-tests:
     name: "Gate: permission tests"
     runs-on: ubuntu-latest
     # Generated FROM permissions.yaml (SEC-TEN-5) against the real API, so it needs
-    # the same Postgres + MinIO as the integration gate — see that job's comments
-    # for why services has no compose-style init container, and why MinIO is
-    # started as a manual step below rather than a `services:` entry.
+    # the same PostgreSQL + SeaweedFS as the integration gate — see that job's
+    # comments for why SeaweedFS is started as a step rather than a `services:` entry.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg18
         env:
-          POSTGRES_USER: seip
-          POSTGRES_PASSWORD: seip_ci
+          POSTGRES_PASSWORD: seip_ci_root
           POSTGRES_DB: seip
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U seip -d seip"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -U postgres -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
-      S3_ENDPOINT: http://localhost:9000
+      # ADR-0012 §4: tests and the app run as seip_app; migrations as seip_migrator.
+      DATABASE_URL: postgresql://seip_app:seip_app_dev@localhost:5432/seip
+      MIGRATE_DATABASE_URL: postgresql://seip_migrator:seip_migrator_dev@localhost:5432/seip
+      S3_ENDPOINT: http://localhost:8333
       S3_BUCKET: seip-evidence
       S3_ACCESS_KEY: seip_ci
       S3_SECRET_KEY: seip_ci_only_change_me
       S3_REGION: us-east-1
       JWT_SECRET: ci-only-secret-not-a-real-credential-min32
+      # v2 committee scoring + reports (ADR-0017) stay frozen in product but are
+      # exercised here, so the frozen code keeps passing its tests (CCR-017).
+      FEATURE_SCORING: "true"
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
-          for i in $(seq 1 20); do
-            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
-              echo "minio healthy"; exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::minio did not become healthy in time"
-          docker logs minio
-          exit 1
+      - name: Start SeaweedFS (S3 API, ADR-0013)
+        run: scripts/ci/start-seaweedfs.sh
+      - name: Create seip_migrator / seip_app (ADR-0012 §4)
+        run: scripts/ci/bootstrap-db.sh
       - name: Run if tests/security has test files
         run: |
           if [ -z "$(find tests/security -type f ! -name '.gitkeep' -print -quit 2>/dev/null)" ]; then
             echo "::notice::permission gate not yet armed — arms when tests/security/* land (against permissions.yaml matrix)"; exit 0
           fi
           npm ci
-          npx --yes prisma@6 migrate deploy
-          npx --yes prisma@6 generate
+          node scripts/db/migrate.mjs deploy
+          npx prisma generate
           node prisma/seed.mjs
           npm run build:libs
           npm run build --workspace apps/api
-          node scripts/ci/ensure-minio-bucket.mjs
+          node scripts/ci/ensure-bucket.mjs
           npm run test:security
 
   e2e-smoke:
     name: "Gate: e2e smoke"
     runs-on: ubuntu-latest
-    # SEIP-QA-004: login → evidence list against real api+web+Postgres+MinIO.
+    # SEIP-QA-004: login → evidence list against real api+web+PostgreSQL+SeaweedFS.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg18
         env:
-          POSTGRES_USER: seip
-          POSTGRES_PASSWORD: seip_ci
+          POSTGRES_PASSWORD: seip_ci_root
           POSTGRES_DB: seip
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U seip -d seip"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -U postgres -d seip"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
-      DATABASE_URL: postgresql://seip:seip_ci@localhost:5432/seip?schema=public
-      S3_ENDPOINT: http://localhost:9000
+      # ADR-0012 §4: tests and the app run as seip_app; migrations as seip_migrator.
+      DATABASE_URL: postgresql://seip_app:seip_app_dev@localhost:5432/seip
+      MIGRATE_DATABASE_URL: postgresql://seip_migrator:seip_migrator_dev@localhost:5432/seip
+      S3_ENDPOINT: http://localhost:8333
       S3_BUCKET: seip-evidence
       S3_ACCESS_KEY: seip_ci
       S3_SECRET_KEY: seip_ci_only_change_me
       S3_REGION: us-east-1
       JWT_SECRET: ci-only-secret-not-a-real-credential-min32
+      # v2 committee scoring + reports (ADR-0017) stay frozen in product but are
+      # exercised here, so the frozen code keeps passing its tests (CCR-017).
+      FEATURE_SCORING: "true"
+      # CCR-018: web sign-in through the dev Keycloak realm (tests/e2e/sso.spec.ts).
+      KEYCLOAK_ISSUER: http://localhost:8180/realms/seip
+      KEYCLOAK_WEB_CLIENT_SECRET: seip-web-dev-secret-not-for-real-use
+      WEB_PUBLIC_ORIGIN: http://127.0.0.1:5173
       PORT: "3011"
       # NODE_ENV deliberately NOT set at job level: `npm ci` under
       # NODE_ENV=production skips devDependencies, so the install/build step had
@@ -382,34 +434,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER="$S3_ACCESS_KEY" -e MINIO_ROOT_PASSWORD="$S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
-          for i in $(seq 1 20); do
-            if docker exec minio curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1; then
-              echo "minio healthy"; exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::minio did not become healthy"; docker logs minio; exit 1
+      - name: Start Keycloak (ADR-0014; boots while the job installs)
+        run: scripts/ci/keycloak.sh start
+      - name: Start SeaweedFS (S3 API, ADR-0013)
+        run: scripts/ci/start-seaweedfs.sh
+      - name: Create seip_migrator / seip_app (ADR-0012 §4)
+        run: scripts/ci/bootstrap-db.sh
       - name: Install, migrate, seed, build
         run: |
           npm ci
-          npx --yes prisma@6 migrate deploy
-          npx --yes prisma@6 generate
+          node scripts/db/migrate.mjs deploy
+          npx prisma generate
           node prisma/seed.mjs
           npm run build:libs
           npm run build --workspace apps/api
+          npm run build --workspace apps/worker
           npm run build --workspace apps/web
-          node scripts/ci/ensure-minio-bucket.mjs
+          node scripts/ci/ensure-bucket.mjs
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
+      - name: Wait for Keycloak
+        run: scripts/ci/keycloak.sh wait
       - name: Start API and web
         run: |
-          NODE_ENV=production node apps/api/dist/index.js &
+          # The fixture teacher signs in once per spec (13+ per run) — above the
+          # production per-email cap of 12 per 15 min. Raised for this job only.
+          NODE_ENV=production LOGIN_RATE_MAX_PER_EMAIL=60 LOGIN_RATE_MAX_PER_IP=200 node apps/api/dist/index.js &
           echo $! > /tmp/seip-api.pid
+          # The worker: scans, then P3 analysis (heuristic floor) the e2e
+          # suggestion flow waits on. No ffmpeg in this job — media off.
+          MEDIA_PROBE=none MEDIA_RENDITIONS=off WORKER_POLL_MS=500 node apps/worker/dist/index.js &
+          echo $! > /tmp/seip-worker.pid
           npm run dev --workspace apps/web -- --host 127.0.0.1 --port 5173 &
           echo $! > /tmp/seip-web.pid
           for i in $(seq 1 40); do
@@ -427,3 +482,68 @@ jobs:
           echo "::error::web did not start"; exit 1
       - name: Run e2e smoke
         run: npm run test:e2e
+
+  # A real install: build every image in infra/docker, bring the staging stack
+  # up from nothing, seed it and create the first admin the way the runbook
+  # says, then drive it through the web container (the browser's origin) with
+  # scripts/ops/smoke-install.mjs — invite → accept → upload via the presigned
+  # URL → worker scan (real clamav) → download. Before this gate no workflow
+  # built these images, and the stack shipped with an api bound to loopback
+  # and presigned URLs naming http://seaweedfs:8333.
+  deploy-smoke:
+    name: "Gate: deploy smoke"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      COMPOSE: docker compose -f docker-compose.staging.yml --env-file .env.staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Write throwaway staging secrets
+        run: |
+          r() { openssl rand -hex 24; }
+          sed -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(r)/" \
+              -e "s/^SEIP_MIGRATOR_PASSWORD=.*/SEIP_MIGRATOR_PASSWORD=$(r)/" \
+              -e "s/^SEIP_APP_PASSWORD=.*/SEIP_APP_PASSWORD=$(r)/" \
+              -e "s/^JWT_SECRET=.*/JWT_SECRET=$(r)/" \
+              -e "s/^S3_ACCESS_KEY=.*/S3_ACCESS_KEY=seip$(openssl rand -hex 6)/" \
+              -e "s/^S3_SECRET_KEY=.*/S3_SECRET_KEY=$(r)/" \
+              -e "s#^SEIP_PUBLIC_ORIGIN=.*#SEIP_PUBLIC_ORIGIN=http://127.0.0.1:8080#" \
+              .env.staging.example > .env.staging
+          echo "BACKUP_HOST_DIR=${RUNNER_TEMP}/seip-backups" >> .env.staging
+      - name: Build images
+        run: $COMPOSE --profile ops build
+      - name: Bring the stack up
+        run: |
+          $COMPOSE up -d
+          # Through the web container, as a browser would: 401 = api up behind it.
+          for i in $(seq 1 120); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/v1/auth/me || true)
+            [ "$code" = 401 ] && { echo "api reachable through web after ${i}x5s"; exit 0; }
+            sleep 5
+          done
+          echo "::error::api never answered through the web container (last: $code)"; exit 1
+      - name: Seed taxonomy, provision a school, create the first admin
+        run: |
+          $COMPOSE run --rm ops node prisma/seed.mjs
+          $COMPOSE run --rm ops node scripts/ops/provision-school.mjs --code=SMOKE-001 --name=Smoke
+          SEIP_ADMIN_PASSWORD=smoke-admin-password-1234 \
+            $COMPOSE run --rm -e SEIP_ADMIN_PASSWORD ops node scripts/ops/bootstrap-admin.mjs \
+            --email=admin@smoke.invalid --name=Admin --school=SMOKE-001
+      - name: Use it through the browser origin
+        env:
+          SEIP_ADMIN_EMAIL: admin@smoke.invalid
+          SEIP_ADMIN_PASSWORD: smoke-admin-password-1234
+        # The worker waits for clamav's signatures (start_period 180s) before it
+        # starts, so allow the scan up to 10 minutes.
+        run: node scripts/ops/smoke-install.mjs --base=http://127.0.0.1:8080 --scan-wait-ms=600000
+      - name: Stack state and logs
+        if: always()
+        run: |
+          $COMPOSE ps -a
+          $COMPOSE logs --tail=80 migrate api worker web backup
+      - name: Tear down
+        if: always()
+        run: $COMPOSE --profile ops down -v

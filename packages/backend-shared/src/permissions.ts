@@ -27,7 +27,7 @@ const doc = yaml.load(
   readFileSync(resolve(repoRoot, 'docs/contracts/permissions.yaml'), 'utf8'),
 ) as PermissionsDoc;
 
-export type Role = 'teacher' | 'director' | 'deputy' | 'evaluator' | 'school_admin' | 'area_admin';
+export type Role = 'teacher' | 'director' | 'deputy' | 'evaluator' | 'school_admin' | 'area_admin' | 'dpo';
 type Grant = string; // 'own' | 'school' | 'area-r' | 'committee' | 'own-revoke' | 'committee-or-own'...
 
 interface PermissionsDoc {
@@ -35,6 +35,8 @@ interface PermissionsDoc {
   unauthenticated?: Record<string, string>;
   any_authenticated?: Record<string, string>;
   matrix: Record<string, Record<string, Grant>>;
+  /** ADR-0014 step-up: a level for the whole operation, or per action. */
+  min_acr?: Record<string, number | Record<string, number>>;
 }
 
 export const PERMISSIONS_VERSION = doc.version;
@@ -55,4 +57,18 @@ export function isExempt(operationId: string): 'unauthenticated' | 'any_authenti
  * this is the runtime mirror so a missing rule fails closed, not open. */
 export function hasDisposition(operationId: string): boolean {
   return Boolean(doc.matrix[operationId]) || Boolean(isExempt(operationId));
+}
+
+/**
+ * Minimum level of authentication (permissions.yaml `min_acr`) for an operation,
+ * or for one action of it. 0 when the contract names none. An action-keyed entry
+ * asked about without an action answers its strictest action, so a caller that
+ * forgets to pass one fails closed.
+ */
+export function minAcrFor(operationId: string, action?: string): number {
+  const entry = doc.min_acr?.[operationId];
+  if (entry === undefined) return 0;
+  if (typeof entry === 'number') return entry;
+  if (action !== undefined) return entry[action] ?? 0;
+  return Math.max(0, ...Object.values(entry));
 }

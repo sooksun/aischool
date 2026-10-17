@@ -5,14 +5,14 @@
 // See prisma/data/README.md for level-description provenance.
 //
 // Idempotent: re-running upserts by stable `code` keys / compound uniques.
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from './client.mjs';
 import {
   ADMIN_RANK_CODES,
   TEACHER_RANK_CODES,
   seedLevelDescriptionsForFramework,
 } from './data/level-descriptions.mjs';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 /** @type {{ code: string, roleFamily: 'teacher'|'administrator', labelTh: string, sortOrder: number }[]} */
 const RANK_LEVELS = [

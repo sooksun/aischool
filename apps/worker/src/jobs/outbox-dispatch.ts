@@ -1,7 +1,10 @@
-// Marks unpublished outbox events as published after a no-op "dispatch".
-// Notification channels are deferred (events.yaml) — publishing means the event
-// is durable and available for future consumers without dual-write loss.
+// Dispatches unpublished outbox events. The notification consumer (events.yaml)
+// writes in-app inbox rows, idempotent on (event, recipient), before the event
+// is marked published; a failure leaves it for the next cycle. Push and email
+// channels are later (FR-100; push carries no content, FR-101).
 import {
+  notifyFromEvent,
+  completeSubjectRequestForExport,
   claimUnpublishedOutbox,
   markOutboxPublished,
   markOutboxFailed,
@@ -12,12 +15,25 @@ export async function dispatchOutboxBatch(limit = 50): Promise<number> {
   let n = 0;
   for (const ev of batch) {
     try {
-      // Future: fan-out to notification service. For now, publish = acknowledge.
-      await markOutboxPublished(ev.id);
-      n += 1;
+      await notifyFromEvent(ev);
+      // CCR-029: an approved access / portability request is done once its export is
+      // ready. Guarded on status, so a re-dispatched event changes nothing.
+      const exportId = (ev.payload as Record<string, unknown> | null)?.export_id;
+      if (ev.eventType === 'export.ready' && typeof exportId === 'string') await completeSubjectRequestForExport(exportId);
+      // Counted only when a row actually changed: a claim whose row disappeared
+      // before publish was not dispatched, and saying it was would overstate what
+      // this cycle achieved.
+      const changed = await markOutboxPublished(ev.id);
+      if (changed > 0) n += 1;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      await markOutboxFailed(ev.id, msg);
+      // Belt and braces on top of markOutboxFailed being a no-op for missing
+      // rows: whatever goes wrong recording a failure, it must not take the rest
+      // of the batch with it. runOnce isolates per-job errors for the same
+      // reason; this loop only looked like it did.
+      await markOutboxFailed(ev.id, msg).catch((inner) => {
+        console.warn(`[outbox] could not record failure for ${ev.id}: ${inner?.message ?? inner}`);
+      });
     }
   }
   return n;

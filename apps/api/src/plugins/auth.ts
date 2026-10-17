@@ -6,18 +6,58 @@ import fp from 'fastify-plugin';
 import type { FastifyPluginAsync, FastifyInstance, FastifyRequest } from 'fastify';
 import {
   verifyAccessToken, AccessTokenExpiredError, resolveTenancy, hasSchoolRole, hasAreaReadAccess,
+  isExternalToken, OWN_TOKEN_ACR, effectiveAcr,
   type TenancyContext,
 } from '@seip/auth';
-import { getUserById, getMembershipsForUser, getPersonnelForUser, getSchoolAreaId } from '@seip/database';
+import {
+  getUserById, getMembershipsForUser, getPersonnelForUser, getSchoolAreaId,
+  getLiveWebSession, touchWebSession, claimKeycloakCheck, recordKeycloakCheck, revokeWebSession, seeDeviceSession,
+} from '@seip/database';
 import { ApiError, isExempt } from '@seip/backend-shared';
 import type { Env } from '../env.js';
+import type { Keycloak } from '../lib/keycloak.js';
+import {
+  KC_CHECK_EVERY_MS, SESSION_COOKIE, equalSecrets, openRefreshToken, parseCookies, sealRefreshToken, sha256,
+} from '../lib/web-session.js';
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/** A request that wins the Keycloak check holds it this long before another may try. */
+const KC_CHECK_LEASE_MS = 30 * 1000;
 
 export interface AuthedRequest {
   userId: string;
   tenancy: TenancyContext;
   /** Resolved per CCR-003 — null if ambiguous/absent and the route needs one. */
   currentSchoolId: string | null;
-  personnel: { id: string; positionRole: 'teacher' | 'administrator'; rankLevelCode: string } | null;
+  personnel: {
+    id: string; positionRole: 'teacher' | 'administrator'; rankLevelCode: string;
+    fullName: string; rankSince: Date | null; confirmedAt: Date | null; correctionNote: string | null;
+  } | null;
+  /** The person this account belongs to (ADR-0015) — the owner key of a
+   * portfolio. Null only for an account that has no person yet. */
+  personId: string | null;
+  /** Level of authentication of this token (ADR-0014): 1 password, 2 second
+   * factor. The API's own tokens are 1; Keycloak's say what the login did. */
+  acr: number;
+  /** Whether permissions.yaml `min_acr` is enforced (ENFORCE_MIN_ACR). */
+  enforceMinAcr: boolean;
+  /** The device_session / web_session this request came through, if any (FR-093). */
+  sessionId?: string | null;
+}
+
+interface Identity { userId: string; acr: number; sessionId?: string | null }
+
+/** The app's Keycloak client (infra/keycloak/seip-realm.dev.json). */
+export const MOBILE_CLIENT_ID = 'seip-mobile';
+
+/**
+ * The app sends `User-Agent: SEIP-Mobile/<version> (<android|ios>)`. Anything
+ * else from the mobile client is recorded as android — the pilot's devices —
+ * rather than refused; the platform is a label, never a security decision.
+ */
+export function clientOf(ua: string | undefined): { platform: 'android' | 'ios'; appVersion: string | null } {
+  const m = /SEIP-Mobile\/([\w.+-]{1,32})/.exec(ua ?? '');
+  return { platform: /\b(ios|iphone|ipad)\b/i.test(ua ?? '') ? 'ios' : 'android', appVersion: m ? m[1] : null };
 }
 
 declare module 'fastify' {
@@ -32,22 +72,85 @@ declare module 'fastify' {
   }
 }
 
-export const authPlugin: FastifyPluginAsync<{ env: Env }> = fp(async (app: FastifyInstance, { env }: { env: Env }) => {
+type AuthPluginOptions = { env: Env; keycloak: Keycloak | null };
+
+export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = fp(async (app: FastifyInstance, { env, keycloak }: AuthPluginOptions) => {
+  /** Bearer token (mobile, scripts, tests): HS256 is ours; anything else is
+   * Keycloak's, and only if a realm is configured. Without one an RS256 token is
+   * simply invalid (AUTH-001). */
+  async function fromBearer(request: FastifyRequest, token: string): Promise<Identity> {
+    let claims;
+    try {
+      if (keycloak && isExternalToken(token)) claims = await keycloak.verifyAccessToken(token);
+    } catch (e) {
+      if (e instanceof AccessTokenExpiredError) throw new ApiError('AUTH-002', 'Token expired');
+      throw new ApiError('AUTH-001', 'Invalid token');
+    }
+    if (claims) {
+      // The app's sign-in is a device session (FR-093): recorded on first sight,
+      // and once revoked here its tokens are refused at once.
+      if (claims.clientId === MOBILE_CLIENT_ID && claims.sessionId) {
+        const device = await seeDeviceSession({
+          userId: claims.userId, kcSessionId: claims.sessionId, ...clientOf(request.headers['user-agent']),
+        });
+        if (!device) throw new ApiError('AUTH-001', 'This device was signed out');
+        return { userId: claims.userId, acr: claims.acr, sessionId: device.id };
+      }
+      return { userId: claims.userId, acr: claims.acr };
+    }
+    try {
+      const { sub } = await verifyAccessToken(token, env.JWT_SECRET);
+      return { userId: sub, acr: OWN_TOKEN_ACR };
+    } catch (e) {
+      if (e instanceof AccessTokenExpiredError) throw new ApiError('AUTH-002', 'Token expired');
+      throw new ApiError('AUTH-001', 'Invalid token');
+    }
+  }
+
+  /** Cookie session (web BFF, CCR-018): live row, CSRF on writes, and at most
+   * once a minute a refresh against Keycloak so a session ended there (logout
+   * elsewhere, admin revoke) ends here too. */
+  async function fromSession(request: FastifyRequest, cookie: string): Promise<Identity> {
+    const session = await getLiveWebSession(sha256(cookie));
+    if (!session) throw new ApiError('AUTH-001', 'Session expired or unknown');
+    if (!SAFE_METHODS.has(request.method)) {
+      const header = request.headers['x-csrf-token'];
+      if (typeof header !== 'string' || !equalSecrets(sha256(header), session.csrfHash)) {
+        throw new ApiError('AUTH-007', 'X-CSRF-Token missing or does not match the session');
+      }
+    }
+    const web = keycloak?.web;
+    if (web && session.kcCheckDueAt <= new Date() && await claimKeycloakCheck(session.id, KC_CHECK_LEASE_MS)) {
+      try {
+        const fresh = await web.refresh(openRefreshToken(env.JWT_SECRET, session.kcRefreshToken));
+        if (!fresh) {
+          await revokeWebSession(session.id);
+          throw new ApiError('AUTH-001', 'Session ended at the identity provider');
+        }
+        await recordKeycloakCheck(session.id, sealRefreshToken(env.JWT_SECRET, fresh.refreshToken), new Date(Date.now() + KC_CHECK_EVERY_MS));
+      } catch (e) {
+        if (e instanceof ApiError) throw e;
+        // Keycloak unreachable: keep the session and try again after the lease.
+        // Revocation waits for Keycloak to answer; availability does not.
+        request.log.warn({ err: e }, 'web session: keycloak check failed; retrying later');
+      }
+    }
+    await touchWebSession(session);
+    // The session's sign-in is its auth time; a step-up does not last its 8 h.
+    return { userId: session.userId, acr: effectiveAcr(session.acr, session.createdAt.getTime() / 1000), sessionId: session.id };
+  }
+
   app.addHook('preHandler', async (request: FastifyRequest) => {
     const operationId = request.routeOptions?.config?.operationId as string | undefined;
     if (operationId && isExempt(operationId) === 'unauthenticated') return;
 
     const header = request.headers.authorization;
-    if (!header?.startsWith('Bearer ')) throw new ApiError('AUTH-001', 'Missing bearer token');
-    const token = header.slice('Bearer '.length);
-
-    let userId: string;
-    try {
-      ({ sub: userId } = await verifyAccessToken(token, env.JWT_SECRET));
-    } catch (e) {
-      if (e instanceof AccessTokenExpiredError) throw new ApiError('AUTH-002', 'Token expired');
-      throw new ApiError('AUTH-001', 'Invalid token');
-    }
+    const cookie = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+    let identity: Identity;
+    if (header?.startsWith('Bearer ')) identity = await fromBearer(request, header.slice('Bearer '.length));
+    else if (cookie) identity = await fromSession(request, cookie);
+    else throw new ApiError('AUTH-001', 'Missing bearer token or session');
+    const { userId, acr, sessionId = null } = identity;
 
     const user = await getUserById(userId);
     if (!user || user.status !== 'active') throw new ApiError('AUTH-003', 'Account disabled or not found');
@@ -57,7 +160,10 @@ export const authPlugin: FastifyPluginAsync<{ env: Env }> = fp(async (app: Fasti
     const currentSchoolId = await resolveCurrentSchool(request, tenancy);
     const personnel = currentSchoolId ? await getPersonnelForUser(userId, currentSchoolId) : null;
 
-    request.auth = { userId, tenancy, currentSchoolId, personnel };
+    request.auth = {
+      userId, tenancy, currentSchoolId, personnel, personId: user.personId ?? null,
+      acr, enforceMinAcr: env.ENFORCE_MIN_ACR, sessionId,
+    };
   });
 });
 
@@ -85,8 +191,10 @@ async function resolveCurrentSchool(request: FastifyRequest, tenancy: TenancyCon
 
   if (schoolIds.includes(requested)) return requested;
 
+  // Any area-scoped role (area_admin, or dpo — CCR-029) may name a school of its
+  // area: the header only picks the context, and every route still checks a grant.
   const requestedAreaId = await getSchoolAreaId(requested);
-  if (requestedAreaId && hasAreaReadAccess(tenancy, requestedAreaId)) return requested;
+  if (requestedAreaId && (hasAreaReadAccess(tenancy, requestedAreaId) || tenancy.areaRoles.has(requestedAreaId))) return requested;
 
   throw new ApiError('PERM-002', 'X-School-Id does not match an active membership');
 }

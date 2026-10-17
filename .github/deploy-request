@@ -1,0 +1,10 @@
+# Changing this file on the development branch triggers .github/workflows/deploy.yml.
+# One line per request, newest last.
+2026-10-17  deploy to cnppai.com (/DATA/AppData/www/aischool, SEIP_EDGE=none) — owner request; environment seip-production created by the owner
+2026-10-17  retry: diagnostic run after the first run saw no settings (e18e34f)
+2026-10-17  probe: re-check seip-production after the owner was given the settings checklist
+2026-10-17  probe 2: re-check seip-production (~12:10 UTC)
+2026-10-17  deploy: owner reports seip-production filled in (aischool.cnppai.com behind NPM)
+2026-10-17  retry: SSH step now normalises SEIP_DEPLOY_HOST and explains a lookup failure
+2026-10-17  retry: key diagnostics + line-break repair (run 6 said the key was unreadable)
+2026-10-17  probe: check whether SEIP_DEPLOY_SSH_KEY was re-pasted (~19:00 UTC)

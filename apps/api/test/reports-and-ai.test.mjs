@@ -1,23 +1,26 @@
-// Integration: createReport + report.generate worker + suggestMappings (local_heuristic).
+// Integration: createReport + report.generate worker over VALIDATED mappings. AI analysis: analysis.test.mjs.
 process.env.NODE_ENV = 'test';
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../../prisma/client.mjs';
 import { hash as argonHash } from '@node-rs/argon2';
 import { buildServer } from '../dist/server.js';
 import { runOnce } from '../../worker/dist/loop.js';
 import { S3Client } from '@aws-sdk/client-s3';
+import { cleanupSchools, trackSchools } from '../../../tests/helpers/db-cleanup.mjs';
 
-const prisma = new PrismaClient();
+const created = trackSchools();
+
+const prisma = createPrismaClient();
 let app;
 let env;
 let school;
 let teacherToken;
 let directorToken;
 let teacherPersonnelId;
-let frameworkId;
+
 let cycleId;
 let evidenceId;
 let indicatorIds = [];
@@ -36,9 +39,9 @@ before(async () => {
   const area = await prisma.area.create({
     data: { code: `rpt-area-${randomUUID()}`, name: 'Area' },
   });
-  school = await prisma.school.create({
+  school = created.add(await prisma.school.create({
     data: { code: `rpt-school-${randomUUID()}`, name: 'School', areaId: area.id },
-  });
+  }));
   await prisma.rankLevel.upsert({
     where: { code: 'teacher_kru' },
     create: { code: 'teacher_kru', roleFamily: 'teacher', labelTh: 'ครู', sortOrder: 1 },
@@ -47,7 +50,7 @@ before(async () => {
 
   const teacherPass = 'teacher-pass-1234';
   const teacher = await prisma.userAccount.create({
-    data: {
+    data: { person: { create: { displayName: 'fixture' } },
       email: `rpt-teacher-${randomUUID()}@x.io`,
       displayName: 'Teacher',
       status: 'active',
@@ -67,7 +70,7 @@ before(async () => {
   const personnel = await prisma.personnelProfile.create({
     data: {
       schoolId: school.id,
-      userId: teacher.id,
+      userId: teacher.id, personId: teacher.personId,
       fullName: 'ครูทดสอบ',
       positionRole: 'teacher',
       rankLevelCode: 'teacher_kru',
@@ -77,7 +80,7 @@ before(async () => {
 
   const directorPass = 'director-pass-1234';
   const director = await prisma.userAccount.create({
-    data: {
+    data: { person: { create: { displayName: 'fixture' } },
       email: `rpt-director-${randomUUID()}@x.io`,
       displayName: 'Director',
       status: 'active',
@@ -108,7 +111,7 @@ before(async () => {
   });
   directorToken = dLogin.json().access_token;
 
-  const fw = await prisma.frameworkVersion.create({
+  const fw = created.addFramework(await prisma.frameworkVersion.create({
     data: {
       code: `rpt-fw-${randomUUID()}`,
       roleFamily: 'teacher',
@@ -117,8 +120,8 @@ before(async () => {
       status: 'active',
       effectiveFrom: new Date(),
     },
-  });
-  frameworkId = fw.id;
+  }));
+
   const domain = await prisma.evaluationDomain.create({
     data: {
       frameworkVersionId: fw.id,
@@ -170,9 +173,12 @@ before(async () => {
   const ev = await app.inject({
     method: 'POST',
     url: '/api/v1/evidence',
-    headers: { authorization: `Bearer ${teacherToken}`, 'x-school-id': school.id },
+    headers: { authorization: `Bearer ${teacherToken}`, 'x-school-id': school.id, 'idempotency-key': randomUUID() },
     payload: {
       category_id: category.id,
+      kind: 'file',
+      contains_learners: 'unknown',
+      client_uuid: randomUUID(),
       title: 'แผนการจัดการเรียนรู้ Active Learning ชั้น ม.2',
       description: 'บันทึกการสอนและการประเมินผลผู้เรียน',
     },
@@ -182,52 +188,34 @@ before(async () => {
 });
 
 after(async () => {
+  await cleanupSchools(prisma, created.ids(), created.userIds(), created.frameworkIds());
   await app.close();
   await prisma.$disconnect();
 });
 
-test('suggestMappings creates ai_suggested rows without auto-confirm', async () => {
-  const res = await app.inject({
-    method: 'POST',
-    url: `/api/v1/evidence/${evidenceId}/mappings/suggest`,
-    headers: { authorization: `Bearer ${teacherToken}`, 'x-school-id': school.id },
-    payload: { framework_version_id: frameworkId, max_suggestions: 3 },
-  });
-  assert.equal(res.statusCode, 200, res.body);
-  const body = res.json();
-  assert.equal(body.provider, 'local_heuristic');
-  assert.ok(body.items.length >= 1, 'expected at least one suggestion');
-  for (const m of body.items) {
-    assert.equal(m.mapping_source, 'ai_suggested');
-    assert.equal(m.status, 'suggested');
+test('only VALIDATED mappings reach the report: owner confirms, director validates', async () => {
+  const headers = (token) => ({ authorization: `Bearer ${token}`, 'x-school-id': school.id });
+  const mapped = [];
+  for (const indicatorId of indicatorIds.slice(0, 2)) {
+    const res = await app.inject({
+      method: 'POST', url: `/api/v1/evidence/${evidenceId}/mappings`,
+      headers: { ...headers(teacherToken), 'idempotency-key': randomUUID() },
+      payload: { indicator_id: indicatorId },
+    });
+    assert.equal(res.statusCode, 201, res.body);
+    mapped.push(res.json());
   }
-
-  // teacher cannot confirm (own-revoke only)
-  const confirm = await app.inject({
-    method: 'PATCH',
-    url: `/api/v1/mappings/${body.items[0].id}`,
-    headers: { authorization: `Bearer ${teacherToken}`, 'x-school-id': school.id },
-    payload: { action: 'confirm' },
+  // The first is validated; the second stays owner_confirmed and must NOT appear.
+  const v = await app.inject({
+    method: 'PATCH', url: `/api/v1/mappings/${mapped[0].id}`,
+    headers: { ...headers(directorToken), 'if-match': `"${mapped[0].version}"` },
+    payload: { action: 'validate' },
   });
-  assert.equal(confirm.statusCode, 403);
-
-  const directorConfirm = await app.inject({
-    method: 'PATCH',
-    url: `/api/v1/mappings/${body.items[0].id}`,
-    headers: { authorization: `Bearer ${directorToken}`, 'x-school-id': school.id },
-    payload: { action: 'confirm' },
-  });
-  assert.equal(directorConfirm.statusCode, 200, directorConfirm.body);
-  assert.equal(directorConfirm.json().status, 'confirmed');
+  assert.equal(v.statusCode, 200, v.body);
+  assert.equal(v.json().status, 'validated');
 });
 
 test('createReport enqueues worker; runOnce fills payload and section refs', async () => {
-  // Ensure mapping has cycle for report section eligibility
-  await prisma.evidenceIndicatorMapping.updateMany({
-    where: { evidenceId, status: 'confirmed' },
-    data: { cycleId },
-  });
-
   const create = await app.inject({
     method: 'POST',
     url: '/api/v1/reports',
@@ -253,8 +241,19 @@ test('createReport enqueues worker; runOnce fills payload and section refs', asy
   const match = jobs.find((j) => j.payload?.report_id === report.id);
   assert.ok(match, 'report.generate job should be enqueued');
 
-  // Process without S3 GC scheduling noise
-  await runOnce(env, fakeS3, { scheduleGc: false });
+  // Process without S3 GC scheduling noise.
+  //
+  // Loop until THIS job is claimed, rather than calling runOnce once. runOnce
+  // takes a single job off a queue that every other test file shares — node:test
+  // runs files in parallel processes, so a sibling's file.process job can be the
+  // one it picks, leaving this report at 'draft' and failing on a race that has
+  // nothing to do with reports. Flaked ~2 runs in 3 once the CCR-014/CCR-015
+  // suites were added and the queue got busier.
+  for (let i = 0; i < 25; i++) {
+    const stillPending = await prisma.workerJob.findUnique({ where: { id: match.id }, select: { status: true } });
+    if (stillPending?.status === 'succeeded') break;
+    await runOnce(env, fakeS3, { scheduleGc: false });
+  }
 
   const get = await app.inject({
     method: 'GET',
@@ -267,7 +266,7 @@ test('createReport enqueues worker; runOnce fills payload and section refs', asy
   assert.equal(detail.payload.generation_status, 'ready');
   assert.equal(detail.payload.template_code, 'PA2_s');
   assert.ok(Array.isArray(detail.section_refs));
-  assert.ok(detail.section_refs.length >= 1, 'confirmed mapping should become section ref');
+  assert.equal(detail.section_refs.length, 1, 'exactly the validated mapping becomes a section ref — owner_confirmed alone does not');
 
   const list = await app.inject({
     method: 'GET',

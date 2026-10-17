@@ -1,0 +1,193 @@
+# Deploy SEIP to the owner's server over SSH, then prove it works over HTTPS.
+#
+# Triggers: a tag `deploy-*` pushed on any commit, or "Run workflow" (manual).
+# Everything server-specific lives in the GitHub environment `seip-production`
+# (Settings → Environments), so nothing about the host is in the repository:
+#
+#   secrets  SEIP_DEPLOY_HOST         server address (IP or name)
+#            SEIP_DEPLOY_USER         SSH user in the docker group (or root)
+#            SEIP_DEPLOY_SSH_KEY      private key for that user (ed25519, no passphrase)
+#            SEIP_DEPLOY_KNOWN_HOSTS  `ssh-keyscan -t ed25519 <host>` output, verified by you
+#            SEIP_ADMIN_PASSWORD      first school admin's password (≥ 12 chars)
+#   vars     (each also accepted from Secrets, for when everything was saved there)
+#            SEIP_DOMAIN              e.g. seip.school.ac.th (DNS → the server; 80/443 open)
+#            SEIP_ADMIN_EMAIL         first school admin's email
+#            SEIP_SCHOOL_CODE         e.g. SCH-001      SEIP_SCHOOL_NAME  (optional)
+#            SEIP_DEPLOY_PORT         optional, default 22
+#            SEIP_ACME_EMAIL          optional, TLS certificate contact
+#            SEIP_EDGE                optional, "caddy" (default: HTTPS on 80/443) or
+#                                     "none" (publish web on a free port; origin
+#                                     http://SEIP_DOMAIN:<port>, or SEIP_PUBLIC_ORIGIN)
+#            SEIP_ROOT                optional, install directory (default /opt/seip)
+#            SEIP_WEB_PORT            optional, web port on the host (default: first free from 8090)
+#            SEIP_PUBLIC_ORIGIN       optional, the URL users open if a proxy is already in front
+#
+# The server needs Docker Engine + Compose v2, openssl and curl. Secrets for the
+# stack itself (database, JWT, storage) are generated ON the server at the first
+# deploy (scripts/ops/deploy-remote.sh) and never pass through GitHub.
+name: deploy
+
+on:
+  push:
+    tags: ['deploy-*']
+    # A deploy requested from the development branch: a commit that changes
+    # .github/deploy-request (its text says what and why). The cloud session
+    # that develops this branch can push commits but neither tags nor
+    # workflow dispatches, so this is its only trigger. Protect the
+    # `seip-production` environment with required reviewers to approve each run.
+    branches: ['claude/remote-control-5aclif']
+    paths: ['.github/deploy-request']
+  workflow_dispatch:
+    inputs:
+      smoke:
+        description: 'Run smoke-install after deploying (adds a test teacher + 1 item to the school)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-seip-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to the server
+    runs-on: ubuntu-latest
+    environment: seip-production
+    timeout-minutes: 60
+    env:
+      HOST: ${{ secrets.SEIP_DEPLOY_HOST }}
+      USER_: ${{ secrets.SEIP_DEPLOY_USER }}
+      PORT_: ${{ vars.SEIP_DEPLOY_PORT || secrets.SEIP_DEPLOY_PORT || '22' }}
+      ROOT: ${{ vars.SEIP_ROOT || secrets.SEIP_ROOT || '/opt/seip' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check configuration
+        env:
+          # Via env, not inlined in the script: the script text is echoed into
+          # the log, and only the key names are meant to be shown.
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: |
+          missing=""
+          for v in HOST USER_; do [ -n "${!v}" ] || missing="$missing $v"; done
+          [ -n "${{ vars.SEIP_DOMAIN || secrets.SEIP_DOMAIN }}" ] || missing="$missing SEIP_DOMAIN"
+          [ -n "${{ secrets.SEIP_DEPLOY_SSH_KEY }}" ] || missing="$missing secrets.SEIP_DEPLOY_SSH_KEY"
+          [ -n "${{ secrets.SEIP_DEPLOY_KNOWN_HOSTS }}" ] || missing="$missing secrets.SEIP_DEPLOY_KNOWN_HOSTS"
+          if [ -n "$missing" ]; then
+            # Variables are not secret: list the names this job can see, so a
+            # misnamed or misplaced setting is obvious. Secret values are never
+            # printed, and their names are not enumerated (the private key
+            # would not be reliably masked).
+            echo "variables visible to this job: $(printf '%s' "$VARS_JSON" | jq -r 'keys | join(", ")')"
+            echo "repository: ${{ github.repository }} — settings must be in Settings → Environments → seip-production (or repository-level) with EXACTLY these names"
+            echo "::error::environment seip-production is missing:$missing"
+            exit 1
+          fi
+      - name: SSH setup
+        env:
+          KEY: ${{ secrets.SEIP_DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.SEIP_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          # Values pasted into the GitHub form often carry a trailing newline or
+          # space, or a scheme / user@ / path. Normalise them, and say what was
+          # wrong without printing the value (it is a secret, so it is masked).
+          clean() { printf '%s' "$1" | tr -d '\r\n\t ' ; }
+          host_raw="$HOST"; host=$(clean "$HOST")
+          [ "$host" != "$host_raw" ] && echo "note: SEIP_DEPLOY_HOST had spaces or line breaks — removed"
+          case "$host" in *://*) host=${host#*://}; echo "note: SEIP_DEPLOY_HOST had a scheme (http:// / ssh://) — removed";; esac
+          case "$host" in *@*) host=${host#*@}; echo "note: SEIP_DEPLOY_HOST had a user@ prefix — removed (the user comes from SEIP_DEPLOY_USER)";; esac
+          case "$host" in */*) host=${host%%/*}; echo "note: SEIP_DEPLOY_HOST had a path — removed";; esac
+          case "$host" in *:*) p=${host##*:}; host=${host%:*}; echo "note: SEIP_DEPLOY_HOST had a :port — using it as the SSH port"; PORT_=$p;; esac
+          user=$(clean "$USER_"); port=$(clean "$PORT_")
+          if printf '%s' "$host" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+            echo "SEIP_DEPLOY_HOST is an IPv4 address"
+            case "$host" in 10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|127.*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*)
+              echo "::error::SEIP_DEPLOY_HOST is a private/LAN address — a GitHub runner on the internet cannot reach it. Use the server's public IP or a public DNS name (and forward the SSH port on the router)."; exit 1;; esac
+          else
+            n=$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u | wc -l)
+            echo "SEIP_DEPLOY_HOST is a name; public DNS returns $n IPv4 address(es) for it"
+            [ "$n" -gt 0 ] || { echo "::error::SEIP_DEPLOY_HOST does not resolve in public DNS — use the server's public IP or a name that resolves on the internet (a name known only inside the LAN will not work)."; exit 1; }
+          fi
+          install -m 700 -d ~/.ssh
+          (umask 077; printf '%s\n' "$KEY" | tr -d '\r' > ~/.ssh/id_deploy)
+          printf '%s\n' "$KNOWN" | tr -d '\r' > ~/.ssh/known_hosts
+          printf 'Host seip\n  HostName %s\n  User %s\n  Port %s\n  IdentityFile ~/.ssh/id_deploy\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n  ConnectTimeout 20\n' \
+            "$host" "$user" "$port" > ~/.ssh/config
+          # known_hosts lines name the host as scanned; also trust the same keys
+          # under the (possibly different) address we connect to.
+          awk -v h="$host" 'NF>=3 && $1 !~ /^#/ {print h, $2, $3}' ~/.ssh/known_hosts >> ~/.ssh/known_hosts
+          [ "$port" != 22 ] && awk -v h="[$host]:$port" 'NF>=3 && $1 !~ /^#/ {print h, $2, $3}' ~/.ssh/known_hosts >> ~/.ssh/known_hosts
+          # Diagnose the key without printing it. A form that collapses line
+          # breaks is repaired (the base64 body is re-wrapped at 70 columns).
+          k=~/.ssh/id_deploy
+          if grep -q '^ssh-\(ed25519\|rsa\) AAAA' "$k" && ! grep -q -- '-----BEGIN' "$k"; then
+            echo "::error::SEIP_DEPLOY_SSH_KEY holds the PUBLIC key (the .pub file, one line starting ssh-ed25519). Paste the PRIVATE file instead: 'sudo cat /home/seipdeploy/.ssh/seip_deploy' (no .pub), from -----BEGIN to -----END."; exit 1
+          fi
+          grep -q -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' "$k" || { echo "::error::SEIP_DEPLOY_SSH_KEY has no '-----BEGIN … PRIVATE KEY-----' line — paste the whole private key file, first line to last."; exit 1; }
+          grep -q -- '-----END [A-Z ]*PRIVATE KEY-----' "$k" || { echo "::error::SEIP_DEPLOY_SSH_KEY has no '-----END … PRIVATE KEY-----' line — the paste was cut short; copy to the very last line."; exit 1; }
+          if [ "$(grep -c . "$k")" -le 2 ]; then
+            echo "note: the key's line breaks were lost in the form — re-wrapping it"
+            kind=$(grep -o -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' "$k" | head -1 | sed 's/-----BEGIN \(.*\)-----/\1/')
+            body=$(tr -d '\n' < "$k" | sed -e "s/.*-----BEGIN $kind-----//" -e "s/-----END $kind-----.*//" | tr -d ' \t')
+            { echo "-----BEGIN $kind-----"; printf '%s' "$body" | fold -w 70; echo; echo "-----END $kind-----"; } | grep . > "$k.fixed"
+            mv "$k.fixed" "$k"; chmod 600 "$k"
+          fi
+          if ! err=$(ssh-keygen -y -P '' -f "$k" 2>&1 >/dev/null); then
+            case "$err" in
+              *passphrase*) echo "::error::SEIP_DEPLOY_SSH_KEY is protected by a passphrase — make a key without one: ssh-keygen -t ed25519 -N \"\" -f seip_deploy";;
+              *) echo "::error::SEIP_DEPLOY_SSH_KEY could not be read as a private key ($(printf '%s' "$err" | head -1 | sed 's#/home/runner[^ ]*#<key>#g')). Paste the whole private key file again, unchanged.";;
+            esac
+            exit 1
+          fi
+          echo "SEIP_DEPLOY_SSH_KEY is a valid private key $(ssh-keygen -l -f "$k" | awk '{print $NF}')"
+          echo "SSH port $port"
+          timeout 25 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null \
+            || { echo "::error::cannot open TCP port $port on the server from the internet — open/forward the SSH port in the firewall/router"; exit 1; }
+          ssh seip 'docker compose version && openssl version && curl --version | head -1'
+      - name: Upload this commit as a release
+        run: |
+          # git archive = tracked files only: no .env, no uploads, no local state.
+          git archive --format=tar HEAD | ssh seip "set -e; d=$ROOT/releases/$GITHUB_SHA; mkdir -p \$d && tar -x -C \$d"
+      - name: Install / update on the server
+        id: install
+        env:
+          SEIP_ADMIN_PASSWORD: ${{ secrets.SEIP_ADMIN_PASSWORD }}
+        run: |
+          set -o pipefail   # a failed remote install must fail this step, not tee
+          # Values travel on stdin, never in the remote command line (visible in ps).
+          {
+            printf 'export SEIP_ROOT=%q SEIP_RELEASE=%q SEIP_DOMAIN=%q SEIP_ACME_EMAIL=%q SEIP_EDGE=%q\n' \
+              "$ROOT" "$GITHUB_SHA" "${{ vars.SEIP_DOMAIN || secrets.SEIP_DOMAIN }}" "${{ vars.SEIP_ACME_EMAIL || secrets.SEIP_ACME_EMAIL }}" "${{ vars.SEIP_EDGE || secrets.SEIP_EDGE || 'caddy' }}"
+            printf 'export SEIP_SCHOOL_CODE=%q SEIP_SCHOOL_NAME=%q SEIP_ADMIN_EMAIL=%q SEIP_ADMIN_PASSWORD=%q\n' \
+              "${{ vars.SEIP_SCHOOL_CODE || secrets.SEIP_SCHOOL_CODE }}" "${{ vars.SEIP_SCHOOL_NAME || secrets.SEIP_SCHOOL_NAME }}" "${{ vars.SEIP_ADMIN_EMAIL || secrets.SEIP_ADMIN_EMAIL }}" "$SEIP_ADMIN_PASSWORD"
+            printf 'export SEIP_WEB_PORT=%q SEIP_PUBLIC_ORIGIN=%q\n' "${{ vars.SEIP_WEB_PORT || secrets.SEIP_WEB_PORT }}" "${{ vars.SEIP_PUBLIC_ORIGIN || secrets.SEIP_PUBLIC_ORIGIN }}"
+            cat scripts/ops/deploy-remote.sh
+          } | ssh seip 'bash -s' | tee deploy.log
+          origin=$(grep -E '^SEIP_PUBLIC_ORIGIN=' deploy.log | tail -1 | cut -d= -f2-)
+          [ -n "$origin" ] || { echo "::error::the server did not report its public origin"; exit 1; }
+          echo "origin=$origin" >> "$GITHUB_OUTPUT"
+          echo "### Installed: $origin" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@v4
+        if: ${{ github.event_name == 'push' || inputs.smoke }}
+        with:
+          node-version: 24
+      - name: Use it through the public origin, as a browser would
+        if: ${{ github.event_name == 'push' || inputs.smoke }}
+        env:
+          SEIP_ADMIN_EMAIL: ${{ vars.SEIP_ADMIN_EMAIL || secrets.SEIP_ADMIN_EMAIL }}
+          SEIP_ADMIN_PASSWORD: ${{ secrets.SEIP_ADMIN_PASSWORD }}
+          ORIGIN: ${{ steps.install.outputs.origin }}
+        run: |
+          # A first certificate (caddy) may take a minute.
+          for i in $(seq 1 36); do
+            curl -sf -o /dev/null "$ORIGIN/" && break
+            [ "$i" = 36 ] && { echo "::error::$ORIGIN/ unreachable from the internet — DNS, firewall/port, or the edge"; exit 1; }
+            sleep 5
+          done
+          node scripts/ops/smoke-install.mjs --base="$ORIGIN" --scan-wait-ms=600000
+      - name: Server state
+        if: ${{ always() && steps.install.outcome != 'skipped' }}
+        run: ssh seip "cd $ROOT/current && docker compose -f docker-compose.staging.yml --env-file $ROOT/shared/.env.staging --profile edge ps -a" || true
+          tail -40 deploy.log 2>/dev/null || true

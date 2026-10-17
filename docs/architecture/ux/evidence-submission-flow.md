@@ -16,7 +16,7 @@ Companions: [`evidence-flow.mmd`](./evidence-flow.mmd) · [`screen-states.md`](.
 | S3 | รายละเอียดขั้นต่ำ | การ์ดหมวด 5 ใบ (จาก categories พร้อม validation meta) + ชื่อ auto-fill | `listEvidenceCategories` |
 | S4 | ผูกตัวชี้วัด (ข้ามได้) | chips ตัวชี้วัดจาก framework ที่ตรงกับผู้ใช้ ค้นหา/หมวดหมู่ตามด้าน | `listFrameworks`, `getFramework` |
 | S5 | ตรวจ + PDPA | สรุป + ข้อความแจ้งข้อมูลส่วนบุคคล (ดูล่าง) | — |
-| S6 | อัปโหลด | สร้าง evidence → initiate → PUT ตรงสู่ storage (progress, พื้นหลัง, resume) → complete | `createEvidence`, `initiateFileUpload`, `completeFileUpload` |
+| S6 | อัปโหลด | สร้าง evidence → เปิด upload session → PUT ตรงสู่ storage (≤16 MiB ครั้งเดียว, ใหญ่กว่านั้น multipart ทีละ 16 MiB พร้อม SHA-256 ต่อ part; resume จาก `parts_received`) → complete | `createEvidence`, `createUpload`, `signUploadParts`, `getUpload`, `completeUpload` (contract 4.0.0, CCR-017) |
 | S7 | ส่งแล้ว | การ์ดสรุป + สถานะสแกน + ปุ่ม "ผูกตัวชี้วัดเพิ่ม" | `createMapping` (จาก S4/S7) |
 
 **Client-side validation ก่อนอัปโหลด** ใช้ metadata จาก `EvidenceCategory` (`allowed_mime_types`, `max_byte_size`, `max_duration_seconds`) — ผู้ใช้รู้ว่าวิดีโอยาวเกิน 10 นาที *ก่อน* เสียเวลาอัปโหลด; server ยังคง validate ซ้ำ (UPL-001..003)

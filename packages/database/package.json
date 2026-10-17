@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Prisma client + tenancy-safe repositories implementing entity-dictionary.md (module-boundaries.md). Owned by apps/api and apps/worker only — apps/web never imports this.",
+  "description": "Prisma client + tenancy-safe repositories implementing entity-dictionary.md (module-boundaries.md). Owned by apps/api and apps/worker only \u2014 apps/web never imports this.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
@@ -12,7 +12,8 @@
     "test:integration": "npm run build && node --env-file-if-exists=../../.env --test \"test/*.test.mjs\""
   },
   "dependencies": {
-    "@prisma/client": "^6.19.3",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
     "@seip/auth": "*",
     "@seip/backend-shared": "*"
   },

@@ -1,6 +1,19 @@
 # SEIP Domain Event Contract
 # version: 1.0.0 — LOCKED by SEIP-ARCH-002 (2026-07-17); ratified by the user on merge of that PR.
 # version: 1.1.0 — CCR-005 (additive): report.generated + ai.suggestion.created.
+# version: 1.2.0 — CCR-012 (additive): evidence.file.scan_completed payload gains
+#   scan_status=unscanned, emitted when no scanner ran (the previous stub reported
+#   `clean` for everything it did not recognise by filename).
+# version: 1.3.0 — CCR-016 (additive): report.approved moves OUT of `deferred:`
+#   and gains a producer — the approval workflow now exists.
+#
+#   NOTE (CCR-016): the `version:` field below still read 1.1.0 when this change
+#   was made. CCR-012 added its line to this log but never bumped the field, so
+#   the two had been out of step since 2026-07-18. Corrected here to 1.3.0 (the
+#   log is the record of what actually shipped). The 2026-07-19 audit called this
+#   out as a real gap: these version headers are hand-maintained comments and
+#   nothing asserts they match the field — unlike openapi.yaml, whose bump the
+#   oasdiff gate checks. Worth a gate of its own.
 # Protected contract (contract-policy.md): changes require a CCR + version bump.
 # Adding an event or an optional payload field is additive (1.x); removing or
 # retyping a field, or changing an event name, is breaking (2.0).
@@ -10,7 +23,14 @@
 # change; a dispatcher relays to consumers (notification, projections).
 # No dual-writes inside request handlers.
 
-version: 1.1.0
+# version: 2.0.0 — CCR-017 (BREAKING): evidence.mapping.suggested/confirmed/rejected retired
+#   (the states no longer exist); evidence.mapping.revoked → mapping.revoked; added
+#   evidence.file.verified, analysis.completed/failed, mapping.owner_confirmed/validated/returned,
+#   export.ready. evidence.created carries owner_person_id.
+# version: 2.1.0 — CCR-028 (additive): assignment.comment.created.
+# version: 2.2.0 — CCR-028 decision A: the notification consumer joins assignment.comment.created.
+# version: 2.3.0 — CCR-029 (additive): subject_request.created / subject_request.decided.
+version: 2.3.0
 status: locked
 locked_at: 2026-07-17
 
@@ -28,35 +48,55 @@ envelope:
 
 events:
   evidence.created:
-    payload: { evidence_id: uuid, owner_personnel_id: uuid, category_code: string }
+    payload: { evidence_id: uuid, owner_person_id: uuid, category_code: string }
     consumers: [audit-projection]
 
   evidence.file.registered:
     payload: { evidence_id: uuid, file_id: uuid, content_type: string, byte_size: integer }
     consumers: [scan-worker]
-    note: Emitted by completeFileUpload; triggers async virus scan + video probe.
+    note: Emitted by completeUpload; triggers async verify (SHA-256 re-hash) + virus scan + media probe.
 
   evidence.file.scan_completed:
-    payload: { evidence_id: uuid, file_id: uuid, scan_status: 'enum[clean, blocked]' }
+    payload: { evidence_id: uuid, file_id: uuid, scan_status: 'enum[clean, unscanned, blocked]' }
     consumers: [notification, audit-projection]
-    note: blocked → file quarantined (UPL-006); owner notified.
+    note: >-
+      blocked → file quarantined (UPL-006); owner notified. unscanned → processed
+      but no scanner ran (CCR-012), served like clean; a notification consumer
+      should not word this as "ปลอดภัย".
 
-  evidence.mapping.suggested:
-    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, mapping_source: 'enum[human, ai_suggested]' }
+  evidence.file.verified:
+    payload: { evidence_id: uuid, file_id: uuid, sha256_matched: boolean }
+    consumers: [analysis-pipeline, audit-projection]
+    note: The worker re-hashed the stored object. false → file blocked (size or hash mismatch).
+
+  analysis.completed:
+    payload: { analysis_id: uuid, evidence_id: uuid, status: 'enum[succeeded, degraded]', suggestion_count: integer }
     consumers: [notification]
-    note: Fired for both human createMapping and AI suggestMappings rows.
 
-  evidence.mapping.confirmed:
-    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, confirmed_by_user_id: uuid }
+  analysis.failed:
+    payload: { analysis_id: uuid, evidence_id: uuid, error_code: string }
+    consumers: [notification]
+
+  mapping.owner_confirmed:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, mapping_source: 'enum[ai_accepted, manual]' }
     consumers: [notification, audit-projection]
 
-  evidence.mapping.rejected:
-    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, rationale: string|null }
-    consumers: [notification]
+  mapping.validated:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, validated_by_user_id: uuid, validator_role: 'enum[director, committee]' }
+    consumers: [notification, audit-projection]
 
-  evidence.mapping.revoked:
+  mapping.returned:
+    payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid, validated_by_user_id: uuid }
+    consumers: [notification, audit-projection]
+    note: The owner is notified; return_note is read from the mapping, never copied into the event.
+
+  mapping.revoked:
     payload: { mapping_id: uuid, evidence_id: uuid, indicator_id: uuid }
     consumers: [audit-projection]
+
+  export.ready:
+    payload: { export_id: uuid, kind: 'enum[dpa_pack, pa2_workbook, portfolio_portable]', person_id: uuid|null }
+    consumers: [notification]
 
   assignment.created:
     payload: { assignment_id: uuid, round_id: uuid, evaluatee_personnel_id: uuid, committee_user_ids: 'uuid[3]' }
@@ -84,10 +124,44 @@ events:
     note: Emitted by report.generate worker when payload + section_refs are written.
 
   ai.suggestion.created:
-    payload: { evidence_id: uuid, mapping_ids: 'uuid[]', provider: 'enum[local_heuristic]', suggestion_count: integer }
+    payload: { evidence_id: uuid, analysis_id: uuid, suggestion_count: integer }
     consumers: [notification, audit-projection]
-    note: Batch summary after suggestMappings; individual rows also emit evidence.mapping.suggested.
+    note: Batch summary when an analysis writes suggestions (CCR-017). Suggestions are not mappings until the owner accepts.
+
+  assignment.comment.created:
+    payload: { assignment_id: uuid, comment_id: uuid, indicator_id: uuid, kind: 'enum[comment, request_info, reply]' }
+    consumers: [notification, audit-projection]
+    note: >-
+      CCR-028. The body is never copied into the event. Notification (owner decision A,
+      2026-10-14; NotificationKind committee_comment): a comment or request_info notifies
+      the evaluatee, a reply notifies the author of its parent; never the actor.
+
+  subject_request.created:
+    payload: { request_id: uuid, area_id: uuid, request_type: string }
+    consumers: [notification, audit-projection]
+    note: CCR-029. Notifies the area's DPOs. No details text in the event.
+
+  subject_request.decided:
+    payload: { request_id: uuid, status: 'enum[fulfilling, approved, completed, rejected]' }
+    consumers: [notification, audit-projection]
+    note: >-
+      CCR-029. Notifies the person. Emitted on approve / reject / complete, and when an
+      access / portability request completes because its export became ready.
+
+  report.approved:
+    payload: { report_id: uuid, cycle_id: uuid, subject_personnel_id: uuid, approver_user_id: uuid, step_code: string }
+    consumers: [notification, audit-projection]
+    note: >
+      CCR-016. Emitted when a report transitions pending_approval → approved, in
+      the same transaction as the status change and the Approval row. Carries the
+      approver so a notification can name who signed.
+
+      Only `approved` is an event. Returning a report for rework is deliberately
+      NOT one: it is an internal step in a document's drafting, not something the
+      rest of the system needs to react to, and every event declared without a
+      consumer is a promise nobody keeps. NOTE that today outbox.dispatch is an
+      acknowledged no-op, so this event is durably recorded and consumed by
+      nothing — a known, separate gap, not something CCR-016 fixes.
 
 deferred:
-  report.approved: approval workflow UI not yet shipped
   notification.delivered: channel choice pending
