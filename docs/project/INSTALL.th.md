@@ -119,6 +119,25 @@ workflow [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) �
 
 อัปเดตเวอร์ชันครั้งต่อไปก็รัน workflow เดิม — migration รันเอง, ข้อมูลและรหัสผ่านเดิมคงอยู่, เก็บ release ย้อนหลัง 3 ชุดใน `/opt/seip/releases`.
 
+## 6c. ติดตั้งด้วยมือบนเซิร์ฟเวอร์ (ไม่ต้องใช้ SSH key ใน GitHub)
+
+สคริปต์เดียวกับที่ workflow ใช้ ([`scripts/ops/deploy-remote.sh`](../../scripts/ops/deploy-remote.sh)) รันบนเซิร์ฟเวอร์ได้ตรง ๆ
+ตัวอย่าง aischool.cnppai.com หลัง NPM (รันเป็น root หรือผู้ใช้ในกลุ่ม `docker`):
+
+```bash
+R=/DATA/AppData/www/aischool; V=$(date +%Y%m%d%H%M)
+git clone --depth 1 -b claude/remote-control-5aclif https://github.com/sooksun/aischool.git "$R/releases/$V"
+read -rsp 'รหัสผ่านผู้ดูแลระบบ: ' SEIP_ADMIN_PASSWORD; echo; export SEIP_ADMIN_PASSWORD
+SEIP_ROOT=$R SEIP_RELEASE=$V SEIP_DOMAIN=aischool.cnppai.com SEIP_EDGE=none SEIP_WEB_PORT=9987 \
+SEIP_PUBLIC_ORIGIN=https://aischool.cnppai.com SEIP_SCHOOL_CODE=SCH-001 SEIP_SCHOOL_NAME='โรงเรียนบ้านพญาไพร' \
+SEIP_ADMIN_EMAIL=<อีเมลผู้ดูแล> bash "$R/releases/$V/scripts/ops/deploy-remote.sh"
+```
+
+(repo เป็น private ให้ใช้ personal access token เป็นรหัสผ่านตอน `git clone`) ต้องจบด้วย `SEIP_PUBLIC_ORIGIN=https://aischool.cnppai.com`;
+จากนั้นตรวจทั้งระบบด้วย `SEIP_ADMIN_EMAIL=<อีเมลผู้ดูแล> node "$R/current/scripts/ops/smoke-install.mjs" --base=https://aischool.cnppai.com`
+(รหัสผ่านอ่านจาก `SEIP_ADMIN_PASSWORD` ที่ export ไว้; ต้องมี Node 22 — หรือรันจากเครื่องอื่นที่มี Node ก็ได้).
+อัปเดตครั้งต่อไปทำซ้ำคำสั่งเดิม (ได้ release ใหม่ ข้อมูลเดิมคงอยู่).
+
 ## 7. หลังติดตั้ง
 
 - **สำรองข้อมูล**: service `backup` สำรองและทดลองกู้คืนทุกวันไปที่ `BACKUP_HOST_DIR` — ชี้ไปดิสก์อื่น และคัดลอกออกนอกเครื่อง (runbook §5).
