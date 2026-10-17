@@ -70,7 +70,16 @@ jobs:
           [ -n "${{ vars.SEIP_DOMAIN }}" ] || missing="$missing vars.SEIP_DOMAIN"
           [ -n "${{ secrets.SEIP_DEPLOY_SSH_KEY }}" ] || missing="$missing secrets.SEIP_DEPLOY_SSH_KEY"
           [ -n "${{ secrets.SEIP_DEPLOY_KNOWN_HOSTS }}" ] || missing="$missing secrets.SEIP_DEPLOY_KNOWN_HOSTS"
-          [ -z "$missing" ] || { echo "::error::environment seip-production is missing:$missing"; exit 1; }
+          if [ -n "$missing" ]; then
+            # Variables are not secret: list the names this job can see, so a
+            # misnamed or misplaced setting is obvious. Secret values are never
+            # printed, and their names are not enumerated (the private key
+            # would not be reliably masked).
+            echo "variables visible to this job: $(echo '${{ toJSON(vars) }}' | jq -r 'keys | join(", ")')"
+            echo "repository: ${{ github.repository }} — settings must be in Settings → Environments → seip-production (or repository-level) with EXACTLY these names"
+            echo "::error::environment seip-production is missing:$missing"
+            exit 1
+          fi
       - name: SSH setup
         env:
           KEY: ${{ secrets.SEIP_DEPLOY_SSH_KEY }}
@@ -124,6 +133,6 @@ jobs:
           done
           node scripts/ops/smoke-install.mjs --base="$ORIGIN" --scan-wait-ms=600000
       - name: Server state
-        if: always()
+        if: ${{ always() && steps.install.outcome != 'skipped' }}
         run: ssh seip "cd $ROOT/current && docker compose -f docker-compose.staging.yml --env-file $ROOT/shared/.env.staging --profile edge ps -a" || true
           tail -40 deploy.log 2>/dev/null || true
