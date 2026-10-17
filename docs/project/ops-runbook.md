@@ -30,7 +30,7 @@ Same architecture everywhere: **Node API + SPA + PostgreSQL 18 + S3 API (Seaweed
 | `JWT_SECRET` | api | ≥ 32 characters; rotating invalidates sessions |
 | `S3_ENDPOINT` | api, worker | Staging internal: `http://seaweedfs:8333` |
 | `SEIP_PUBLIC_ORIGIN` → api `S3_PUBLIC_ENDPOINT` | api (presigning), web gateway | **Required.** The exact URL users open (`https://seip.school.ac.th`, or `http://127.0.0.1:8080` for a first bring-up). Presigned upload/download URLs are signed for it; `web` forwards `/<bucket>/` from it to SeaweedFS with Host intact. Wrong value = every upload fails with a signature error |
-| `SEIP_WEB_BIND` | web | Host address the gateway publishes on (default `127.0.0.1:8080`, behind the edge proxy) |
+| `SEIP_WEB_BIND` / `SEIP_API_BIND` | web / api | Host addresses published (defaults `127.0.0.1:8080` / `127.0.0.1:3001`). `deploy-remote.sh` picks free ports on first deploy (web from 8090, api from 3101) and records them |
 | `HOST` | api | Listen address. Staging compose sets `0.0.0.0` — loopback inside a container is unreachable from `web` and the published port |
 | `S3_BUCKET` | api, worker, storage-init | Private bucket; no anonymous read |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | api, worker, SeaweedFS identity (staging) | Treat as root secrets; separate app keys later if needed |

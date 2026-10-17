@@ -101,7 +101,13 @@ workflow [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) �
    - Secrets: `SEIP_DEPLOY_HOST`, `SEIP_DEPLOY_USER`, `SEIP_DEPLOY_SSH_KEY` (private key), `SEIP_DEPLOY_KNOWN_HOSTS`
      (ผลของ `ssh-keyscan -t ed25519 <host>` ที่คุณตรวจแล้ว), `SEIP_ADMIN_PASSWORD`
    - Variables: `SEIP_DOMAIN`, `SEIP_ADMIN_EMAIL`, `SEIP_SCHOOL_CODE`, `SEIP_SCHOOL_NAME` (และถ้าต้องการ `SEIP_DEPLOY_PORT`, `SEIP_ACME_EMAIL`)
-3. **Actions → deploy → Run workflow** (หรือ push tag `deploy-…`). ต้องจบด้วย `✓ https://… is installed and working`.
+   - เครื่องที่มีเว็บอื่นใช้พอร์ต 80/443 อยู่แล้ว (เช่น CasaOS) ให้ตั้ง `SEIP_EDGE=none`: ระบบจะเปิดเว็บบน**พอร์ตว่างพอร์ตแรกตั้งแต่ 8090**
+     และใช้ origin `http://<SEIP_DOMAIN>:<พอร์ต>` (หรือตั้ง `SEIP_WEB_PORT` เอง / `SEIP_PUBLIC_ORIGIN` ถ้ามี reverse proxy อยู่หน้าเครื่อง).
+     ติดตั้งที่ path อื่นด้วย `SEIP_ROOT`
+   - ตัวอย่างเซิร์ฟเวอร์ cnppai.com: `SEIP_DOMAIN=cnppai.com`, `SEIP_ROOT=/DATA/AppData/www/aischool`, `SEIP_EDGE=none`
+     — ผู้ใช้ deploy ต้องเขียน path นี้ได้ และ firewall ต้องเปิดพอร์ตที่ระบบเลือก (ดูในหน้าสรุปของ workflow)
+3. **Actions → deploy → Run workflow** (หรือ push tag `deploy-…`). ต้องจบด้วย `✓ <origin> is installed and working`
+   และหน้าสรุปของ run จะแสดง URL ที่ติดตั้ง.
 
 อัปเดตเวอร์ชันครั้งต่อไปก็รัน workflow เดิม — migration รันเอง, ข้อมูลและรหัสผ่านเดิมคงอยู่, เก็บ release ย้อนหลัง 3 ชุดใน `/opt/seip/releases`.
 

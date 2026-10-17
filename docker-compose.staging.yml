@@ -129,7 +129,7 @@ services:
       FEATURE_SCORING: ${FEATURE_SCORING:-false}
     # Bind localhost only if you must hit the API without nginx during bring-up.
     ports:
-      - "127.0.0.1:3001:3001"
+      - "${SEIP_API_BIND:-127.0.0.1:3001}:3001"
     healthcheck:
       # TCP check only — avoids depending on a /health route (not required by contract).
       test:

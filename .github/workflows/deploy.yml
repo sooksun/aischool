@@ -14,7 +14,12 @@
 #            SEIP_SCHOOL_CODE         e.g. SCH-001      SEIP_SCHOOL_NAME  (optional)
 #            SEIP_DEPLOY_PORT         optional, default 22
 #            SEIP_ACME_EMAIL          optional, TLS certificate contact
-#            SEIP_EDGE                optional, "caddy" (default) or "none"
+#            SEIP_EDGE                optional, "caddy" (default: HTTPS on 80/443) or
+#                                     "none" (publish web on a free port; origin
+#                                     http://SEIP_DOMAIN:<port>, or SEIP_PUBLIC_ORIGIN)
+#            SEIP_ROOT                optional, install directory (default /opt/seip)
+#            SEIP_WEB_PORT            optional, web port on the host (default: first free from 8090)
+#            SEIP_PUBLIC_ORIGIN       optional, the URL users open if a proxy is already in front
 #
 # The server needs Docker Engine + Compose v2, openssl and curl. Secrets for the
 # stack itself (database, JWT, storage) are generated ON the server at the first
@@ -48,7 +53,7 @@ jobs:
       HOST: ${{ secrets.SEIP_DEPLOY_HOST }}
       USER_: ${{ secrets.SEIP_DEPLOY_USER }}
       PORT_: ${{ vars.SEIP_DEPLOY_PORT || '22' }}
-      ROOT: /opt/seip
+      ROOT: ${{ vars.SEIP_ROOT || '/opt/seip' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check configuration
@@ -75,34 +80,43 @@ jobs:
           # git archive = tracked files only: no .env, no uploads, no local state.
           git archive --format=tar HEAD | ssh seip "set -e; d=$ROOT/releases/$GITHUB_SHA; mkdir -p \$d && tar -x -C \$d"
       - name: Install / update on the server
+        id: install
         env:
           SEIP_ADMIN_PASSWORD: ${{ secrets.SEIP_ADMIN_PASSWORD }}
         run: |
+          set -o pipefail   # a failed remote install must fail this step, not tee
           # Values travel on stdin, never in the remote command line (visible in ps).
           {
             printf 'export SEIP_ROOT=%q SEIP_RELEASE=%q SEIP_DOMAIN=%q SEIP_ACME_EMAIL=%q SEIP_EDGE=%q\n' \
               "$ROOT" "$GITHUB_SHA" "${{ vars.SEIP_DOMAIN }}" "${{ vars.SEIP_ACME_EMAIL }}" "${{ vars.SEIP_EDGE || 'caddy' }}"
             printf 'export SEIP_SCHOOL_CODE=%q SEIP_SCHOOL_NAME=%q SEIP_ADMIN_EMAIL=%q SEIP_ADMIN_PASSWORD=%q\n' \
               "${{ vars.SEIP_SCHOOL_CODE }}" "${{ vars.SEIP_SCHOOL_NAME }}" "${{ vars.SEIP_ADMIN_EMAIL }}" "$SEIP_ADMIN_PASSWORD"
+            printf 'export SEIP_WEB_PORT=%q SEIP_PUBLIC_ORIGIN=%q\n' "${{ vars.SEIP_WEB_PORT }}" "${{ vars.SEIP_PUBLIC_ORIGIN }}"
             cat scripts/ops/deploy-remote.sh
-          } | ssh seip 'bash -s'
+          } | ssh seip 'bash -s' | tee deploy.log
+          origin=$(grep -E '^SEIP_PUBLIC_ORIGIN=' deploy.log | tail -1 | cut -d= -f2-)
+          [ -n "$origin" ] || { echo "::error::the server did not report its public origin"; exit 1; }
+          echo "origin=$origin" >> "$GITHUB_OUTPUT"
+          echo "### Installed: $origin" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/setup-node@v4
         if: ${{ github.event_name == 'push' || inputs.smoke }}
         with:
           node-version: 24
-      - name: Use it over HTTPS, as a browser would
+      - name: Use it through the public origin, as a browser would
         if: ${{ github.event_name == 'push' || inputs.smoke }}
         env:
           SEIP_ADMIN_EMAIL: ${{ vars.SEIP_ADMIN_EMAIL }}
           SEIP_ADMIN_PASSWORD: ${{ secrets.SEIP_ADMIN_PASSWORD }}
+          ORIGIN: ${{ steps.install.outputs.origin }}
         run: |
-          # The certificate may take a minute on the first deploy.
+          # A first certificate (caddy) may take a minute.
           for i in $(seq 1 36); do
-            curl -sf -o /dev/null "https://${{ vars.SEIP_DOMAIN }}/" && break
-            [ "$i" = 36 ] && { echo "::error::https://${{ vars.SEIP_DOMAIN }}/ unreachable — DNS, ports 80/443, or the edge"; exit 1; }
+            curl -sf -o /dev/null "$ORIGIN/" && break
+            [ "$i" = 36 ] && { echo "::error::$ORIGIN/ unreachable from the internet — DNS, firewall/port, or the edge"; exit 1; }
             sleep 5
           done
-          node scripts/ops/smoke-install.mjs --base="https://${{ vars.SEIP_DOMAIN }}" --scan-wait-ms=600000
+          node scripts/ops/smoke-install.mjs --base="$ORIGIN" --scan-wait-ms=600000
       - name: Server state
         if: always()
         run: ssh seip "cd $ROOT/current && docker compose -f docker-compose.staging.yml --env-file $ROOT/shared/.env.staging --profile edge ps -a" || true
+          tail -40 deploy.log 2>/dev/null || true
