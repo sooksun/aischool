@@ -2405,3 +2405,51 @@ tasks:
       - "offered to evaluator / director only"   # DONE — committee_test
       - "open rounds only; framework order; provenance; read-only; PERM-003 message"  # DONE — committee_test
 
+  - id: SEIP-OPS-006
+    title: "Installable staging stack — fixes found by actually installing it, plus a deploy-smoke CI gate"
+    status: review              # 2026-10-17 — owner asked "แก้ไข พร้อม ติดตั้งให้ใช้งานได้จริง"
+    branch: claude/remote-control-5aclif
+    dependencies: [SEIP-OPS-003, SEIP-OPS-004]
+    primary_paths:
+      - .dockerignore
+      - infra/docker/Dockerfile.api
+      - infra/docker/Dockerfile.worker
+      - infra/docker/Dockerfile.web
+      - infra/docker/nginx-web.conf.template
+      - docker-compose.staging.yml
+      - .env.staging.example
+      - apps/api/src/env.ts
+      - apps/api/src/index.ts
+      - apps/api/src/lib/s3.ts
+      - scripts/ops/smoke-install.mjs
+      - .github/workflows/ci.yml
+      - docs/project/INSTALL.th.md
+      - docs/project/ops-runbook.md
+    notes: >
+      No workflow had ever built infra/docker, and installing it turned up six
+      faults, each of which alone made the stack unusable or unsafe:
+      (1) no .dockerignore — COPY . . baked .env/.env.staging secrets, host
+      node_modules and backups into image layers; (2) the api listened on
+      127.0.0.1 inside its container, unreachable from web and the published port
+      (its TCP healthcheck from inside still passed) — now HOST, 0.0.0.0 in compose;
+      (3) presigned URLs were signed for http://seaweedfs:8333, a name no browser
+      resolves — now S3_PUBLIC_ENDPOINT (= SEIP_PUBLIC_ORIGIN) signs, and the web
+      container forwards /<bucket>/ to seaweedfs with Host intact (^~ so the
+      static-asset regex never captures an evidence .jpg); (4) web served the SPA
+      only, so without an edge proxy nothing could sign in — it now proxies /api/
+      too; (5) the runtime images lacked docs/contracts, which backend-shared reads
+      at import — api and worker crashed on boot; (6) assets/fonts for the PA PDF
+      was missing likewise. Also: an `ops` profile service runs seed /
+      provision-school / bootstrap-admin on the internal network (the runbook used
+      to say "from a one-shot container, or the host" and left it there).
+      No contract change (env and deployment only). Image builds cannot run in
+      the dev sandbox, so each Dockerfile stage was reproduced natively and the
+      gateway run in stock nginx; the deploy-smoke gate is the real-image proof.
+    acceptance_criteria:
+      - "no secrets / node_modules in the build context"  # DONE — .dockerignore
+      - "api reachable from other containers and the published port"  # DONE — HOST; deploy smoke
+      - "presigned upload + download work from the browser origin"  # DONE — presign-public-endpoint.test, smoke-install via gateway
+      - "api and worker runtime images boot"  # DONE locally (runtime-stage reproduction); CI deploy smoke
+      - "seed + first admin on a docker install without publishing the DB"  # DONE — ops service
+      - "CI builds the images and drives a fresh install end to end"  # DONE — Gate: deploy smoke (first run pending at time of writing)
+      - "Thai install guide"  # DONE — docs/project/INSTALL.th.md

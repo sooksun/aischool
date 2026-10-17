@@ -7,7 +7,10 @@ On-prem / staging layout for SEIP. Architecture decisions: **ADR-0011** (hosting
 | `docker/Dockerfile.api` | Multi-stage image for `apps/api` (+ migrate on start) |
 | `docker/Dockerfile.worker` | Multi-stage image for `apps/worker` (async jobs) |
 | `docker/Dockerfile.web` | Static SPA image for `apps/web` |
-| `docker/nginx-web.conf` | Static file server inside the web image |
+| `docker/nginx-web.conf.template` | The web container: SPA + `/api/` → api + `/<bucket>/` → seaweedfs (browser origin for presigned URLs) |
+| `../.dockerignore` | Keeps `.env*`, `node_modules`, backups out of every image |
+| `../scripts/ops/smoke-install.mjs` | End-to-end check of an install through the public origin (CI gate **deploy smoke**) |
+| `../docs/project/INSTALL.th.md` | Step-by-step install guide (Thai) |
 | `nginx/seip-staging.conf.example` | **Edge** TLS reverse proxy + rate limit + security headers (OPS-004) |
 | `nginx/http-rate-zones.conf.example` | `limit_req_zone` lines for main `http {}` block |
 | `../docker-compose.staging.yml` | Staging stack: postgres, seaweedfs, migrate, api, worker, web, clamav, backup |
@@ -34,7 +37,8 @@ Then point a host nginx at `infra/nginx/seip-staging.conf.example` (or terminate
 | seaweedfs | no (internal) | S3-compatible evidence storage |
 | api | localhost:3001 | HTTP API (`/api/v1`) |
 | worker | no | Scan, duration, outbox, GC |
-| web | localhost:8080 | SPA; edge nginx proxies `/api` → api |
+| web | localhost:8080 | SPA + gateway: `/api/` → api, `/seip-evidence/` → seaweedfs; edge nginx terminates TLS in front |
+| ops | no (`--profile ops`, `run --rm`) | Seed, provision-school, bootstrap-admin |
 
 ## Ownership
 

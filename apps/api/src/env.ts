@@ -6,11 +6,19 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   S3_ENDPOINT: z.string().url(),
+  /** The origin browsers reach the store at, used ONLY to sign presigned URLs.
+   * Unset = S3_ENDPOINT (dev, where both are localhost). In a container stack
+   * S3_ENDPOINT is an internal name (http://seaweedfs:8333) no browser can
+   * resolve; point this at the public origin whose /<bucket>/ path the web
+   * gateway forwards to the store with Host preserved (the signature covers it). */
+  S3_PUBLIC_ENDPOINT: z.string().url().optional(),
   S3_BUCKET: z.string().min(1),
   S3_ACCESS_KEY: z.string().min(1),
   S3_SECRET_KEY: z.string().min(1),
   S3_REGION: z.string().default('us-east-1'),
   PORT: z.coerce.number().int().positive().default(3001),
+  /** Listen address (index.ts). 0.0.0.0 inside a container. */
+  HOST: z.string().min(1).default('127.0.0.1'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   /** ADR-0017: committee scoring and report approval are v2. Their routes are
    * registered only when this is true; the code stays compiled and tested. */

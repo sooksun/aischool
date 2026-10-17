@@ -112,9 +112,15 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3001"
+      # Loopback inside a container is unreachable from web and from the
+      # published port — the api must listen on all interfaces here.
+      HOST: 0.0.0.0
       DATABASE_URL: postgresql://seip_app:${SEIP_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET min 32 chars}
       S3_ENDPOINT: http://seaweedfs:8333
+      # Presigned URLs are followed by browsers, so they are signed for the
+      # public origin; web forwards /<bucket>/ from there to seaweedfs.
+      S3_PUBLIC_ENDPOINT: ${SEIP_PUBLIC_ORIGIN:?set SEIP_PUBLIC_ORIGIN (the URL users open, e.g. https://seip.school.ac.th)}
       S3_BUCKET: ${S3_BUCKET:-seip-evidence}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
@@ -204,8 +210,34 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+    environment:
+      # The one browser-facing origin (infra/docker/nginx-web.conf.template):
+      # the SPA, /api/ → api, /<bucket>/ → seaweedfs for presigned transfers.
+      SEIP_API_UPSTREAM: api:3001
+      SEIP_STORE_UPSTREAM: seaweedfs:8333
+      S3_BUCKET: ${S3_BUCKET:-seip-evidence}
     ports:
-      - "127.0.0.1:8080:80"
+      - "${SEIP_WEB_BIND:-127.0.0.1:8080}:80"
+    networks: [seip_internal]
+
+  # Operator one-shots, never started by `up` (profile "ops"). Same image as
+  # `migrate` — it has the scripts and the pinned toolchain — but connects as
+  # seip_app (DML only), which is all seeding and bootstrap need:
+  #   docker compose -f docker-compose.staging.yml --env-file .env.staging run --rm ops node prisma/seed.mjs
+  #   … run --rm ops node scripts/ops/provision-school.mjs --code=SCH-001 --name="…"
+  #   … run --rm -e SEIP_ADMIN_PASSWORD ops node scripts/ops/bootstrap-admin.mjs --email=… --name="…" --school=SCH-001
+  ops:
+    profiles: [ops]
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+      target: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://seip_app:${SEIP_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-seip}
+    command: ["node", "-e", "console.log('ops: pass a command, e.g. node prisma/seed.mjs')"]
     networks: [seip_internal]
 
   # Automated backups. Before this, ops-runbook §5 handed an operator two

@@ -25,9 +25,9 @@ import type { Env } from '../env.js';
 // `.env` (gitignored, SEC-REPO-1). Allowlisted by exact fingerprint in
 // .gitleaks.toml with the reasoning recorded there — contorting this code to
 // dodge a heuristic would cost more readability than the false positive costs.
-export function createS3Client(env: Env): S3Client {
+export function createS3Client(env: Env, endpoint: string = env.S3_ENDPOINT): S3Client {
   return new S3Client({
-    endpoint: env.S3_ENDPOINT,
+    endpoint,
     region: env.S3_REGION,
     forcePathStyle: true,
     credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY }, // gitleaks:allow
@@ -38,6 +38,13 @@ export function createS3Client(env: Env): S3Client {
     requestChecksumCalculation: 'WHEN_REQUIRED',
     responseChecksumValidation: 'WHEN_REQUIRED',
   });
+}
+
+/** The client that signs URLs a browser will follow. Signing makes no network
+ * call, so it may name a host this process cannot reach; every server-side
+ * request (head, list parts, complete, …) keeps using createS3Client. */
+export function createPresignClient(env: Env): S3Client {
+  return createS3Client(env, env.S3_PUBLIC_ENDPOINT ?? env.S3_ENDPOINT);
 }
 
 /** Ensures the evidence bucket exists — safe to call on every boot (dev/CI

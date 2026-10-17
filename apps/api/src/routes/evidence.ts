@@ -22,7 +22,7 @@ import { resolveGrant } from '../lib/permission-guard.js';
 import { authorizeEvidence, isOwner, auditNonOwnerAccess } from '../lib/evidence-access.js';
 import { etag, idempotent, requireIfMatch, staleOrMissing } from '../lib/concurrency.js';
 import {
-  createS3Client, evidenceObjectKey, presignUpload, presignDownload, createMultipartUpload,
+  createS3Client, createPresignClient, evidenceObjectKey, presignUpload, presignDownload, createMultipartUpload,
   presignUploadPart, listUploadedParts, completeMultipartFromListing, abortMultipartUpload, storedObjectSize,
 } from '../lib/s3.js';
 import type { Env } from '../env.js';
@@ -152,6 +152,8 @@ const toDate = (v: string | null | undefined) => (v === undefined ? undefined : 
 
 export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env }) => {
   const s3 = createS3Client(env);
+  // Browser-facing URLs only (S3_PUBLIC_ENDPOINT); server calls keep `s3`.
+  const signer = createPresignClient(env);
 
   // CCR-026 / FR-012: before any bytes move, the client asks whether these exact
   // bytes are already in the caller's own portfolio.
@@ -526,7 +528,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
       });
       let singlePut = null;
       if (protocol === 'single_put') {
-        const p = await presignUpload(s3, env.S3_BUCKET, key, body.content_type, body.byte_size);
+        const p = await presignUpload(signer, env.S3_BUCKET, key, body.content_type, body.byte_size);
         singlePut = { url: p.uploadUrl, headers: { 'Content-Type': body.content_type }, expiresAt: p.expiresAt };
       }
       return { status: 201, body: serializeUpload(session, { singlePut, partsReceived: [] }) };
@@ -544,7 +546,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
         partsReceived = (await listUploadedParts(s3, env.S3_BUCKET, session.file.storageUri, session.s3UploadId)).map((p) => p.PartNumber);
       } else if (session.protocol === 'single_put') {
         // A resumed single PUT just gets a fresh URL — the whole file is one part.
-        const p = await presignUpload(s3, env.S3_BUCKET, session.file.storageUri, session.file.contentType, Number(session.byteSize));
+        const p = await presignUpload(signer, env.S3_BUCKET, session.file.storageUri, session.file.contentType, Number(session.byteSize));
         singlePut = { url: p.uploadUrl, headers: { 'Content-Type': session.file.contentType }, expiresAt: p.expiresAt };
       }
     }
@@ -571,7 +573,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     if (outOfRange.length) throw new ApiError('VAL-002', `part numbers beyond part_count ${session.partCount}: ${outOfRange.join(', ')}`);
 
     const parts = await Promise.all(body.part_numbers.map(async (n, i) => {
-      const p = await presignUploadPart(s3, env.S3_BUCKET, session.file.storageUri, session.s3UploadId!, n, body.checksums_sha256?.[i]);
+      const p = await presignUploadPart(signer, env.S3_BUCKET, session.file.storageUri, session.s3UploadId!, n, body.checksums_sha256?.[i]);
       return { part_number: n, request: { url: p.url, method: 'PUT', headers: p.headers, expires_at: p.expiresAt.toISOString() } };
     }));
     return { parts };
@@ -655,7 +657,7 @@ export const evidenceRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { en
     if (file.mediaState === 'uploading' || !['clean', 'unscanned', 'sanitised'].includes(file.scanStatus)) {
       throw new ApiError('UPL-006', `File is not available for download (scan_status=${file.scanStatus})`);
     }
-    const { downloadUrl, expiresAt } = await presignDownload(s3, env.S3_BUCKET, file.storageUri, file.originalFilename);
+    const { downloadUrl, expiresAt } = await presignDownload(signer, env.S3_BUCKET, file.storageUri, file.originalFilename);
     await auditNonOwnerAccess(auth, detail, 'evidence_file_downloaded', grant, request.id, file.id);
     return { download_url: downloadUrl, expires_at: expiresAt.toISOString() };
   });

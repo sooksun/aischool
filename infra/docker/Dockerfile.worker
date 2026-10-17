@@ -40,6 +40,9 @@ COPY --from=build /app/packages/backend-shared/dist packages/backend-shared/dist
 COPY --from=build /app/packages/auth/dist packages/auth/dist
 COPY --from=build /app/packages/database/dist packages/database/dist
 COPY --from=build /app/apps/worker/dist apps/worker/dist
+# backend-shared loads permissions.yaml at import; without it the worker
+# crashed on boot.
+COPY docs/contracts docs/contracts
 COPY packages/backend-shared/package.json packages/backend-shared/
 COPY packages/auth/package.json packages/auth/
 COPY packages/database/package.json packages/database/

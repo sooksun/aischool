@@ -21,6 +21,7 @@ Pattern: **LIVE** gates run now; **SELF-ARMING** gates watch for their subject a
 | Migration validation | `npx prisma validate` (DB-001 extends: `migrate diff` up/down) | `Gate: migration validation` | self-arming | `prisma/schema.prisma` exists |
 | Permission tests | `npm run test:security` — asserts the `permissions.yaml` matrix (esp. cross-school RES-001) | `Gate: permission tests` | self-arming | files in `tests/security/` |
 | E2E smoke | `npm run test:e2e` (Playwright: login → evidence list → open submit) | `Gate: e2e smoke` | **LIVE** (SEIP-QA-004) | always; needs PostgreSQL 18 + SeaweedFS + api + web (ADR-0012/0013) |
+| Deploy smoke | build every `infra/docker` image, `up` the staging stack from nothing, seed + provision + bootstrap via the `ops` service, then `node scripts/ops/smoke-install.mjs` through the web origin (invite → accept → presigned upload → clamav scan → download, bytes equal) | `Gate: deploy smoke` | **LIVE** (2026-10-17) | always; Docker on the runner. Before it no workflow built the images — the stack shipped with the api bound to loopback, presigned URLs naming `http://seaweedfs:8333`, and runtime images missing `docs/contracts` (crash on boot) |
 | Code owner review | — (not a CI job) | branch protection + CODEOWNERS | policy | requires branch protection (below) |
 
 **Pass thresholds:** every gate is binary (exit 0). `dep-audit` fails on **high+** advisories. oasdiff fails on **breaking** changes only (additive contract changes pass). Secret scan fails on any leak — a confirmed false positive gets an inline `// gitleaks:allow` comment on the exact flagged line (gitleaks' native line-level suppression), with a code comment explaining why it isn't a real secret, reviewed in the same PR. Never skip the gate to work around one. (A repo-wide `.gitleaks.toml` allowlist was tried first for SEIP-API-001's one false positive — `credentials: { ..., secretAccessKey: env.S3_SECRET_KEY }`, gitleaks' `generic-api-key` rule matching the *identifier* `secretAccessKey:` regardless of the RHS being a literal or a variable reference — but its regex/fingerprint matching didn't reliably suppress findings already baked into git history when run through the pinned docker image; the inline comment is simpler, guaranteed to work per-line, and keeps the justification next to the code it excuses.)
@@ -52,7 +53,7 @@ Added 2026-07-19 after a full code audit found the suite passing on a system tha
 | **Two classes of fixture are invisible to school-scoped teardown** | Users with no school link (`score-foreign-*`, `session-attacker-*`) and **area-scoped memberships** (`area_admin` carries `schoolId = NULL` by contract, `membershipScope: 'area'`) | Both are deliberate — a non-member proving they cannot score, an area role proving it is read-only across schools — so both need `created.addUser(...)`, and the helper clears area memberships only for users named that way. Any new fixture that is intentionally school-less must do the same or it leaks silently, with green tests |
 | **Test files share one database, one MinIO and one worker-job queue** | `node:test` runs files in parallel processes against the same MySQL, the same bucket and the same `worker_job` table. `reports-and-ai.test.mjs` calls `runOnce`, which claims **one** job — a sibling file's `file.process` job can be the one it takes | Surfaced 2026-07-19 as a ~2-in-3 flake once the CCR-014/CCR-015 suites made the queue busier. Fixed by looping until *that* job is claimed rather than assuming the next one is yours. **Any future test that calls `runOnce` must do the same.** Separately, on 2026-07-20 the `apps/worker` suite was observed failing 4 of 8 once when run in a compound command alongside other suites; **not reproducible in 5 subsequent runs**, cause not established, recorded here so a recurrence is investigated rather than dismissed as noise. A gate that fails at random is a gate people learn to ignore. **2026-07-20:** adding teardown surfaced two real robustness bugs of the same shape in `outbox.ts` and `jobs.ts` — see the row below |
 | ~~**A single vanished row aborts an entire dispatch/poll cycle**~~ — **fixed 2026-07-20** | `markOutboxPublished`/`markOutboxFailed` and `markJobDone`/`markJobFailed`/`markJobTerminalFailed` used `update`, which throws P2025 when the row is gone. Now `updateMany`, returning a count | Both loops *claim* with a proper compare-and-swap and then completed with a call that assumed exclusive ownership of a row they had merely read. Worse, in each loop the recovery handler made the same call — so a P2025 in the `try` produced a second P2025 in the `catch`, which propagated out and abandoned every other claimed item in the batch. Found because test teardown began deleting rows concurrently, but nothing about it is test-only: any retention job, operator cleanup, or second worker would do the same. Regression test: `outbox-claim.test.mjs` "an event that disappears between claim and publish does not abort its batch" |
-| **No SAST, no container image scan, no license check** | `.github/workflows/ci.yml` has no CodeQL/Trivy/Grype job despite three Dockerfiles | Image and code-level vulnerability classes are entirely unexamined |
+| **No SAST, no container image scan, no license check** | `.github/workflows/ci.yml` has no CodeQL/Trivy/Grype job despite four Dockerfiles (they are now *built and run* by `Gate: deploy smoke`, but not scanned) | Image and code-level vulnerability classes are entirely unexamined |
 
 ## Release gates (run before tagging a release from main — not CI jobs yet)
 
@@ -76,6 +77,7 @@ Gate: contract compatibility
 Gate: secret scan
 Gate: dependency audit
 Gate: e2e smoke
+Gate: deploy smoke
 ```
 
 ### E2E smoke (SEIP-QA-004)
@@ -161,6 +163,17 @@ app defects found. Two first-run-only flakes (1× api integration, 2× worker
 file-process) appeared on the cold stack and vanished on re-run — consistent
 with cross-suite state in the shared dev DB; the disposable-stack discipline
 above remains the recommendation for release verification.
+
+## Verified runs (2026-10-17, local — SEIP-OPS-005, installable staging stack)
+
+Docker image builds cannot run in the dev sandbox (no route from build containers), so the Dockerfile stages were reproduced natively — same COPY sets, `.dockerignore` honoured, apt step aside — and the gateway ran in the stock `nginx:1.27-alpine` image with the real template:
+
+- web build stage (only `apps/web` + `docs/contracts`): `npm ci` + `vite build` — pass.
+- api/worker build stage: `npm ci`, `prisma generate`, `build:libs`, api + worker builds — pass; seed, provision-school and bootstrap-admin run from it (the `ops` image) — pass.
+- runtime stage (`npm ci --omit=dev` + copied dist): **crashed on boot** (`could not locate docs/contracts/permissions.yaml`) until the Dockerfiles copy `docs/contracts` (and `assets/fonts` for the PDF); then api + worker boot.
+- `smoke-install.mjs` through the gateway against that runtime: SPA, admin sign-in, taxonomy, invite → accept → sign-in, presigned PUT via the public origin, complete, scan, download, bytes equal — **pass**.
+- `apps/api` integration incl. new `presign-public-endpoint.test.mjs` — see the run below; e2e 25/25 (earlier today).
+- First CI run of `Gate: deploy smoke` is the real-image proof; recorded in PROJECT_STATE.
 
 ## Verified runs (2026-10-15, local — SEIP-P5-002, DPO role + subject requests)
 

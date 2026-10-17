@@ -18,7 +18,7 @@ import { requireCurrentSchool } from '../plugins/auth.js';
 import { resolveGrant, requireAcr, requireAnyGrant } from '../lib/permission-guard.js';
 import { ownGrant } from '../lib/evidence-access.js';
 import { idempotent } from '../lib/concurrency.js';
-import { createS3Client, presignDownload } from '../lib/s3.js';
+import { createPresignClient, presignDownload } from '../lib/s3.js';
 
 type ExportRow = NonNullable<Awaited<ReturnType<typeof getExportById>>>;
 
@@ -56,7 +56,7 @@ async function exportFor(op: string, auth: AuthedRequest, id: string): Promise<E
 }
 
 export const exportRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env }) => {
-  const s3 = createS3Client(env);
+  const signer = createPresignClient(env);
 
   app.post('/exports', { config: { operationId: 'createExport' } }, async (request, reply) => {
     const auth = request.auth!;
@@ -126,7 +126,7 @@ export const exportRoutes: FastifyPluginAsync<{ env: Env }> = async (app, { env 
       throw new ApiError('EXP-002', 'Export not ready');
     }
     const name = `SEIP-portfolio-${e.createdAt.toISOString().slice(0, 10)}.zip`;
-    const { downloadUrl, expiresAt } = await presignDownload(s3, env.S3_BUCKET, e.storageUri, name);
+    const { downloadUrl, expiresAt } = await presignDownload(signer, env.S3_BUCKET, e.storageUri, name);
     if (e.personId !== auth.personId) {
       await writeAuditEvent({
         schoolId: e.schoolId, actorUserId: auth.userId, action: 'export_downloaded', entityType: 'ExportPackage', entityId: e.id,

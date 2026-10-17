@@ -482,3 +482,68 @@ jobs:
           echo "::error::web did not start"; exit 1
       - name: Run e2e smoke
         run: npm run test:e2e
+
+  # A real install: build every image in infra/docker, bring the staging stack
+  # up from nothing, seed it and create the first admin the way the runbook
+  # says, then drive it through the web container (the browser's origin) with
+  # scripts/ops/smoke-install.mjs — invite → accept → upload via the presigned
+  # URL → worker scan (real clamav) → download. Before this gate no workflow
+  # built these images, and the stack shipped with an api bound to loopback
+  # and presigned URLs naming http://seaweedfs:8333.
+  deploy-smoke:
+    name: "Gate: deploy smoke"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      COMPOSE: docker compose -f docker-compose.staging.yml --env-file .env.staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Write throwaway staging secrets
+        run: |
+          r() { openssl rand -hex 24; }
+          sed -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(r)/" \
+              -e "s/^SEIP_MIGRATOR_PASSWORD=.*/SEIP_MIGRATOR_PASSWORD=$(r)/" \
+              -e "s/^SEIP_APP_PASSWORD=.*/SEIP_APP_PASSWORD=$(r)/" \
+              -e "s/^JWT_SECRET=.*/JWT_SECRET=$(r)/" \
+              -e "s/^S3_ACCESS_KEY=.*/S3_ACCESS_KEY=seip$(openssl rand -hex 6)/" \
+              -e "s/^S3_SECRET_KEY=.*/S3_SECRET_KEY=$(r)/" \
+              -e "s#^SEIP_PUBLIC_ORIGIN=.*#SEIP_PUBLIC_ORIGIN=http://127.0.0.1:8080#" \
+              .env.staging.example > .env.staging
+          echo "BACKUP_HOST_DIR=${RUNNER_TEMP}/seip-backups" >> .env.staging
+      - name: Build images
+        run: $COMPOSE --profile ops build
+      - name: Bring the stack up
+        run: |
+          $COMPOSE up -d
+          # Through the web container, as a browser would: 401 = api up behind it.
+          for i in $(seq 1 120); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/v1/auth/me || true)
+            [ "$code" = 401 ] && { echo "api reachable through web after ${i}x5s"; exit 0; }
+            sleep 5
+          done
+          echo "::error::api never answered through the web container (last: $code)"; exit 1
+      - name: Seed taxonomy, provision a school, create the first admin
+        run: |
+          $COMPOSE run --rm ops node prisma/seed.mjs
+          $COMPOSE run --rm ops node scripts/ops/provision-school.mjs --code=SMOKE-001 --name=Smoke
+          SEIP_ADMIN_PASSWORD=smoke-admin-password-1234 \
+            $COMPOSE run --rm -e SEIP_ADMIN_PASSWORD ops node scripts/ops/bootstrap-admin.mjs \
+            --email=admin@smoke.invalid --name=Admin --school=SMOKE-001
+      - name: Use it through the browser origin
+        env:
+          SEIP_ADMIN_EMAIL: admin@smoke.invalid
+          SEIP_ADMIN_PASSWORD: smoke-admin-password-1234
+        # The worker waits for clamav's signatures (start_period 180s) before it
+        # starts, so allow the scan up to 10 minutes.
+        run: node scripts/ops/smoke-install.mjs --base=http://127.0.0.1:8080 --scan-wait-ms=600000
+      - name: Stack state and logs
+        if: always()
+        run: |
+          $COMPOSE ps -a
+          $COMPOSE logs --tail=80 migrate api worker web backup
+      - name: Tear down
+        if: always()
+        run: $COMPOSE --profile ops down -v

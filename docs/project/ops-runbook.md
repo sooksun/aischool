@@ -29,6 +29,9 @@ Same architecture everywhere: **Node API + SPA + PostgreSQL 18 + S3 API (Seaweed
 | `DATABASE_URL` / `MIGRATE_DATABASE_URL` | api, worker / `npm run db:migrate` | Staging compose builds these; dev values in `.env.example` |
 | `JWT_SECRET` | api | ≥ 32 characters; rotating invalidates sessions |
 | `S3_ENDPOINT` | api, worker | Staging internal: `http://seaweedfs:8333` |
+| `SEIP_PUBLIC_ORIGIN` → api `S3_PUBLIC_ENDPOINT` | api (presigning), web gateway | **Required.** The exact URL users open (`https://seip.school.ac.th`, or `http://127.0.0.1:8080` for a first bring-up). Presigned upload/download URLs are signed for it; `web` forwards `/<bucket>/` from it to SeaweedFS with Host intact. Wrong value = every upload fails with a signature error |
+| `SEIP_WEB_BIND` | web | Host address the gateway publishes on (default `127.0.0.1:8080`, behind the edge proxy) |
+| `HOST` | api | Listen address. Staging compose sets `0.0.0.0` — loopback inside a container is unreachable from `web` and the published port |
 | `S3_BUCKET` | api, worker, storage-init | Private bucket; no anonymous read |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | api, worker, SeaweedFS identity (staging) | Treat as root secrets; separate app keys later if needed |
 | `S3_REGION` | api, worker | Dummy for SeaweedFS; `ap-southeast-7` for Amazon S3 Bangkok |
@@ -57,6 +60,7 @@ Templates:
    ```bash
    docker compose -f docker-compose.staging.yml --env-file .env.staging ps
    # Expect: postgres, seaweedfs, api, worker, web, clamav, backup (migrate + storage-init exited 0)
+   # The worker starts only once clamav is healthy (signatures loaded, ~3 min).
    # API container healthcheck is TCP :3001; process probe:
    curl -sS -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:3001/api/v1/auth/login \
      -H 'content-type: application/json' -d '{}'
@@ -66,12 +70,25 @@ Templates:
    docker compose -f docker-compose.staging.yml --env-file .env.staging logs --tail=20 worker
    ```
 5. Install edge TLS (section 4).
-6. Run seed **once** if empty taxonomy (operator decision):
+6. Seed the taxonomy (ว9/ว10 frameworks, categories, rank levels — idempotent),
+   then create the first school and its admin (section 4c). All three run in the
+   `ops` one-shot container on the internal network, as `seip_app`:
    ```bash
-   # from a one-shot node container on the same network, or host with DATABASE_URL pointed at published DB
-   npm run db:seed
+   C="docker compose -f docker-compose.staging.yml --env-file .env.staging"
+   $C run --rm ops node prisma/seed.mjs
+   $C run --rm ops node scripts/ops/provision-school.mjs --code=SCH-001 --name="โรงเรียนตัวอย่าง"
+   SEIP_ADMIN_PASSWORD='choose-something-long' \
+     $C run --rm -e SEIP_ADMIN_PASSWORD ops node scripts/ops/bootstrap-admin.mjs \
+     --email=admin@school.ac.th --name="ผู้ดูแลระบบ" --school=SCH-001
    ```
-7. Create the first school_admin / director accounts via approved bootstrap procedure (not documented as open registration).
+7. Prove it end to end through the public origin (what CI's **deploy smoke**
+   gate runs on every push). It invites a throwaway teacher into that school,
+   uploads a small PDF through the presigned URL, waits for the worker's scan,
+   and downloads it back — on an acceptance install, or end that membership after:
+   ```bash
+   SEIP_ADMIN_EMAIL=admin@school.ac.th SEIP_ADMIN_PASSWORD='…' \
+     node scripts/ops/smoke-install.mjs --base="$SEIP_PUBLIC_ORIGIN"
+   ```
 
 ---
 

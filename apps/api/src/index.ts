@@ -5,10 +5,11 @@ import { buildServer } from './server.js';
 
 const { app, env } = await buildServer();
 try {
-  // 127.0.0.1 not 0.0.0.0: on-prem deployment sits behind a reverse proxy on the
-  // same host (ADR-0005); binding all interfaces isn't needed and some sandboxed
-  // dev environments (this one included) reject 0.0.0.0 with EACCES outright.
-  await app.listen({ port: env.PORT, host: '127.0.0.1' });
+  // HOST defaults to 127.0.0.1: a bare-metal api sits behind a reverse proxy on
+  // the same host (ADR-0005), and some sandboxed dev environments reject 0.0.0.0
+  // with EACCES. Inside a container loopback is unreachable from every other
+  // container and from the published port, so the compose stacks set 0.0.0.0.
+  await app.listen({ port: env.PORT, host: env.HOST });
 } catch (err) {
   app.log.error(err);
   process.exit(1);
