@@ -106,6 +106,12 @@ workflow [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) �
      ติดตั้งที่ path อื่นด้วย `SEIP_ROOT`
    - ตัวอย่างเซิร์ฟเวอร์ cnppai.com: `SEIP_DOMAIN=cnppai.com`, `SEIP_ROOT=/DATA/AppData/www/aischool`, `SEIP_EDGE=none`
      — ผู้ใช้ deploy ต้องเขียน path นี้ได้ และ firewall ต้องเปิดพอร์ตที่ระบบเลือก (ดูในหน้าสรุปของ workflow)
+   - **อยู่หลัง Nginx Proxy Manager (NPM)** เช่น `https://aischool.cnppai.com`: ตั้ง `SEIP_EDGE=none`,
+     `SEIP_PUBLIC_ORIGIN=https://aischool.cnppai.com`, `SEIP_DOMAIN=aischool.cnppai.com` และ `SEIP_WEB_PORT` เป็นพอร์ตว่างพอร์ตหนึ่ง
+     (เช่น `8095`) แล้วใน NPM สร้าง **Proxy Host**: Domain `aischool.cnppai.com` → Scheme `http`, Forward Hostname = IP ของเครื่อง
+     (ไม่ใช่ `127.0.0.1` เพราะ NPM อยู่ใน container), Forward Port = `SEIP_WEB_PORT`; แท็บ SSL ขอใบรับรอง Let's Encrypt + Force SSL.
+     ไม่ต้องตั้ง custom location — `/api/` และ `/seip-evidence/` ไปที่พอร์ตเดียวกัน. NPM ส่ง Host เดิมต่อให้อยู่แล้ว
+     ซึ่งจำเป็นต่อลิงก์อัปโหลด/ดาวน์โหลดที่เซ็นไว้ พอร์ตนี้ไม่ต้องเปิดออกอินเทอร์เน็ต ถ้า NPM อยู่เครื่องเดียวกัน
 3. สั่ง deploy ได้ 3 ทาง: **Actions → deploy → Run workflow**, push tag `deploy-…`, หรือ commit ที่แก้ไฟล์
    `.github/deploy-request` บน branch พัฒนา (ทางเดียวที่ session บนคลาวด์ใช้ได้ — ตั้ง required reviewers ที่ environment
    `seip-production` เพื่อให้ทุก run ต้องกดอนุมัติก่อน). ต้องจบด้วย `✓ <origin> is installed and working`
