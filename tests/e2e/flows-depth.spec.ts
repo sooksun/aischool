@@ -145,14 +145,21 @@ test.describe('depth: create report + PDF', () => {
     await expect(subjectSelect.locator('option')).not.toHaveCount(1); // more than the placeholder
     await subjectSelect.selectOption(creds.teacherPersonnelId!);
 
-    const countBefore = await page.locator('main li').count();
+    const created = page.waitForResponse(
+      (r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/reports'),
+    );
     await page.getByRole('button', { name: 'สร้างและจัดทำรายงาน' }).click();
+    const res = await created;
 
     // The form closing proves only that the form closed — the 2026-07-19 audit
     // flagged the previous version of this assertion for passing on a silently
-    // failing create. Assert the list actually grew by one instead.
+    // failing create. Assert the create succeeded and the new report is listed
+    // (newest first, so it is on the first page however many already exist —
+    // counting rows broke once a reused database held more than one page).
+    expect(res.status(), await res.text()).toBe(201);
+    const { id } = (await res.json()) as { id: string };
     await expect(page.getByRole('button', { name: '+ สร้างรายงาน' })).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator('main li')).toHaveCount(countBefore + 1, { timeout: 15_000 });
+    await expect(page.locator(`main a[href="/reports/${id}"]`)).toBeVisible({ timeout: 15_000 });
   });
 
   test('director downloads draft/review PDF for ready report', async ({ page }) => {
