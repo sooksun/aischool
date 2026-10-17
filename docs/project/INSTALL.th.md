@@ -106,7 +106,9 @@ workflow [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml) �
      ติดตั้งที่ path อื่นด้วย `SEIP_ROOT`
    - ตัวอย่างเซิร์ฟเวอร์ cnppai.com: `SEIP_DOMAIN=cnppai.com`, `SEIP_ROOT=/DATA/AppData/www/aischool`, `SEIP_EDGE=none`
      — ผู้ใช้ deploy ต้องเขียน path นี้ได้ และ firewall ต้องเปิดพอร์ตที่ระบบเลือก (ดูในหน้าสรุปของ workflow)
-3. **Actions → deploy → Run workflow** (หรือ push tag `deploy-…`). ต้องจบด้วย `✓ <origin> is installed and working`
+3. สั่ง deploy ได้ 3 ทาง: **Actions → deploy → Run workflow**, push tag `deploy-…`, หรือ commit ที่แก้ไฟล์
+   `.github/deploy-request` บน branch พัฒนา (ทางเดียวที่ session บนคลาวด์ใช้ได้ — ตั้ง required reviewers ที่ environment
+   `seip-production` เพื่อให้ทุก run ต้องกดอนุมัติก่อน). ต้องจบด้วย `✓ <origin> is installed and working`
    และหน้าสรุปของ run จะแสดง URL ที่ติดตั้ง.
 
 อัปเดตเวอร์ชันครั้งต่อไปก็รัน workflow เดิม — migration รันเอง, ข้อมูลและรหัสผ่านเดิมคงอยู่, เก็บ release ย้อนหลัง 3 ชุดใน `/opt/seip/releases`.

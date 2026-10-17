@@ -29,6 +29,13 @@ name: deploy
 on:
   push:
     tags: ['deploy-*']
+    # A deploy requested from the development branch: a commit that changes
+    # .github/deploy-request (its text says what and why). The cloud session
+    # that develops this branch can push commits but neither tags nor
+    # workflow dispatches, so this is its only trigger. Protect the
+    # `seip-production` environment with required reviewers to approve each run.
+    branches: ['claude/remote-control-5aclif']
+    paths: ['.github/deploy-request']
   workflow_dispatch:
     inputs:
       smoke:

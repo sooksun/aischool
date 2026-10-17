@@ -1,0 +1,3 @@
+# Changing this file on the development branch triggers .github/workflows/deploy.yml.
+# One line per request, newest last.
+2026-10-17  deploy to cnppai.com (/DATA/AppData/www/aischool, SEIP_EDGE=none) — owner request; environment seip-production created by the owner
