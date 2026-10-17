@@ -9,7 +9,8 @@
 #            SEIP_DEPLOY_SSH_KEY      private key for that user (ed25519, no passphrase)
 #            SEIP_DEPLOY_KNOWN_HOSTS  `ssh-keyscan -t ed25519 <host>` output, verified by you
 #            SEIP_ADMIN_PASSWORD      first school admin's password (≥ 12 chars)
-#   vars     SEIP_DOMAIN              e.g. seip.school.ac.th (DNS → the server; 80/443 open)
+#   vars     (each also accepted from Secrets, for when everything was saved there)
+#            SEIP_DOMAIN              e.g. seip.school.ac.th (DNS → the server; 80/443 open)
 #            SEIP_ADMIN_EMAIL         first school admin's email
 #            SEIP_SCHOOL_CODE         e.g. SCH-001      SEIP_SCHOOL_NAME  (optional)
 #            SEIP_DEPLOY_PORT         optional, default 22
@@ -59,15 +60,15 @@ jobs:
     env:
       HOST: ${{ secrets.SEIP_DEPLOY_HOST }}
       USER_: ${{ secrets.SEIP_DEPLOY_USER }}
-      PORT_: ${{ vars.SEIP_DEPLOY_PORT || '22' }}
-      ROOT: ${{ vars.SEIP_ROOT || '/opt/seip' }}
+      PORT_: ${{ vars.SEIP_DEPLOY_PORT || secrets.SEIP_DEPLOY_PORT || '22' }}
+      ROOT: ${{ vars.SEIP_ROOT || secrets.SEIP_ROOT || '/opt/seip' }}
     steps:
       - uses: actions/checkout@v4
       - name: Check configuration
         run: |
           missing=""
           for v in HOST USER_; do [ -n "${!v}" ] || missing="$missing $v"; done
-          [ -n "${{ vars.SEIP_DOMAIN }}" ] || missing="$missing vars.SEIP_DOMAIN"
+          [ -n "${{ vars.SEIP_DOMAIN || secrets.SEIP_DOMAIN }}" ] || missing="$missing SEIP_DOMAIN"
           [ -n "${{ secrets.SEIP_DEPLOY_SSH_KEY }}" ] || missing="$missing secrets.SEIP_DEPLOY_SSH_KEY"
           [ -n "${{ secrets.SEIP_DEPLOY_KNOWN_HOSTS }}" ] || missing="$missing secrets.SEIP_DEPLOY_KNOWN_HOSTS"
           if [ -n "$missing" ]; then
@@ -104,10 +105,10 @@ jobs:
           # Values travel on stdin, never in the remote command line (visible in ps).
           {
             printf 'export SEIP_ROOT=%q SEIP_RELEASE=%q SEIP_DOMAIN=%q SEIP_ACME_EMAIL=%q SEIP_EDGE=%q\n' \
-              "$ROOT" "$GITHUB_SHA" "${{ vars.SEIP_DOMAIN }}" "${{ vars.SEIP_ACME_EMAIL }}" "${{ vars.SEIP_EDGE || 'caddy' }}"
+              "$ROOT" "$GITHUB_SHA" "${{ vars.SEIP_DOMAIN || secrets.SEIP_DOMAIN }}" "${{ vars.SEIP_ACME_EMAIL || secrets.SEIP_ACME_EMAIL }}" "${{ vars.SEIP_EDGE || secrets.SEIP_EDGE || 'caddy' }}"
             printf 'export SEIP_SCHOOL_CODE=%q SEIP_SCHOOL_NAME=%q SEIP_ADMIN_EMAIL=%q SEIP_ADMIN_PASSWORD=%q\n' \
-              "${{ vars.SEIP_SCHOOL_CODE }}" "${{ vars.SEIP_SCHOOL_NAME }}" "${{ vars.SEIP_ADMIN_EMAIL }}" "$SEIP_ADMIN_PASSWORD"
-            printf 'export SEIP_WEB_PORT=%q SEIP_PUBLIC_ORIGIN=%q\n' "${{ vars.SEIP_WEB_PORT }}" "${{ vars.SEIP_PUBLIC_ORIGIN }}"
+              "${{ vars.SEIP_SCHOOL_CODE || secrets.SEIP_SCHOOL_CODE }}" "${{ vars.SEIP_SCHOOL_NAME || secrets.SEIP_SCHOOL_NAME }}" "${{ vars.SEIP_ADMIN_EMAIL || secrets.SEIP_ADMIN_EMAIL }}" "$SEIP_ADMIN_PASSWORD"
+            printf 'export SEIP_WEB_PORT=%q SEIP_PUBLIC_ORIGIN=%q\n' "${{ vars.SEIP_WEB_PORT || secrets.SEIP_WEB_PORT }}" "${{ vars.SEIP_PUBLIC_ORIGIN || secrets.SEIP_PUBLIC_ORIGIN }}"
             cat scripts/ops/deploy-remote.sh
           } | ssh seip 'bash -s' | tee deploy.log
           origin=$(grep -E '^SEIP_PUBLIC_ORIGIN=' deploy.log | tail -1 | cut -d= -f2-)
@@ -121,7 +122,7 @@ jobs:
       - name: Use it through the public origin, as a browser would
         if: ${{ github.event_name == 'push' || inputs.smoke }}
         env:
-          SEIP_ADMIN_EMAIL: ${{ vars.SEIP_ADMIN_EMAIL }}
+          SEIP_ADMIN_EMAIL: ${{ vars.SEIP_ADMIN_EMAIL || secrets.SEIP_ADMIN_EMAIL }}
           SEIP_ADMIN_PASSWORD: ${{ secrets.SEIP_ADMIN_PASSWORD }}
           ORIGIN: ${{ steps.install.outputs.origin }}
         run: |
